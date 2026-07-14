@@ -110,6 +110,10 @@ Each session record shall include:
 
 **REQ-PL-2.7.** When the student has answered all questions in the activity, the application shall mark the progress record's status as "completed" and shall create a corresponding activity attempt record summarizing the overall result.
 
+---
+
+# View Activity Requirements
+
 ### REQ-PL-3 - Viewing Student Activity
 Students and instructors can view activity results.
 
@@ -121,10 +125,18 @@ Students should be able to view a basic history of their own completed activitie
 
 Instructors should be able to view student activity results so they can see which activities students completed and how students performed.
 
+---
+
+# Indentifying Weak User Stories Requirements
+
 ### REQ-PL-4: Student Activity — Identify Weak User Stories
 Identifying Weak User Stories is a Type A activity.  The user is presented a question asking the student to choose the weakest user story out in a given set of answers.  One answer is the "correct" answer scoring the maximum points.  The other answers can recieve partial points. The user is asked multiple questions before the activity is completed.  The questions and answers are stored in the database.  The questions are presented in increased difficulty.
 
-### REQ-PL-5: Identify Weak Acceptance Criteria
+---
+
+# Indentifying Weak Acceptance Criteria Requirements
+
+### REQ-PL-5: Student Activity - Identify Weak Acceptance Criteria
 Identifying Weak Acceptance Criteria is a Type A activity.  The user is presented a question asking the student to choose the weakest acceptance story out in a given set of answers.
 
 - The application should present the student with a user story and a list of possible acceptance criteria for that story.
@@ -133,7 +145,27 @@ Identifying Weak Acceptance Criteria is a Type A activity.  The user is presente
 - The application should help the student understand that good acceptance criteria should be specific, testable, and clearly connected to the user story.
 - The application should help the student distinguish between acceptance criteria that describe expected system behavior and statements that are vague, subjective, or too general.
 
-## Other Planned Activities (Lowest Priority)
+---
+
+# User Interface Requirements
+
+### REQ-PL-6: User Interface
+
+#### REQ-PL-6.1 - Navigation Bar
+There should be a navigation bar containing an easy way to select activities and other commonly accessed functions.
+
+#### REQ-PL-6.2 - Activity Selection
+There should be a way to select an activity.
+
+#### REQ-PL-6.3 - Activity Start/Resume/Abandon
+After selecting an activity, the app should let the user know if the activity had previously been started.  If it had, the user should be able to abandon or resume the activity.  If there is not a previously started activity, then the user can start a new activity.
+
+#### REQ-PL-6.4 - Type A Activity User Interface
+As discussed in prior requirements, the user is presented with a question and possible answers.  The user can pick one answer (no multiple answer selections). The user must be able to click a submit button to confirm this is the answer that is being submitted. The user is presented with a comment on their selection.  If the selection is not correct, the user is show the correct answer with an explanation.  
+
+---
+
+# Future Requirements (Lowest Priority)
 
 ### REQ-FU-1: Student Activity: Write and Evaluate a User Story
 
