@@ -6,7 +6,7 @@ The application will be a browser-based application that helps undergraduate com
 
 The goal of the application is not primarily to teach lessons on requirements, but to provide students with practice activities that help them improve their ability to recognize, write, evaluate, and revise user stories.
 
-Gamification elements will be incorporated to increase activity engagement.
+Gamification elements are incorporated to increase activity engagement.
 
 ## Introduction
 
@@ -23,11 +23,11 @@ As the features of this application expand, there will be multiple types of acti
 
 #### What Is a Type A Activity?
 
-A Type A activity presents the student with a prompt (e.g., a user story, or a scenario) along with a fixed set of pre-authored answer options. Each option has a known, stored score and a stored explanation. The student selects a single option, and the application uses the pre-authored data to score the attempt and display feedback — no AI evaluation is needed at attempt time.
+A Type A activity presents the student with a prompt (e.g., a user story, or a scenario) along with a fixed set of pre-authored answer options. Only one option can be chosen by the user for each question.Each option has a known, stored score and a stored explanation. The student selects a single option, and the application uses the pre-authored data to score the attempt and display feedback — no AI evaluation is needed at attempt time.
 
 Examples of Type A activities include "Identify Weak User Stories" and "Identify Weak Acceptance Criteria" (identifying the single weakest acceptance criterion from a list).
 
-A Type A activity may contain one or more questions, presented to the student one at a time.  Each question answered correctly increases the total score for the activity.  Since a full score is 100 points for the entire activity, the points for a question must be carefully be pre-assigned so that the total for all correct answers is 100 points.  Only one option can be chosen by the user for each question.
+The questions are stored in a question bank.  Each question has a difficulty rating (1=easy, 2=medium, 3=hard). Students start at the easy level.  The student is given 4 random questions from the bank at that level.  Each question is worth 25 points at most.  If the student has a cummulative score of 80% on the questions, then the student can advance to the next level of difficult.  Otherwise, the student must repeat the level before advancing by trying a new version of the quiz with a newly selected set of random questions.
 
 # Storage Requirements
 
@@ -43,9 +43,9 @@ The application shall store a bank of pre-authored questions and answer options,
 - a unique question id
 - the activity type the question belongs to (restricted to a known set of activity type values).
 - the question prompt text presented to the student
-- a difficulty level of the question, ranging from 1 (easiest) to 5 (hardest)
+- a difficulty level of the question, ranging from 1 (easiest) to 3 (hardest)
 - the order number of the question (0 is the first question presented)
-- the maximum possible score for the question
+- the maximum possible score for the question (default is 25)
 
 #### REQ-DL-2 — Answer Bank Storage (Priority: High)
 
@@ -53,7 +53,7 @@ The application shall store a bank of pre-authored questions and answer options,
 - a unique option id
 - the question id it belongs to (foreign key)
 - the option text presented to the student
-- a score value, for the student choosing this option
+- a score value, for the student choosing this option (25 at most = correct answer)
 - an explanation describing why the option is correct or incorrect that can be presented when the option is chosen.
 - a boolean value indicating if this is the correct answer to the question.
 
@@ -73,16 +73,21 @@ Each session record shall include:
 - a unique activity session id
 - the student account id (uuid)
 - the activity type (restricted to a known set of activity type values).
+- the degree of difficulty (1 to 3) of the questions
+- the 4 questions in the activity, referenced by question id (foreign key)
 - the date and time the activity was started
 - a status. Restricted to a known set of activity type values: in-progress, completed, abandonded.
-- the number of the last question answered
+- the index (starts at 0) of the last question answered (must be <= 2)
 - the date and time the activity was completed
+- the cumulative score earned so far (sum of points accumulated as questions are answered, updated each time a question is answered)
+- the maximum possible score for the activity (default = 100)
+- passed field set to true if the activity as completed with a score higher than 80%.
 
 ---
 
 #### REQ-DL-4 — Answered Question Log (Priority: Medium)
 
-**REQ-DL-3.1.** The application shall store, for each question answered as part of a Type A activity, the following:
+**REQ-DL-4.1.** The application shall store, for each question answered as part of a Type A activity, the following:
 
 - the activity session log id (foreign key)
 - the question id (foreign key)
@@ -106,9 +111,15 @@ Each session record shall include:
 
 **REQ-PL-2.5.** If the student selects the correct option, the application shall display the explanation associated with the correct answer.
 
-**REQ-PL-2.6.** After the student has answered a question and been shown the relevant explanation(s), the application shall either present the next unanswered question in the activity, or, if no questions remain, complete the activity.
+**REQ-PL-2.5.** The total cummulative score is adjusted in the session log after the student answers a question.
 
-**REQ-PL-2.7.** When the student has answered all questions in the activity, the application shall mark the progress record's status as "completed" and shall create a corresponding activity attempt record summarizing the overall result.
+**REQ-PL-2.7.** After the student has answered a question and been shown the relevant explanation(s), the application shall either present the next unanswered question in the activity, or, if no questions remain, complete the activity.
+
+**REQ-PL-2.8.** When the student has answered all questions in the activity, the application shall mark the progress record's status as "completed" and shall create a corresponding activity attempt record summarizing the overall result.
+
+**REQ-PL-2.9.** If the student's score is 80% or higher, the student is informed that they passed.  Otherwise, the student is informed they must take the quiz again to advance.
+
+**REQ-PL-2.10.** If the student passes the last difficulty level (3), the student is informed that they have successfully completed this skill.
 
 ---
 
@@ -130,7 +141,7 @@ Instructors should be able to view student activity results so they can see whic
 # Indentifying Weak User Stories Requirements
 
 ### REQ-PL-4: Student Activity — Identify Weak User Stories
-Identifying Weak User Stories is a Type A activity.  The user is presented a question asking the student to choose the weakest user story out in a given set of answers.  One answer is the "correct" answer scoring the maximum points.  The other answers can recieve partial points. The user is asked multiple questions before the activity is completed.  The questions and answers are stored in the database.  The questions are presented in increased difficulty.
+Identifying Weak User Stories is a Type A activity.  The user is presented a question asking the student to choose the weakest user story out in a given set of answers.  One answer is the "correct" answer scoring the maximum points.  The other answers can recieve partial points. The user is asked multiple questions before the activity is completed.  The questions and answers are stored in the database.  The questions are presented in increased difficulty. See **REQ-PL-2.9.** for general information on how the activity behaves.
 
 ---
 
@@ -165,7 +176,64 @@ As discussed in prior requirements, the user is presented with a question and po
 
 ---
 
-# Future Requirements (Lowest Priority)
+# Gamification Elements
+
+The Requirements Coach platform incorporates gamification elements to increase student engagement and provide a sense of progression and achievement. The goal is not to make the application feel like a game, but to give students clear feedback on their growth, motivate them to attempt harder challenges, and reward mastery with recognition that feels meaningful in an academic context.
+
+## Cumulative Score
+**REQ-GAM-DL-1**
+a running total of points earned across all completed activity attempts, giving students a single number that reflects their overall practice effort. The cumulative score is calculated as the sum of the best passing score at each difficulty level for each activity type. This rewards improvement — a student who retakes a level and scores higher will see their cumulative score increase.
+
+The application shall be able to calculate a cumulative score for each student representing the total points earned across all completed activity attempts.
+
+The cumulative score shall be computed as follows:
+    for each student
+      for each type of activity
+        for each difficult level
+          find the highest score out of the completed sessions
+          add this score to the accumated total
+
+**REQ-GAM-PL-1**— Cumulative Score Display
+A students cumulative score should be visible in the students profile or navbar.
+
+---
+
+## Mastery Titles
+
+**REQ-GAM-DL-2** Title Definition Storage (Priority: Medium)
+The application shall store a table of title definitions that maps an activity type and difficulty level to a title name.
+
+**REQ-GAM-DL-2.1** Each title definition record shall include:
+
+-a unique title definition id
+-the activity type (foreign key, restricted to the known set of activity type values)
+-the difficulty level that must be passed to earn this title (1, 2, or 3)
+-the title name (e.g., "Story Apprentice", "Criteria Expert")
+
+**REQ-GAM-DL-2.2** Title definitions shall be stored in the database rather than hardcoded in the application, so that new titles can be added when new activity types are introduced without requiring a code change.
+
+**REQ-GAM-DL-3** — Student Title Computation (Priority: Medium)
+The application shall determine a student's current title for each activity type by querying their session history.
+
+**REQ-GAM-DL-3.1** A student's current title for a given activity type shall be determined by finding the highest difficulty level for which the student has a completed session record with passed = true for that activity type. This value is then looked up in the title definition table (REQ-GAM-DL-2) to retrieve the corresponding title name.
+
+**REQ-GAM-DL-3.2** A student's title for a given activity type shall always be computed at query time from existing session records — no separate title field needs to be stored on the student record.
+
+**REQ-GAM-DL-3.3** If a student has no passed sessions for a given activity type, the application shall display "Not yet started" or equivalent for that activity's title.
+
+**REQ-GAM-PL-2** Title Display (Priority: Medium)
+The application shall display a student's current title for each activity type.
+
+**REQ-GAM-PL-2.1** A student's titles shall be visible on their profile page, showing one title per activity type they have attempted.
+
+**REQ-GAM-PL-2.2** When a student passes a difficulty level and earns a new title, the application shall display a notification informing the student of their new title. This notification shall appear on the activity completion screen immediately after the passed result is shown (REQ-PL-2.9).
+
+**REQ-GAM-PL-2.3** The title notification shall include the title name and the activity type it belongs to — for example: "You've earned a new title: Story Analyst — Weak User Stories."
+
+---
+
+
+# Lower Priority Student Activities
 
 ### REQ-FU-1: Student Activity: Write and Evaluate a User Story
 
@@ -190,6 +258,17 @@ As discussed in prior requirements, the user is presented with a question and po
 - The application should evaluate whether the acceptance criteria are clear, testable, and connected to the user story.
 - The application should provide feedback to help the student improve the acceptance criteria.
 
+### Ideas for Other Activities
+
+The following activities may be useful additions in a later version of the application, but they are not part of the initial requirements.
+
+- The application could ask students to revise a weak user story and then compare the revised version with the original.
+- The application could ask students to match user stories with appropriate acceptance criteria.
+- The application could ask students to sort user stories from strongest to weakest.
+- The application could ask students to identify which INVEST property is most clearly missing from a user story.
+- The application could present a short project scenario and ask students to write several user stories for that scenario.
+- The application could allow students to compare their answer with an example answer after completing an activity.
+
 ### Gamification Elements
 
 The intention is to provide a learning platform which is different from traditional teaching approaches and provides fun or challenges for the user. Thus, the activity loop for the user should be advanced by…
@@ -210,16 +289,7 @@ The intention is to provide a learning platform which is different from traditio
 **Professional Achievements**
 - Earn role-like titles (e.g., "Story Refiner" or "Acceptance Criteria Expert") instead of playful badges.
 
-### Future Enhancements
 
-The following activities may be useful additions in a later version of the application, but they are not part of the initial requirements.
-
-- The application could ask students to revise a weak user story and then compare the revised version with the original.
-- The application could ask students to match user stories with appropriate acceptance criteria.
-- The application could ask students to sort user stories from strongest to weakest.
-- The application could ask students to identify which INVEST property is most clearly missing from a user story.
-- The application could present a short project scenario and ask students to write several user stories for that scenario.
-- The application could allow students to compare their answer with an example answer after completing an activity.
 
 #### Gamification Elements which could be developed:
 
