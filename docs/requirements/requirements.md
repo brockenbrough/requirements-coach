@@ -199,7 +199,9 @@ A students cumulative score should be visible in the students profile or navbar.
 ---
 
 ## Mastery Titles
+ Activity titles that are earned by passing successive difficulty levels. Each activity type has its own title track, so a student can hold different titles for different activities simultaneously, reflecting where they have genuinely invested effort. Titles are computed directly from session history and require no additional data entry — they are always an accurate reflection of the student's current standing.
 
+### Storage
 **REQ-GAM-DL-2** Title Definition Storage (Priority: Medium)
 The application shall store a table of title definitions that maps an activity type and difficulty level to a title name.
 
@@ -212,23 +214,25 @@ The application shall store a table of title definitions that maps an activity t
 
 **REQ-GAM-DL-2.2** Title definitions shall be stored in the database rather than hardcoded in the application, so that new titles can be added when new activity types are introduced without requiring a code change.
 
-**REQ-GAM-DL-3** — Student Title Computation (Priority: Medium)
+### Business Logic
+**REQ-GAM-BL-1** — Student Title Computation (Priority: Medium)
 The application shall determine a student's current title for each activity type by querying their session history.
 
-**REQ-GAM-DL-3.1** A student's current title for a given activity type shall be determined by finding the highest difficulty level for which the student has a completed session record with passed = true for that activity type. This value is then looked up in the title definition table (REQ-GAM-DL-2) to retrieve the corresponding title name.
+**REQ-GAM-BL-1.1** A student's current title for a given activity type shall be determined by finding the highest difficulty level for which the student has a completed session record with passed = true for that activity type. This value is then looked up in the title definition table (REQ-GAM-DL-2) to retrieve the corresponding title name.
 
-**REQ-GAM-DL-3.2** A student's title for a given activity type shall always be computed at query time from existing session records — no separate title field needs to be stored on the student record.
+**REQ-GAM-BL-1.2** A student's title for a given activity type shall always be computed at query time from existing session records — no separate title field needs to be stored on the student record.
 
-**REQ-GAM-DL-3.3** If a student has no passed sessions for a given activity type, the application shall display "Not yet started" or equivalent for that activity's title.
+### User Interface
+**REQ-GAM-PL-2.1** If a student has no passed sessions for a given activity type, the application shall display "Not yet started" or equivalent for that activity's title.
 
-**REQ-GAM-PL-2** Title Display (Priority: Medium)
+**REQ-GAM-PL-2.2** Title Display (Priority: Medium)
 The application shall display a student's current title for each activity type.
 
-**REQ-GAM-PL-2.1** A student's titles shall be visible on their profile page, showing one title per activity type they have attempted.
+**REQ-GAM-PL-2.3** A student's titles shall be visible on their profile page, showing one title per activity type they have attempted.
 
-**REQ-GAM-PL-2.2** When a student passes a difficulty level and earns a new title, the application shall display a notification informing the student of their new title. This notification shall appear on the activity completion screen immediately after the passed result is shown (REQ-PL-2.9).
+**REQ-GAM-PL-2.4** When a student passes a difficulty level and earns a new title, the application shall display a notification informing the student of their new title. This notification shall appear on the activity completion screen immediately after the passed result is shown (REQ-PL-2.9).
 
-**REQ-GAM-PL-2.3** The title notification shall include the title name and the activity type it belongs to — for example: "You've earned a new title: Story Analyst — Weak User Stories."
+**REQ-GAM-PL-2.5** The title notification shall include the title name and the activity type it belongs to — for example: "You've earned a new title: Story Analyst — Weak User Stories."
 
 ---
 
