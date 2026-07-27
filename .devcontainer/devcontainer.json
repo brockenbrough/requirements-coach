@@ -1,0 +1,30 @@
+{
+  "name": "Requirements Coach",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "forwardPorts": [3000],
+  "features": {
+    "ghcr.io/devcontainers/features/node:2.1.0": {
+      "version": "20",
+      "pnpmVersion": "latest"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.formatOnSave": true
+      },
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "bradlc.vscode-tailwindcss",
+        "mhutchie.git-graph",
+        "ms-vscode.live-server",
+        "anthropic.claude-code"
+      ]
+    }
+  },
+  "postCreateCommand": "npm install"
+}
