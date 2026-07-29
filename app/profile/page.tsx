@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 
-type Profile = { id: string; username: string; biography: string; avatar_url: string | null };
+type Profile = { user_id: string; username: string; biography: string; avatar_url: string | null; role: string };
 
 export default function ProfilePage() {
   const [profile, setProfile] = useState<Profile | null>(null);
