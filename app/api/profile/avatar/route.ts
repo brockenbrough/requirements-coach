@@ -39,10 +39,10 @@ export async function POST(request: Request) {
   const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path);
 
   const { data, error: updateError } = await supabase
-    .from('myapp_profile')
+    .from('user')
     .update({ avatar_url: publicUrl })
-    .eq('id', user.id)
-    .select('id, username, biography, avatar_url')
+    .eq('user_id', user.id)
+    .select('user_id, username, biography, avatar_url, role')
     .single();
 
   if (updateError) return Response.json({ error: updateError.message }, { status: 400 });
