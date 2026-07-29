@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mockProfile = { id: 'user-123', username: 'testuser', biography: 'Hello!' };
+const mockProfile = { user_id: 'user-123', username: 'testuser', biography: 'Hello!', role: 'student' };
 
 const mockBuilder = {
   select: vi.fn().mockReturnThis(),
