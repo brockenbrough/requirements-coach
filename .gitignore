@@ -4,3 +4,4 @@ node_modules
 .env
 coverage
 .devcontainer/devcontainer-lock.json
+tsconfig.tsbuildinfo
