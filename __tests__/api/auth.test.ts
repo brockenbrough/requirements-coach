@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../lib/supabase', () => ({
-  getSupabaseClient: vi.fn(() => ({
+// Login runs on the anon-key client, register on the service-role client.
+// The stub lives inside the factory because vi.mock is hoisted to the top of
+// the file and cannot reach top-level variables.
+vi.mock('../../lib/supabase', () => {
+  const supabaseStub = () => ({
     auth: {
       signInWithPassword: vi.fn(async ({ email }: { email: string }) => {
         if (email === 'bad@example.com') {
@@ -18,8 +21,14 @@ vi.mock('../../lib/supabase', () => ({
         }),
       },
     },
-  })),
-}));
+  });
+
+  return {
+    getSupabaseClient: vi.fn(supabaseStub),
+    getSupabaseAuthClient: vi.fn(supabaseStub),
+    getSupabaseAdminClient: vi.fn(supabaseStub),
+  };
+});
 
 import { POST as registerPost } from '../../app/api/auth/register/route';
 import { POST as loginPost } from '../../app/api/auth/login/route';

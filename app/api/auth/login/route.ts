@@ -1,4 +1,4 @@
-import { getSupabaseClient } from '../../../../lib/supabase';
+import { getSupabaseAuthClient } from '../../../../lib/supabase';
 
 export async function POST(request: Request) {
   try {
@@ -9,10 +9,13 @@ export async function POST(request: Request) {
       return Response.json({ error: 'Email and password are required.' }, { status: 400 });
     }
 
-    const supabase = getSupabaseClient();
+    const supabase = getSupabaseAuthClient();
 
     if (!supabase) {
-      return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
+      return Response.json(
+        { error: 'Supabase credentials are not configured. Set SUPABASE_URL and SUPABASE_ANON_KEY in .env.local.' },
+        { status: 500 },
+      );
     }
 
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });

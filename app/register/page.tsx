@@ -1,9 +1,12 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { register } from '../../lib/authClient';
 
 export default function RegisterPage() {
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
@@ -14,15 +17,17 @@ export default function RegisterPage() {
     setLoading(true);
     setMessage('');
 
-    const response = await fetch('/api/auth/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
+    const result = await register(email, password);
 
-    const data = await response.json();
-    setLoading(false);
-    setMessage(response.ok ? 'Registration request sent successfully.' : data.error || 'Registration failed.');
+    if (!result.ok) {
+      setLoading(false);
+      setMessage(result.error);
+      return;
+    }
+
+    // Registration only creates the auth user; the `user` row is created on the
+    // profile page, so send new students there to finish setting up.
+    router.push('/profile');
   }
 
   return (

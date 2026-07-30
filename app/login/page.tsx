@@ -3,19 +3,12 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-
-// Dev-only convenience login so local testing doesn't require retyping credentials.
-// Update these to match a real test account in your Supabase project, or remove
-// them once one is seeded. Only active when NODE_ENV === 'development', so this
-// never ships prefilled in a production build.
-const DEV_TEST_EMAIL = 'test@example.com';
-const DEV_TEST_PASSWORD = 'TestPassword123!';
-const isDev = process.env.NODE_ENV === 'development';
+import { login } from '../../lib/authClient';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState(isDev ? DEV_TEST_EMAIL : '');
-  const [password, setPassword] = useState(isDev ? DEV_TEST_PASSWORD : '');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -24,33 +17,15 @@ export default function LoginPage() {
     setLoading(true);
     setMessage('');
 
-    const response = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
+    const result = await login(email, password);
 
-    const data = await response.json();
-    setLoading(false);
-
-    if (response.ok) {
-      const accessToken = data?.session?.session?.access_token;
-      if (accessToken) localStorage.setItem('access_token', accessToken);
-      router.push('/dashboard');
+    if (!result.ok) {
+      setLoading(false);
+      setMessage(result.error);
       return;
     }
 
-    // Dev-only: no Supabase project configured yet, so simulate a successful
-    // login instead of blocking local click-through testing. Disappears the
-    // moment real Supabase credentials are added (the API then returns a
-    // different error, or succeeds for real).
-    if (isDev && data?.error === 'Supabase credentials are not configured.') {
-      localStorage.setItem('access_token', 'dev-mock-token');
-      router.push('/dashboard');
-      return;
-    }
-
-    setMessage(data.error || 'Login failed.');
+    router.push('/dashboard');
   }
 
   return (
@@ -104,9 +79,6 @@ export default function LoginPage() {
         <p className="mt-6 text-sm font-semibold text-[#A79FC9]">
           Need an account? <Link href="/register" className="text-[#2DD4BF] hover:underline">Create one here</Link>
         </p>
-        {isDev ? (
-          <p className="mt-4 text-xs font-semibold text-[#5c5480]">Dev mode: form prefilled with test credentials.</p>
-        ) : null}
       </section>
     </main>
   );

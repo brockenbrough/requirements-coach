@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { getCumulativeScore, getHighestTitleOverall } from '../lib/activityStore';
+import { clearStoredAccessToken } from '../lib/authClient';
 
 type NavKey = 'dashboard' | 'activities' | 'profile';
 
@@ -103,7 +104,7 @@ export function AppShell({
   }, []);
 
   function handleLogout() {
-    localStorage.removeItem('access_token');
+    clearStoredAccessToken();
     router.push('/login');
   }
 

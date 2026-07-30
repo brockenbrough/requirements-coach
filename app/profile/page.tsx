@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
+import { getStoredAccessToken } from '../../lib/authClient';
 
 type Profile = { user_id: string; username: string; biography: string; avatar_url: string | null; role: string };
 
@@ -24,7 +25,7 @@ export default function ProfilePage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const stored = localStorage.getItem('access_token');
+    const stored = getStoredAccessToken();
     setToken(stored);
     if (!stored) { setLoading(false); return; }
     fetchProfile(stored);
