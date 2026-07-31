@@ -1,9 +1,26 @@
 /**
- * Fallback-avatar initials for a display name.
- * "Anna Student" -> "AS" (first letter of first + last word).
- * "annelin"      -> "AN" (first two letters of the single word).
+ * Fallback-avatar initials.
+ * Prefers first/last name: "Anna" + "Student" -> "AS".
+ * Falls back to the old single-name heuristic (e.g. the username) when
+ * first/last name aren't set yet: "Anna Student" -> "AS", "annelin" -> "AN".
  */
-export function getInitials(name: string | null | undefined): string {
+export function getInitials(
+  firstName: string | null | undefined,
+  lastName: string | null | undefined,
+  fallbackName?: string | null
+): string {
+  const first = (firstName ?? '').trim();
+  const last = (lastName ?? '').trim();
+
+  if (first || last) {
+    const combined = `${first[0] ?? ''}${last[0] ?? ''}`.toUpperCase();
+    if (combined) return combined;
+  }
+
+  return initialsFromSingleName(fallbackName);
+}
+
+function initialsFromSingleName(name: string | null | undefined): string {
   const trimmed = (name ?? '').trim();
   if (!trimmed) return '?';
 

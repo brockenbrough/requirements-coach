@@ -3,7 +3,17 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { clearStoredAccessToken, getStoredAccessToken } from '../lib/authClient';
 
-export type Profile = { user_id: string; username: string; biography: string; avatar_url: string | null; role: string };
+export type Profile = {
+  user_id: string;
+  username: string;
+  biography: string;
+  avatar_url: string | null;
+  role: string;
+  first_name: string | null;
+  last_name: string | null;
+  age: number | null;
+  semester: number | null;
+};
 
 type UserContextValue = {
   token: string | null;

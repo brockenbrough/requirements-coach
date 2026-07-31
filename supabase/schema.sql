@@ -28,6 +28,13 @@ CREATE TABLE "user" (
     biography text NOT NULL,
     avatar_url text,
     role text NOT NULL DEFAULT 'student',
+    -- Issue #61: optional profile fields, filled in on the profile page
+    -- after account creation. All nullable — a user_id with a username
+    -- is still a valid row without these.
+    first_name text,
+    last_name text,
+    age int2 CHECK (age IS NULL OR (age > 0 AND age < 130)),
+    semester int2 CHECK (semester IS NULL OR (semester > 0 AND semester <= 20)),
     PRIMARY KEY (user_id));
 
 -- ---------------------------------------------------------------------
@@ -285,3 +292,14 @@ CREATE POLICY own_answers_insert ON answered_question_log
 --   DROP FUNCTION IF EXISTS bump_session_score() CASCADE;
 --
 -- Leaving "user" out of that list keeps the profiles.
+
+-- Issue #61 (first/last name, age, semester on the profile page): if your
+-- "user" table already exists from an earlier run of this script, add the
+-- new columns instead of recreating the table:
+--
+--   ALTER TABLE "user" ADD COLUMN IF NOT EXISTS first_name text;
+--   ALTER TABLE "user" ADD COLUMN IF NOT EXISTS last_name text;
+--   ALTER TABLE "user" ADD COLUMN IF NOT EXISTS age int2
+--     CHECK (age IS NULL OR (age > 0 AND age < 130));
+--   ALTER TABLE "user" ADD COLUMN IF NOT EXISTS semester int2
+--     CHECK (semester IS NULL OR (semester > 0 AND semester <= 20));

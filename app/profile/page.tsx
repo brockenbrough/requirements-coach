@@ -1,18 +1,16 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
+import { EditableField } from '../../components/EditableField';
 import { ImageCropModal } from '../../components/ImageCropModal';
 import { useUser } from '../../components/UserProvider';
+import { getInitials } from '../../lib/initials';
 
 export default function ProfilePage() {
   const { token, profile, loading, setProfile } = useUser();
   const [error, setError] = useState('');
-
-  const [editing, setEditing] = useState(false);
-  const [biography, setBiography] = useState('');
-  const [saving, setSaving] = useState(false);
 
   const [creating, setCreating] = useState(false);
   const [newUsername, setNewUsername] = useState('');
@@ -21,13 +19,6 @@ export default function ProfilePage() {
   const [uploading, setUploading] = useState(false);
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Profile itself is already loaded (or loading) via UserProvider in the
-  // root layout — this just keeps the biography textarea in sync whenever
-  // the shared profile changes (initial load, create, save, avatar upload).
-  useEffect(() => {
-    if (profile) setBiography(profile.biography);
-  }, [profile]);
 
   async function handleCreate(event: React.FormEvent) {
     event.preventDefault();
@@ -40,22 +31,34 @@ export default function ProfilePage() {
     });
     const data = await res.json();
     setCreating(false);
-    if (res.ok) { setProfile(data.profile); setBiography(data.profile.biography); }
+    if (res.ok) setProfile(data.profile);
     else setError(data.error || 'Failed to create profile.');
   }
 
-  async function handleSave() {
-    if (!token) return;
-    setSaving(true);
+  /** Shared PATCH for every editable field (biography, first/last name, age, semester). */
+  async function patchProfile(fields: Record<string, unknown>): Promise<string | null> {
+    if (!token) return 'Not logged in.';
     const res = await fetch('/api/profile', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ biography }),
+      body: JSON.stringify(fields),
     });
     const data = await res.json();
-    setSaving(false);
-    if (res.ok) { setProfile(data.profile); setEditing(false); }
-    else setError(data.error || 'Failed to save.');
+    if (!res.ok) return data.error || 'Failed to save.';
+    setProfile(data.profile);
+    return null;
+  }
+
+  function saveOptionalNumber(field: 'age' | 'semester', min: number, max: number) {
+    return async (raw: string): Promise<string | null> => {
+      const trimmed = raw.trim();
+      if (trimmed === '') return patchProfile({ [field]: null });
+      const n = Number(trimmed);
+      if (!Number.isInteger(n) || n < min || n > max) {
+        return `Please enter a whole number between ${min} and ${max}.`;
+      }
+      return patchProfile({ [field]: n });
+    };
   }
 
   function handleAvatarChange(event: React.ChangeEvent<HTMLInputElement>) {
@@ -167,7 +170,7 @@ export default function ProfilePage() {
                   <img src={profile.avatar_url} alt="Avatar" className="h-full w-full object-cover" />
                 ) : (
                   <span className="text-3xl font-extrabold text-gray-400">
-                    {profile.username[0].toUpperCase()}
+                    {getInitials(profile.first_name, profile.last_name, profile.username)}
                   </span>
                 )}
                 <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/50 text-xs text-white opacity-0 transition group-hover:opacity-100">
@@ -184,44 +187,44 @@ export default function ProfilePage() {
               <h1 className="text-3xl font-extrabold text-[#1B1642]">{profile.username}</h1>
             </div>
 
-            <div className="mt-6">
-              <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Biography</p>
-              {editing ? (
-                <div className="mt-2 space-y-3">
-                  <textarea
-                    value={biography}
-                    onChange={(e) => setBiography(e.target.value)}
-                    rows={4}
-                    className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-[#1B1642] outline-none transition focus:border-[#7C4DFF]"
-                  />
-                  <div className="flex gap-3">
-                    <button
-                      onClick={handleSave}
-                      disabled={saving}
-                      className="rounded-xl bg-[#7C4DFF] px-4 py-2 text-sm font-extrabold text-white hover:bg-[#6234d1] disabled:opacity-70"
-                    >
-                      {saving ? 'Saving…' : 'Save'}
-                    </button>
-                    <button
-                      onClick={() => { setEditing(false); setBiography(profile.biography); }}
-                      className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-bold text-gray-600 hover:border-gray-300"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="mt-2">
-                  <p className="text-gray-600">{profile.biography || 'No biography yet.'}</p>
-                  <button
-                    onClick={() => setEditing(true)}
-                    className="mt-3 rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-bold text-gray-600 hover:border-[#7C4DFF] hover:text-[#7C4DFF]"
-                  >
-                    Edit biography
-                  </button>
-                </div>
-              )}
-            </div>
+            <EditableField
+              label="First name"
+              value={profile.first_name ?? ''}
+              placeholder="Anna"
+              onSave={(v) => patchProfile({ first_name: v })}
+            />
+            <EditableField
+              label="Last name"
+              value={profile.last_name ?? ''}
+              placeholder="Student"
+              onSave={(v) => patchProfile({ last_name: v })}
+            />
+            <EditableField
+              label="Age"
+              value={profile.age != null ? String(profile.age) : ''}
+              inputType="number"
+              min={1}
+              max={129}
+              placeholder="21"
+              onSave={saveOptionalNumber('age', 1, 129)}
+            />
+            <EditableField
+              label="Semester"
+              value={profile.semester != null ? String(profile.semester) : ''}
+              inputType="number"
+              min={1}
+              max={20}
+              placeholder="4"
+              onSave={saveOptionalNumber('semester', 1, 20)}
+            />
+            <EditableField
+              label="Biography"
+              value={profile.biography}
+              emptyText="No biography yet."
+              inputType="textarea"
+              placeholder="Tell us about yourself…"
+              onSave={(v) => patchProfile({ biography: v })}
+            />
           </>
         )}
       </section>
