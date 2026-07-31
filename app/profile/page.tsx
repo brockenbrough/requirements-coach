@@ -14,20 +14,49 @@ export default function ProfilePage() {
 
   const [creating, setCreating] = useState(false);
   const [newUsername, setNewUsername] = useState('');
+  const [newFirstName, setNewFirstName] = useState('');
+  const [newLastName, setNewLastName] = useState('');
+  const [newAge, setNewAge] = useState('');
+  const [newSemester, setNewSemester] = useState('');
   const [newBiography, setNewBiography] = useState('');
 
   const [uploading, setUploading] = useState(false);
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  /** Shared with saveOptionalNumber's server round-trip below, but validates locally before the create POST. */
+  function parseOptionalNumber(raw: string, min: number, max: number): { value: number | null; error?: string } {
+    const trimmed = raw.trim();
+    if (trimmed === '') return { value: null };
+    const n = Number(trimmed);
+    if (!Number.isInteger(n) || n < min || n > max) {
+      return { value: null, error: `Please enter a whole number between ${min} and ${max}.` };
+    }
+    return { value: n };
+  }
+
   async function handleCreate(event: React.FormEvent) {
     event.preventDefault();
     if (!token) return;
+
+    const age = parseOptionalNumber(newAge, 1, 129);
+    if (age.error) return setError(age.error);
+    const semester = parseOptionalNumber(newSemester, 1, 20);
+    if (semester.error) return setError(semester.error);
+
+    setError('');
     setCreating(true);
     const res = await fetch('/api/profile', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ username: newUsername, biography: newBiography }),
+      body: JSON.stringify({
+        username: newUsername,
+        first_name: newFirstName,
+        last_name: newLastName,
+        age: age.value,
+        semester: semester.value,
+        biography: newBiography,
+      }),
     });
     const data = await res.json();
     setCreating(false);
@@ -138,6 +167,52 @@ export default function ProfilePage() {
                   placeholder="your_username"
                 />
               </label>
+              <label className="block text-sm font-bold text-gray-600">
+                First name
+                <input
+                  type="text"
+                  value={newFirstName}
+                  onChange={(e) => setNewFirstName(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-brand-navy outline-none transition focus:border-brand-purple"
+                  placeholder="Anna"
+                />
+              </label>
+              <label className="block text-sm font-bold text-gray-600">
+                Last name
+                <input
+                  type="text"
+                  value={newLastName}
+                  onChange={(e) => setNewLastName(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-brand-navy outline-none transition focus:border-brand-purple"
+                  placeholder="Student"
+                />
+              </label>
+              <div className="grid grid-cols-2 gap-4">
+                <label className="block text-sm font-bold text-gray-600">
+                  Age
+                  <input
+                    type="number"
+                    value={newAge}
+                    onChange={(e) => setNewAge(e.target.value)}
+                    min={1}
+                    max={129}
+                    className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-brand-navy outline-none transition focus:border-brand-purple"
+                    placeholder="21"
+                  />
+                </label>
+                <label className="block text-sm font-bold text-gray-600">
+                  Semester
+                  <input
+                    type="number"
+                    value={newSemester}
+                    onChange={(e) => setNewSemester(e.target.value)}
+                    min={1}
+                    max={20}
+                    className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-brand-navy outline-none transition focus:border-brand-purple"
+                    placeholder="4"
+                  />
+                </label>
+              </div>
               <label className="block text-sm font-bold text-gray-600">
                 Biography
                 <textarea
