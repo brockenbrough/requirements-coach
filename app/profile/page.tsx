@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
+import { ImageCropModal } from '../../components/ImageCropModal';
 import { getStoredAccessToken } from '../../lib/authClient';
 
 type Profile = { user_id: string; username: string; biography: string; avatar_url: string | null; role: string };
@@ -22,6 +23,7 @@ export default function ProfilePage() {
   const [newBiography, setNewBiography] = useState('');
 
   const [uploading, setUploading] = useState(false);
+  const [pendingImage, setPendingImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -72,12 +74,24 @@ export default function ProfilePage() {
     else setError(data.error || 'Failed to save.');
   }
 
-  async function handleAvatarChange(event: React.ChangeEvent<HTMLInputElement>) {
+  function handleAvatarChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
-    if (!file || !token) return;
+    event.target.value = '';
+    if (!file) return;
+    setPendingImage(URL.createObjectURL(file));
+  }
+
+  function handleCropCancel() {
+    if (pendingImage) URL.revokeObjectURL(pendingImage);
+    setPendingImage(null);
+  }
+
+  async function handleCropSave(croppedBlob: Blob) {
+    if (!token) return;
     setUploading(true);
+    setError('');
     const formData = new FormData();
-    formData.append('image', file);
+    formData.append('image', new File([croppedBlob], 'avatar.jpg', { type: 'image/jpeg' }));
     const res = await fetch('/api/profile/avatar', {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
@@ -87,7 +101,8 @@ export default function ProfilePage() {
     setUploading(false);
     if (res.ok) setProfile(data.profile);
     else setError(data.error || 'Failed to upload image.');
-    event.target.value = '';
+    if (pendingImage) URL.revokeObjectURL(pendingImage);
+    setPendingImage(null);
   }
 
   if (loading) {
@@ -112,7 +127,8 @@ export default function ProfilePage() {
   }
 
   return (
-    <AppShell active="profile">
+    <>
+      <AppShell active="profile">
       <section className="mx-auto w-full max-w-md rounded-2xl border border-gray-100 bg-gray-50 p-8">
         <p className="text-sm font-extrabold uppercase tracking-wide text-[#7C4DFF]">Profile</p>
 
@@ -225,6 +241,10 @@ export default function ProfilePage() {
           </>
         )}
       </section>
-    </AppShell>
+      </AppShell>
+      {pendingImage ? (
+        <ImageCropModal key={pendingImage} imageSrc={pendingImage} onCancel={handleCropCancel} onSave={handleCropSave} />
+      ) : null}
+    </>
   );
 }
