@@ -9,31 +9,60 @@ npm install        # install dependencies
 npm run dev        # start dev server (http://localhost:3000)
 npm run build      # production build
 npm test           # run all tests (vitest)
-npx vitest run __tests__/api/auth.test.ts   # run a single test file
+npx vitest run __tests__/api/sessions.test.ts              # run a single test file
+npx vitest run __tests__/api/sessions.test.ts -t "resume"  # run tests matching a name
 ```
+
+There is no lint or typecheck script; `npm run build` is the type check.
 
 ## Environment setup
 
-Copy `.env.example` to `.env.local` and fill in your Supabase credentials before running the app. The register route uses `SUPABASE_SERVICE_ROLE_KEY` (admin API); the login route works with `SUPABASE_ANON_KEY`. Both `SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_URL` are read by `lib/supabase.ts` — either prefix works.
+Copy `.env.example` to `.env.local` and fill in your Supabase credentials. Then, in the Supabase SQL editor, run `supabase/schema.sql` followed by `supabase/seed.sql` (the question bank — without it every session start returns 400), and create a **public** Storage bucket named `avatars` for profile images.
+
+`lib/supabase.ts` accepts either `SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_URL` and exposes three factories, each returning `null` when its key is missing so routes can answer 500 instead of a confusing Supabase error:
+
+- `getSupabaseClient()` — service-role key preferred, anon fallback. Used by every data route; it bypasses RLS, which is why those routes must derive `user_id` from the token themselves.
+- `getSupabaseAuthClient()` — anon key preferred. Only `login`, so Supabase issues a real user session.
+- `getSupabaseAdminClient()` — service role, no fallback. Only `register` (`auth.admin.createUser`, which bypasses email confirmation).
+
+Clients are created per call with `persistSession: false` — no singleton, no shared state.
 
 ## Architecture
 
-This is a Next.js 14 App Router project with Tailwind CSS and Supabase auth.
+Next.js 14 App Router, Tailwind, Supabase. The product is a requirements-practice app for students; `docs/requirements/requirements.md` is the spec, and its identifiers (`REQ-DL-3.1`, `REQ-PL-2.1`, `REQ-GAM-BL-1`, …) are cited in code comments — read the referenced requirement before changing behavior that a comment ties to one.
 
-**Request flow for auth:**
-1. Client pages (`app/login/page.tsx`, `app/register/page.tsx`) are `'use client'` forms that POST to the API routes via `fetch`.
-2. API routes (`app/api/auth/login/route.ts`, `app/api/auth/register/route.ts`) call `getSupabaseClient()` from `lib/supabase.ts` and delegate to the Supabase JS SDK.
-3. `lib/supabase.ts` — `getSupabaseClient()` returns `null` when env vars are missing; both routes guard against this and return a 500.
+### Two half-connected worlds — read this first
 
-**Key design decisions:**
-- Register uses `supabase.auth.admin.createUser` (service-role key required), so registration bypasses email confirmation.
-- Login returns the full Supabase session object under the `session` key.
-- `getSupabaseClient` creates a new client per call with `persistSession: false` — there is no singleton or shared state.
+The backend and the UI are currently built against different data sources:
 
-**Tests (`__tests__/api/auth.test.ts`):**
-- Vitest with `environment: 'node'`.
-- `lib/supabase` is fully mocked via `vi.mock`; tests import the route handler functions directly and call them with `new Request(...)`.
-- Tests live in `__tests__/` and are matched by the glob `__tests__/**/*.test.ts`.
+- **API routes + `lib/*Queries.ts` + `supabase/schema.sql`** are the real implementation (sessions, answers, feedback, score, titles), fully covered by tests.
+- **`lib/activityContent.ts` + `lib/activityStore.ts`** are a **localStorage mock** of that same domain — a hardcoded question bank and a `rc_activity_progress_v1` key. Every activity page (`app/activities/**`) and `components/AppShell.tsx` still reads from the mock, not the API. Only `app/profile/page.tsx` and login/register talk to real routes.
+
+The two halves don't even share vocabulary: the UI keys activities by slug (`weak-user-stories`), the DB by `activity_type` (`IDENTIFY_WEAK_USER_STORIES`), and no mapping exists yet. Wiring a page to the backend means adding that mapping and replacing `activityStore` calls with `fetch`, keeping the function signatures — `lib/activityStore.ts` was written to be swapped out this way.
+
+### Auth flow
+
+`lib/authClient.ts` is the only place the UI talks to auth routes; it stores the Supabase `access_token` in localStorage under `access_token` (register additionally signs in, since the admin API returns a user but no session). `lib/useAccessToken.ts` is how pages gate on it. Every protected API route then repeats the same preamble: read `Authorization: Bearer …`, `supabase.auth.getUser(token)`, and derive `user_id` from the result — **never** from the body, query string, or path. The `/api/students/{studentId}/*` routes compare the path param against the token's user and 403 on mismatch.
+
+### Session model (the core domain)
+
+- **One in-progress session per (user, activity_type)**, enforced by the partial unique index `uq_session_log_one_active`. `POST /api/sessions` is therefore idempotent: it returns the existing session with `resumed: true` (200) instead of creating a second one, and treats a `23505` race as "someone else started it". "Start" and "resume" are the same call.
+- **The current question is derived, never stored.** It is the lowest `position` in `session_to_question` without a row in `answered_question_log` (`nextUnansweredPosition` in `lib/sessionQueries.ts`). Do not add a `current_question_index` column — the absence of a mutable pointer is what makes multi-device resume conflict-free.
+- **Write before disclose.** `POST /api/sessions/{id}/answers` commits the answer first and reveals `correct`/`explanation` second; `POST .../feedback` only serves a solution for an option already present in `answered_question_log`. Otherwise the endpoints become an oracle for trying options until one is right.
+- **Scores roll up in the database.** The `trg_answered_question_log_score` trigger adds to `session_log.cumulative_score` inside the insert's transaction; routes re-read the row afterwards rather than computing the total locally.
+- **Column visibility is a query-level concern.** `SESSION_QUESTION_COLUMNS` in `lib/sessionQueries.ts` deliberately omits `is_correct` and `explanation`; only `loadQuestionOptions` (feedback path) selects them. Keep new queries on that split.
+- `lib/sessionRules.ts` holds the shared constants (`QUESTIONS_PER_SESSION = 4`, `START_DIFFICULTY_LEVEL = 1`, `PASS_RATIO = 0.8`, `SESSION_COLUMNS`) so routes cannot drift apart. Partial credit is a known gap: `scoreForAnswer` is all-or-nothing until `answer` gains a score column.
+- Gamification is derived, not stored: `lib/scoreQueries.ts` sums the best *passing* score per (activity_type, difficulty_level); `lib/titleQueries.ts` looks up `title_definition` by the highest passed level per activity type. Nothing about score or title lives on the student row.
+
+### Database
+
+`supabase/schema.sql` is the single migration (plain DDL, no `IF NOT EXISTS` — its footer documents the drop/rename paths for re-running). Notable: the profile table is `"user"` (a reserved word — quoted in SQL, plain `.from('user')` in supabase-js) and FKs to `auth.users`; the question-bank tables have **RLS enabled with no policies at all**, so they are unreachable except through a service-role route. Adding a table that the client must not read directly should follow the same pattern.
+
+Valid `activity_type` values live in `lib/activityTypes.ts` and must match `question.activity_type` in `supabase/seed.sql`; the DB does not enforce the set yet.
+
+### Tests
+
+Vitest, `environment: 'node'`, glob `__tests__/**/*.test.ts`, no React/DOM tests. Each file mocks `lib/supabase` with a `vi.hoisted` fake whose `from(table)` returns a chainable builder — `select/eq/in/order` are no-ops, and the builder is *thenable* so queries without `.single()` resolve too. Results are **queued per table** (`queue('session_log', { data, error })`) and shifted in call order, and the mock records `inserts`/`deletes`/`tables` for asserting what the route did. Route handlers are imported directly and invoked as `POST(new Request(...), { params })`. When adding a route, copy this harness from the nearest existing test rather than inventing a new mocking style.
 
 ## Styling Guidelines
 
