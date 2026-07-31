@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { login } from '../../lib/authClient';
+import { PasswordField } from '../../components/PasswordField';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -53,17 +54,13 @@ export default function LoginPage() {
             />
           </label>
 
-          <label className="block text-sm font-bold text-[#A79FC9]">
-            Password
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-              className="mt-1 w-full rounded-[10px] border border-[#332b6b] bg-[#1b1642] px-4 py-3 text-[#F3F1FF] outline-none ring-0 transition focus:border-[#7C4DFF]"
-              placeholder="••••••••"
-            />
-          </label>
+          <PasswordField
+            label="Password"
+            value={password}
+            onChange={setPassword}
+            placeholder="••••••••"
+            autoComplete="current-password"
+          />
 
           <button
             type="submit"
