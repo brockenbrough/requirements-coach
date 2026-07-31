@@ -1,46 +1,61 @@
-import type { AnswerOption, Question } from '../lib/activityContent';
+import type { SessionQuestionOption } from '../lib/sessionClient';
 
-function optionClasses(option: AnswerOption, selectedOptionId: string) {
-  if (option.correct) return 'border-[#2DD4BF] bg-[#2DD4BF]/15';
-  if (option.id === selectedOptionId) return 'border-[#ff6b57] bg-[#ff6b57]/15';
+// The option list comes from the session question, but which one is correct — and why —
+// comes from the feedback route, because the server withholds that until the answer is
+// committed. Hence ids rather than a flag on the option itself.
+function optionClasses(answerId: string, selectedAnswerId: string, correctAnswerId: string) {
+  if (answerId === correctAnswerId) return 'border-[#2DD4BF] bg-[#2DD4BF]/15';
+  if (answerId === selectedAnswerId) return 'border-[#ff6b57] bg-[#ff6b57]/15';
   return 'border-[#332b6b] bg-[#241f52]';
 }
 
 export function FeedbackCard({
-  question,
-  selectedOptionId,
+  prompt,
+  options,
+  selectedAnswerId,
+  correctAnswerId,
+  selectedExplanation,
+  correctExplanation,
   awardedScore,
   isCorrect,
 }: {
-  question: Question;
-  selectedOptionId: string;
+  prompt: string;
+  options: SessionQuestionOption[];
+  selectedAnswerId: string;
+  /** Equal to selectedAnswerId when the pick was right. */
+  correctAnswerId: string;
+  selectedExplanation: string | null;
+  correctExplanation: string | null;
   awardedScore: number;
   isCorrect: boolean;
 }) {
-  const selectedOption = question.options.find((o) => o.id === selectedOptionId);
-  const correctOption = question.options.find((o) => o.correct);
-  if (!selectedOption || !correctOption) return null;
-
   return (
     <div className="rounded-2xl border border-[#332b6b] bg-[#1b1642] p-6">
-      <p className="mb-5 text-base font-extrabold leading-snug text-white">{question.prompt}</p>
+      <p className="mb-5 text-base font-extrabold leading-snug text-white">{prompt}</p>
 
       <div className="mb-5 flex flex-col gap-2.5">
-        {question.options.map((option) => (
-          <div key={option.id} className={`flex items-start gap-3 rounded-xl border p-3.5 ${optionClasses(option, selectedOptionId)}`}>
+        {options.map((option) => (
+          <div
+            key={option.answer_id}
+            className={`flex items-start gap-3 rounded-xl border p-3.5 ${optionClasses(option.answer_id, selectedAnswerId, correctAnswerId)}`}
+          >
             <span
               className={`mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full text-[10px] font-extrabold text-white ${
-                option.correct ? 'bg-[#2DD4BF]' : option.id === selectedOptionId ? 'bg-[#ff6b57]' : 'border-2 border-[#332b6b]'
+                option.answer_id === correctAnswerId
+                  ? 'bg-[#2DD4BF]'
+                  : option.answer_id === selectedAnswerId
+                    ? 'bg-[#ff6b57]'
+                    : 'border-2 border-[#332b6b]'
               }`}
             >
-              {option.correct ? '✓' : option.id === selectedOptionId ? '✕' : ''}
+              {option.answer_id === correctAnswerId ? '✓' : option.answer_id === selectedAnswerId ? '✕' : ''}
             </span>
-            <span className="flex-1 text-sm leading-relaxed text-[#F3F1FF]">{option.text}</span>
-            {option.correct ? (
+            <span className="flex-1 text-sm leading-relaxed text-[#F3F1FF]">{option.option_text}</span>
+            {option.answer_id === correctAnswerId ? (
               <span className="flex-none rounded-full bg-[#2DD4BF] px-2.5 py-0.5 text-[11px] font-extrabold text-[#04241f]">
                 Correct answer
               </span>
-            ) : option.id === selectedOptionId ? (
+            ) : option.answer_id === selectedAnswerId ? (
               <span className="flex-none rounded-full bg-[#ff6b57] px-2.5 py-0.5 text-[11px] font-extrabold text-white">Your answer</span>
             ) : null}
           </div>
@@ -54,16 +69,19 @@ export function FeedbackCard({
         </span>
       </div>
 
-      {!isCorrect ? (
+      {/* answer.explanation is nullable in the schema, so each block only renders when there is something to say. */}
+      {!isCorrect && selectedExplanation ? (
         <div className="mb-3 rounded-xl border border-[#332b6b] bg-[#241f52] p-4 text-sm leading-relaxed text-[#A79FC9]">
           <strong className="mb-1 block font-extrabold text-white">Your pick</strong>
-          {selectedOption.explanation}
+          {selectedExplanation}
         </div>
       ) : null}
-      <div className="rounded-xl border border-[#332b6b] bg-[#241f52] p-4 text-sm leading-relaxed text-[#A79FC9]">
-        <strong className="mb-1 block font-extrabold text-white">{isCorrect ? 'Why this is the weakest' : 'Correct answer'}</strong>
-        {correctOption.explanation}
-      </div>
+      {correctExplanation ? (
+        <div className="rounded-xl border border-[#332b6b] bg-[#241f52] p-4 text-sm leading-relaxed text-[#A79FC9]">
+          <strong className="mb-1 block font-extrabold text-white">{isCorrect ? 'Why this is the weakest' : 'Correct answer'}</strong>
+          {correctExplanation}
+        </div>
+      ) : null}
     </div>
   );
 }

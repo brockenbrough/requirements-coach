@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../../components/AppShell';
 import { getActivity } from '../../../lib/activityContent';
-import { abandonSession, ActivityState, getActivityState, startSession } from '../../../lib/activityStore';
+import { abandonSession, ActivityState, getActivityState } from '../../../lib/activityStore';
+import { loadCurrentSession, startSession } from '../../../lib/sessionClient';
 import { useAccessToken } from '../../../lib/useAccessToken';
 
 const DIFFICULTY_LABEL = { 1: 'Easy', 2: 'Medium', 3: 'Hard' } as const;
@@ -15,10 +16,29 @@ export default function ActivityDetailPage({ params }: { params: { slug: string 
   const { token, loading } = useAccessToken();
   const activity = getActivity(params.slug);
   const [state, setState] = useState<ActivityState | null>(null);
+  const [hasServerSession, setHasServerSession] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<{ message: string; needsProfile: boolean } | null>(null);
 
   useEffect(() => {
     if (!token || !activity) return;
     setState(getActivityState(activity.slug));
+  }, [token, activity]);
+
+  // Only to label the button: starting is idempotent, so Start and Continue run the
+  // same call — uq_session_log_one_active guarantees there is at most one to resume.
+  useEffect(() => {
+    if (!token || !activity) return;
+    let cancelled = false;
+
+    loadCurrentSession(token, activity.activityType).then((result) => {
+      if (cancelled) return;
+      if (result.ok) setHasServerSession(result.data.session !== null);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [token, activity]);
 
   if (loading) return null;
@@ -49,9 +69,29 @@ export default function ActivityDetailPage({ params }: { params: { slug: string 
     );
   }
 
-  function handleStart() {
-    startSession(activity!.slug);
-    router.push(`/activities/${activity!.slug}/play`);
+  async function handleStart() {
+    if (!token || starting) return;
+
+    setStarting(true);
+    setError(null);
+
+    const result = await startSession(token, activity!.activityType);
+
+    if (result.ok) {
+      router.push(`/activities/${activity!.slug}/play`);
+      return;
+    }
+
+    setStarting(false);
+
+    if (result.status === 401) {
+      router.push('/login');
+      return;
+    }
+
+    // 409: authenticated, but no row in "user" yet — registration does not create one,
+    // and session_log.user_id references it.
+    setError({ message: result.error, needsProfile: result.status === 409 });
   }
 
   function handleAbandon() {
@@ -105,12 +145,26 @@ export default function ActivityDetailPage({ params }: { params: { slug: string 
               </div>
             </>
           ) : (
-            <button
-              onClick={handleStart}
-              className="rounded-full bg-[#7C4DFF] px-6 py-3 text-sm font-extrabold text-white hover:bg-[#6234d1]"
-            >
-              Start
-            </button>
+            <>
+              <button
+                onClick={handleStart}
+                disabled={starting}
+                className="rounded-full bg-[#7C4DFF] px-6 py-3 text-sm font-extrabold text-white hover:bg-[#6234d1] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {starting ? 'Starting…' : hasServerSession ? 'Continue' : 'Start'}
+              </button>
+
+              {error ? (
+                <div className="mt-4 rounded-brand-md border border-brand-danger/40 bg-brand-danger/10 p-4 text-sm font-semibold text-brand-danger-light">
+                  {error.message}
+                  {error.needsProfile ? (
+                    <Link href="/profile" className="ml-1 underline hover:text-white">
+                      Go to your profile
+                    </Link>
+                  ) : null}
+                </div>
+              ) : null}
+            </>
           )}
         </div>
 
