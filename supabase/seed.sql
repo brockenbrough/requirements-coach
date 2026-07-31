@@ -2,16 +2,16 @@
 -- Seed data for the Type A question bank.
 -- Run after supabase/schema.sql.
 --
--- Two activities, 18 questions each (6 per difficulty level), 4 answer
+-- Two activities, 36 questions each (12 per difficulty level), 4 answer
 -- options per question. Every question is worth 25 points, so a session
 -- of 4 questions adds up to the max_score of 100 from REQ-DL-3.
 --
 -- UUID scheme (deterministic, collision-free IDs only):
 --   Identify Weak User Stories
---     question(N)          -> 00000000-0000-0000-0000-0000000000NN   (N = 1..18)
+--     question(N)          -> 00000000-0000-0000-0000-0000000000NN   (N = 1..36)
 --     answer(N, option i)  -> 00000000-0000-0000-0001-0000000000XX   (XX = N*10 + i)
 --   Identify Weak Acceptance Criteria
---     question(N)          -> 00000000-0000-0000-0000-0000000001NN   (100 + N)
+--     question(N)          -> 00000000-0000-0000-0000-0000000001NN   (100 + N, N = 1..36)
 --     answer(N, option i)  -> 00000000-0000-0000-0001-000000000XXX   (XXX = (100+N)*10 + i)
 --   i: 1=A, 2=B, 3=C, 4=D
 --
@@ -115,7 +115,88 @@ Acceptance Criteria:
 
 ('00000000-0000-0000-0000-000000000018', 'Which is the primary weakness of the following user story?
 
-"As a customer, I want the online shop to be completely secure and extremely user-friendly so that I can shop without concerns."', 3, 'IDENTIFY_WEAK_USER_STORIES', 18, 25);
+"As a customer, I want the online shop to be completely secure and extremely user-friendly so that I can shop without concerns."', 3, 'IDENTIFY_WEAK_USER_STORIES', 18, 25),
+
+('00000000-0000-0000-0000-000000000019', 'Which is the primary weakness of the following user story?
+
+"I want to view my order history so that I can check past purchases."', 1, 'IDENTIFY_WEAK_USER_STORIES', 19, 25),
+
+('00000000-0000-0000-0000-000000000020', 'Which is the primary weakness of the following user story?
+
+"As a customer, I want to receive a push notification."', 1, 'IDENTIFY_WEAK_USER_STORIES', 20, 25),
+
+('00000000-0000-0000-0000-000000000021', 'Which is the primary weakness of the following user story?
+
+"As a customer, I want the website to look better so that I enjoy shopping more."', 1, 'IDENTIFY_WEAK_USER_STORIES', 21, 25),
+
+('00000000-0000-0000-0000-000000000022', 'Which is the primary weakness of the following user story?
+
+"As a user, I want the app to load instantly every time so that I never have to wait."', 1, 'IDENTIFY_WEAK_USER_STORIES', 22, 25),
+
+('00000000-0000-0000-0000-000000000023', 'Which is the primary weakness of the following user story?
+
+"As a customer, I want the system to use Redis for caching so that pages load."', 1, 'IDENTIFY_WEAK_USER_STORIES', 23, 25),
+
+('00000000-0000-0000-0000-000000000024', 'Which is the primary weakness of the following user story?
+
+"As a developer, I want to reformat the code indentation so that it looks tidy."', 1, 'IDENTIFY_WEAK_USER_STORIES', 24, 25),
+
+('00000000-0000-0000-0000-000000000025', 'Which is the primary weakness of the following user story?
+
+"As a customer, I want to browse categories, filter products, read reviews, add items to my wishlist, and checkout so that I can complete my shopping."', 2, 'IDENTIFY_WEAK_USER_STORIES', 25, 25),
+
+('00000000-0000-0000-0000-000000000026', 'Which is the primary weakness of the following user story?
+
+"As a user, I want to approve refund requests so that customers get their money back."', 2, 'IDENTIFY_WEAK_USER_STORIES', 26, 25),
+
+('00000000-0000-0000-0000-000000000027', 'Which is the primary weakness of the following user story?
+
+"As a customer, I want the newsletter signup to be simple so that I can subscribe easily."', 2, 'IDENTIFY_WEAK_USER_STORIES', 27, 25),
+
+('00000000-0000-0000-0000-000000000028', 'Which is the primary weakness of the following user story?
+
+"As a customer, I want to return a product so that I can get a refund."', 2, 'IDENTIFY_WEAK_USER_STORIES', 28, 25),
+
+('00000000-0000-0000-0000-000000000029', 'Which is the primary weakness of the following user story?
+
+"As a customer, I want a blue ''Buy Now'' button rendered with React so that I can purchase quickly."', 2, 'IDENTIFY_WEAK_USER_STORIES', 29, 25),
+
+('00000000-0000-0000-0000-000000000030', 'Which is the primary weakness of the following user story?
+
+"As a customer, I want to upload a profile picture so that my account feels personal."
+
+Acceptance Criterion: "The upload should work properly."', 2, 'IDENTIFY_WEAK_USER_STORIES', 30, 25),
+
+('00000000-0000-0000-0000-000000000031', 'Which is the primary weakness of the following user story?
+
+"As a customer, I want to see estimated delivery dates so that I know when my order will arrive."
+
+(The delivery-date feature depends on an unfinished carrier-integration feature.)', 3, 'IDENTIFY_WEAK_USER_STORIES', 31, 25),
+
+('00000000-0000-0000-0000-000000000032', 'Which is the primary weakness of the following user story?
+
+"As a customer, I want the payment_log database table to be created so that transactions can later be recorded."', 3, 'IDENTIFY_WEAK_USER_STORIES', 32, 25),
+
+('00000000-0000-0000-0000-000000000033', 'Which is the primary weakness of the following user story?
+
+"As a customer, I want to filter products by price so that I can find items within my budget."
+
+Acceptance Criteria:
+- Results must include only items under $50.
+- Results must include only items over $100.
+- All items must always be shown regardless of the filter.', 3, 'IDENTIFY_WEAK_USER_STORIES', 33, 25),
+
+('00000000-0000-0000-0000-000000000034', 'Which is the primary weakness of the following user story?
+
+"As a customer, I want product images to be served via a CDN with WebP conversion and lazy-loading using IntersectionObserver so that pages load quickly."', 3, 'IDENTIFY_WEAK_USER_STORIES', 34, 25),
+
+('00000000-0000-0000-0000-000000000035', 'Which is the primary weakness of the following user story?
+
+"As a system administrator, I want the footer copyright text changed from a serif to a sans-serif font so that it looks marginally different."', 3, 'IDENTIFY_WEAK_USER_STORIES', 35, 25),
+
+('00000000-0000-0000-0000-000000000036', 'Which is the primary weakness of the following user story?
+
+"As a customer, I want the entire website to be extremely fast, beautifully designed, perfectly accessible, and completely bug-free so that I have the best possible experience."', 3, 'IDENTIFY_WEAK_USER_STORIES', 36, 25);
 
 
 -- =====================================================================
@@ -248,6 +329,132 @@ INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
 ('00000000-0000-0000-0001-000000000183', 'The story contains multiple actors.', 'Incorrect: only one actor (customer) appears.', false),
 ('00000000-0000-0000-0001-000000000184', 'The story is too short.', 'Incorrect: length is not the problem here.', false);
 
+-- Question 19 -------------------------------------------------------
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000000191', 'The user role is missing.', 'Correct: the story does not start with "As a ...", so it is unclear who performs the action.', true),
+('00000000-0000-0000-0001-000000000192', 'The business value is missing.', 'Incorrect: "so that I can check past purchases" states the value.', false),
+('00000000-0000-0000-0001-000000000193', 'The story contains implementation details.', 'Incorrect: no technology is mentioned.', false),
+('00000000-0000-0000-0001-000000000194', 'The story is too detailed.', 'Incorrect: the story is rather too short than too detailed.', false);
+
+-- Question 20 -------------------------------------------------------
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000000201', 'The role is incorrect.', 'Incorrect: "customer" is an appropriate role here.', false),
+('00000000-0000-0000-0001-000000000202', 'The business value ("so that...") is missing.', 'Correct: the "so that..." part explaining why the notification matters is missing.', true),
+('00000000-0000-0000-0001-000000000203', 'The story contains multiple features.', 'Incorrect: only a single feature is described.', false),
+('00000000-0000-0000-0001-000000000204', 'The story is too technical.', 'Incorrect: no technical details are mentioned.', false);
+
+-- Question 21 -------------------------------------------------------
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000000211', 'The wording is too vague.', 'Correct: "better" is subjective and not measurable or testable.', true),
+('00000000-0000-0000-0001-000000000212', 'The role is missing.', 'Incorrect: "customer" is stated as the role.', false),
+('00000000-0000-0000-0001-000000000213', 'The story contains implementation details.', 'Incorrect: no specific technology is mentioned.', false),
+('00000000-0000-0000-0001-000000000214', 'The story has too many acceptance criteria.', 'Incorrect: no acceptance criteria are given at all.', false);
+
+-- Question 22 -------------------------------------------------------
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000000221', 'The expectation is unrealistic and not testable.', 'Correct: "instantly every time" and "never have to wait" cannot realistically be guaranteed or verified.', true),
+('00000000-0000-0000-0001-000000000222', 'The story is missing a role.', 'Incorrect: the role "user" is stated.', false),
+('00000000-0000-0000-0001-000000000223', 'The business value is missing.', 'Incorrect: "so that I never have to wait" states the value.', false),
+('00000000-0000-0000-0001-000000000224', 'The story contains multiple actors.', 'Incorrect: only one actor (user) appears.', false);
+
+-- Question 23 -------------------------------------------------------
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000000231', 'The story focuses on technical implementation instead of user value.', 'Correct: "Redis" is a concrete technical solution, not a user need.', true),
+('00000000-0000-0000-0001-000000000232', 'The story contains multiple actors.', 'Incorrect: only one actor (customer) appears.', false),
+('00000000-0000-0000-0001-000000000233', 'The role is missing.', 'Incorrect: "customer" is stated as the role.', false),
+('00000000-0000-0000-0001-000000000234', 'The story is too short.', 'Incorrect: brevity is not the actual problem.', false);
+
+-- Question 24 -------------------------------------------------------
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000000241', 'The story provides little business value.', 'Correct: a pure indentation reformat delivers no recognizable value to users or the business.', true),
+('00000000-0000-0000-0001-000000000242', 'The story is missing a role.', 'Incorrect: "developer" is stated as the role.', false),
+('00000000-0000-0000-0001-000000000243', 'The story contains too many acceptance criteria.', 'Incorrect: no acceptance criteria are given.', false),
+('00000000-0000-0000-0001-000000000244', 'The story is too detailed.', 'Incorrect: excessive detail is not the issue here.', false);
+
+-- Question 25 -------------------------------------------------------
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000000251', 'The story should be split into smaller stories.', 'Correct: browsing, filtering, reading reviews, wishlisting, and checkout are several independent stories.', true),
+('00000000-0000-0000-0001-000000000252', 'The role is missing.', 'Incorrect: "customer" is stated as the role.', false),
+('00000000-0000-0000-0001-000000000253', 'The story is too short.', 'Incorrect: the story is rather too long / too broad.', false),
+('00000000-0000-0000-0001-000000000254', 'The story contains no business value.', 'Incorrect: "so that I can complete my shopping" describes the value.', false);
+
+-- Question 26 -------------------------------------------------------
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000000261', 'The user role is too generic.', 'Correct: "user" is too unspecific; a concrete role such as "support agent" would be better.', true),
+('00000000-0000-0000-0001-000000000262', 'The story is too detailed.', 'Incorrect: the story is rather too coarse than too detailed.', false),
+('00000000-0000-0000-0001-000000000263', 'The story contains technical implementation.', 'Incorrect: no specific technology is mentioned.', false),
+('00000000-0000-0000-0001-000000000264', 'The business value is missing.', 'Incorrect: "so that customers get their money back" states the value.', false);
+
+-- Question 27 -------------------------------------------------------
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000000271', '"Simple" and "easily" are not measurable.', 'Correct: without concrete criteria, these words cannot be objectively tested.', true),
+('00000000-0000-0000-0001-000000000272', 'The story has no actor.', 'Incorrect: "customer" is stated as the role.', false),
+('00000000-0000-0000-0001-000000000273', 'The story contains implementation details.', 'Incorrect: no specific technology is mentioned.', false),
+('00000000-0000-0000-0001-000000000274', 'The story is too long.', 'Incorrect: length is not the problem here.', false);
+
+-- Question 28 -------------------------------------------------------
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000000281', 'Important business conditions are missing.', 'Correct: conditions such as the return window or the item''s required condition are missing.', true),
+('00000000-0000-0000-0001-000000000282', 'The story is too technical.', 'Incorrect: no technology or implementation is mentioned.', false),
+('00000000-0000-0000-0001-000000000283', 'The actor is missing.', 'Incorrect: "customer" is stated as the role.', false),
+('00000000-0000-0000-0001-000000000284', 'The story contains too many goals.', 'Incorrect: only one goal (return) is described.', false);
+
+-- Question 29 -------------------------------------------------------
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000000291', 'The story specifies UI and implementation details instead of user needs.', 'Correct: the button color and "rendered with React" describe the implementation rather than the actual need.', true),
+('00000000-0000-0000-0001-000000000292', 'The story contains multiple actors.', 'Incorrect: only one actor (customer) appears.', false),
+('00000000-0000-0000-0001-000000000293', 'The role is missing.', 'Incorrect: "customer" is stated as the role.', false),
+('00000000-0000-0000-0001-000000000294', 'The story is too short.', 'Incorrect: the story is, on the contrary, quite detailed.', false);
+
+-- Question 30 -------------------------------------------------------
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000000301', 'The acceptance criterion is too vague.', 'Correct: "should work properly" is not concretely measurable or testable.', true),
+('00000000-0000-0000-0001-000000000302', 'The actor is missing.', 'Incorrect: "customer" is stated as the role.', false),
+('00000000-0000-0000-0001-000000000303', 'The story contains implementation details.', 'Incorrect: no specific implementation is described.', false),
+('00000000-0000-0000-0001-000000000304', 'The story contains multiple business values.', 'Incorrect: only one value is stated.', false);
+
+-- Question 31 -------------------------------------------------------
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000000311', 'The story has a hidden dependency.', 'Correct: the story depends on a still-unfinished carrier-integration feature, which is not visible from the story itself.', true),
+('00000000-0000-0000-0001-000000000312', 'The story is too short.', 'Incorrect: length is not the problem here.', false),
+('00000000-0000-0000-0001-000000000313', 'The role is missing.', 'Incorrect: "customer" is stated as the role.', false),
+('00000000-0000-0000-0001-000000000314', 'The business value is missing.', 'Incorrect: "so that I know when my order will arrive" describes the value.', false);
+
+-- Question 32 -------------------------------------------------------
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000000321', 'The story is sliced by technical implementation instead of user value.', 'Correct: the story is defined around a database table rather than a user-visible outcome.', true),
+('00000000-0000-0000-0001-000000000322', 'The role is missing.', 'Incorrect: "customer" is stated as the role.', false),
+('00000000-0000-0000-0001-000000000323', 'The story is too long.', 'Incorrect: the story is rather short and simple.', false),
+('00000000-0000-0000-0001-000000000324', 'The story contains multiple actors.', 'Incorrect: only one actor (customer) appears.', false);
+
+-- Question 33 -------------------------------------------------------
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000000331', 'The acceptance criteria contradict each other.', 'Correct: "only under $50", "only over $100", and "always show all items" cannot all hold at once.', true),
+('00000000-0000-0000-0001-000000000332', 'The story is missing a role.', 'Incorrect: "customer" is stated as the role.', false),
+('00000000-0000-0000-0001-000000000333', 'The story is too technical.', 'Incorrect: no specific technology is mentioned.', false),
+('00000000-0000-0000-0001-000000000334', 'The business value is unclear.', 'Incorrect: "so that I can find items within my budget" is clearly stated.', false);
+
+-- Question 34 -------------------------------------------------------
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000000341', 'The story specifies implementation details instead of user needs.', 'Correct: CDN, WebP conversion, and IntersectionObserver describe a technical solution rather than a user need.', true),
+('00000000-0000-0000-0001-000000000342', 'The actor is missing.', 'Incorrect: "customer" is stated as the role.', false),
+('00000000-0000-0000-0001-000000000343', 'The story is too short.', 'Incorrect: the story is, on the contrary, very detailed.', false),
+('00000000-0000-0000-0001-000000000344', 'The business value is missing.', 'Incorrect: "so that pages load quickly" describes the value.', false);
+
+-- Question 35 -------------------------------------------------------
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000000351', 'The story delivers little meaningful business value.', 'Correct: swapping the footer font provides virtually no relevant value.', true),
+('00000000-0000-0000-0001-000000000352', 'The story is missing a role.', 'Incorrect: "system administrator" is stated as the role.', false),
+('00000000-0000-0000-0001-000000000353', 'The story contains multiple features.', 'Incorrect: only a single, very small change is described.', false),
+('00000000-0000-0000-0001-000000000354', 'The business value is missing.', 'Incorrect: "so that it looks marginally different" is stated, even if it is a weak value.', false);
+
+-- Question 36 -------------------------------------------------------
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000000361', 'The quality goals are subjective and not measurable.', 'Correct: "extremely fast", "beautifully designed", "perfectly accessible", and "completely bug-free" cannot be objectively measured or tested.', true),
+('00000000-0000-0000-0001-000000000362', 'The actor is missing.', 'Incorrect: "customer" is stated as the role.', false),
+('00000000-0000-0000-0001-000000000363', 'The story contains multiple actors.', 'Incorrect: only one actor (customer) appears.', false),
+('00000000-0000-0000-0001-000000000364', 'The story is too short.', 'Incorrect: length is not the problem here.', false);
+
 
 -- =====================================================================
 -- 3) QUESTION_TO_ANSWER (mapping)
@@ -343,7 +550,97 @@ INSERT INTO question_to_answer (question_id, answer_id) VALUES
 ('00000000-0000-0000-0000-000000000018', '00000000-0000-0000-0001-000000000181'),
 ('00000000-0000-0000-0000-000000000018', '00000000-0000-0000-0001-000000000182'),
 ('00000000-0000-0000-0000-000000000018', '00000000-0000-0000-0001-000000000183'),
-('00000000-0000-0000-0000-000000000018', '00000000-0000-0000-0001-000000000184');
+('00000000-0000-0000-0000-000000000018', '00000000-0000-0000-0001-000000000184'),
+-- Q19
+('00000000-0000-0000-0000-000000000019', '00000000-0000-0000-0001-000000000191'),
+('00000000-0000-0000-0000-000000000019', '00000000-0000-0000-0001-000000000192'),
+('00000000-0000-0000-0000-000000000019', '00000000-0000-0000-0001-000000000193'),
+('00000000-0000-0000-0000-000000000019', '00000000-0000-0000-0001-000000000194'),
+-- Q20
+('00000000-0000-0000-0000-000000000020', '00000000-0000-0000-0001-000000000201'),
+('00000000-0000-0000-0000-000000000020', '00000000-0000-0000-0001-000000000202'),
+('00000000-0000-0000-0000-000000000020', '00000000-0000-0000-0001-000000000203'),
+('00000000-0000-0000-0000-000000000020', '00000000-0000-0000-0001-000000000204'),
+-- Q21
+('00000000-0000-0000-0000-000000000021', '00000000-0000-0000-0001-000000000211'),
+('00000000-0000-0000-0000-000000000021', '00000000-0000-0000-0001-000000000212'),
+('00000000-0000-0000-0000-000000000021', '00000000-0000-0000-0001-000000000213'),
+('00000000-0000-0000-0000-000000000021', '00000000-0000-0000-0001-000000000214'),
+-- Q22
+('00000000-0000-0000-0000-000000000022', '00000000-0000-0000-0001-000000000221'),
+('00000000-0000-0000-0000-000000000022', '00000000-0000-0000-0001-000000000222'),
+('00000000-0000-0000-0000-000000000022', '00000000-0000-0000-0001-000000000223'),
+('00000000-0000-0000-0000-000000000022', '00000000-0000-0000-0001-000000000224'),
+-- Q23
+('00000000-0000-0000-0000-000000000023', '00000000-0000-0000-0001-000000000231'),
+('00000000-0000-0000-0000-000000000023', '00000000-0000-0000-0001-000000000232'),
+('00000000-0000-0000-0000-000000000023', '00000000-0000-0000-0001-000000000233'),
+('00000000-0000-0000-0000-000000000023', '00000000-0000-0000-0001-000000000234'),
+-- Q24
+('00000000-0000-0000-0000-000000000024', '00000000-0000-0000-0001-000000000241'),
+('00000000-0000-0000-0000-000000000024', '00000000-0000-0000-0001-000000000242'),
+('00000000-0000-0000-0000-000000000024', '00000000-0000-0000-0001-000000000243'),
+('00000000-0000-0000-0000-000000000024', '00000000-0000-0000-0001-000000000244'),
+-- Q25
+('00000000-0000-0000-0000-000000000025', '00000000-0000-0000-0001-000000000251'),
+('00000000-0000-0000-0000-000000000025', '00000000-0000-0000-0001-000000000252'),
+('00000000-0000-0000-0000-000000000025', '00000000-0000-0000-0001-000000000253'),
+('00000000-0000-0000-0000-000000000025', '00000000-0000-0000-0001-000000000254'),
+-- Q26
+('00000000-0000-0000-0000-000000000026', '00000000-0000-0000-0001-000000000261'),
+('00000000-0000-0000-0000-000000000026', '00000000-0000-0000-0001-000000000262'),
+('00000000-0000-0000-0000-000000000026', '00000000-0000-0000-0001-000000000263'),
+('00000000-0000-0000-0000-000000000026', '00000000-0000-0000-0001-000000000264'),
+-- Q27
+('00000000-0000-0000-0000-000000000027', '00000000-0000-0000-0001-000000000271'),
+('00000000-0000-0000-0000-000000000027', '00000000-0000-0000-0001-000000000272'),
+('00000000-0000-0000-0000-000000000027', '00000000-0000-0000-0001-000000000273'),
+('00000000-0000-0000-0000-000000000027', '00000000-0000-0000-0001-000000000274'),
+-- Q28
+('00000000-0000-0000-0000-000000000028', '00000000-0000-0000-0001-000000000281'),
+('00000000-0000-0000-0000-000000000028', '00000000-0000-0000-0001-000000000282'),
+('00000000-0000-0000-0000-000000000028', '00000000-0000-0000-0001-000000000283'),
+('00000000-0000-0000-0000-000000000028', '00000000-0000-0000-0001-000000000284'),
+-- Q29
+('00000000-0000-0000-0000-000000000029', '00000000-0000-0000-0001-000000000291'),
+('00000000-0000-0000-0000-000000000029', '00000000-0000-0000-0001-000000000292'),
+('00000000-0000-0000-0000-000000000029', '00000000-0000-0000-0001-000000000293'),
+('00000000-0000-0000-0000-000000000029', '00000000-0000-0000-0001-000000000294'),
+-- Q30
+('00000000-0000-0000-0000-000000000030', '00000000-0000-0000-0001-000000000301'),
+('00000000-0000-0000-0000-000000000030', '00000000-0000-0000-0001-000000000302'),
+('00000000-0000-0000-0000-000000000030', '00000000-0000-0000-0001-000000000303'),
+('00000000-0000-0000-0000-000000000030', '00000000-0000-0000-0001-000000000304'),
+-- Q31
+('00000000-0000-0000-0000-000000000031', '00000000-0000-0000-0001-000000000311'),
+('00000000-0000-0000-0000-000000000031', '00000000-0000-0000-0001-000000000312'),
+('00000000-0000-0000-0000-000000000031', '00000000-0000-0000-0001-000000000313'),
+('00000000-0000-0000-0000-000000000031', '00000000-0000-0000-0001-000000000314'),
+-- Q32
+('00000000-0000-0000-0000-000000000032', '00000000-0000-0000-0001-000000000321'),
+('00000000-0000-0000-0000-000000000032', '00000000-0000-0000-0001-000000000322'),
+('00000000-0000-0000-0000-000000000032', '00000000-0000-0000-0001-000000000323'),
+('00000000-0000-0000-0000-000000000032', '00000000-0000-0000-0001-000000000324'),
+-- Q33
+('00000000-0000-0000-0000-000000000033', '00000000-0000-0000-0001-000000000331'),
+('00000000-0000-0000-0000-000000000033', '00000000-0000-0000-0001-000000000332'),
+('00000000-0000-0000-0000-000000000033', '00000000-0000-0000-0001-000000000333'),
+('00000000-0000-0000-0000-000000000033', '00000000-0000-0000-0001-000000000334'),
+-- Q34
+('00000000-0000-0000-0000-000000000034', '00000000-0000-0000-0001-000000000341'),
+('00000000-0000-0000-0000-000000000034', '00000000-0000-0000-0001-000000000342'),
+('00000000-0000-0000-0000-000000000034', '00000000-0000-0000-0001-000000000343'),
+('00000000-0000-0000-0000-000000000034', '00000000-0000-0000-0001-000000000344'),
+-- Q35
+('00000000-0000-0000-0000-000000000035', '00000000-0000-0000-0001-000000000351'),
+('00000000-0000-0000-0000-000000000035', '00000000-0000-0000-0001-000000000352'),
+('00000000-0000-0000-0000-000000000035', '00000000-0000-0000-0001-000000000353'),
+('00000000-0000-0000-0000-000000000035', '00000000-0000-0000-0001-000000000354'),
+-- Q36
+('00000000-0000-0000-0000-000000000036', '00000000-0000-0000-0001-000000000361'),
+('00000000-0000-0000-0000-000000000036', '00000000-0000-0000-0001-000000000362'),
+('00000000-0000-0000-0000-000000000036', '00000000-0000-0000-0001-000000000363'),
+('00000000-0000-0000-0000-000000000036', '00000000-0000-0000-0001-000000000364');
 
 
 -- #####################################################################
@@ -476,7 +773,130 @@ Acceptance Criteria: "The interface should feel intuitive."', 3, 'IDENTIFY_WEAK_
 
 User Story: "As a customer, I want to pay online so that I can complete purchases conveniently."
 
-Acceptance Criteria: "The payment process should be secure, fast, modern, and reliable."', 3, 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 18, 25);
+Acceptance Criteria: "The payment process should be secure, fast, modern, and reliable."', 3, 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 18, 25),
+
+('00000000-0000-0000-0000-000000000119', 'Which is the primary weakness of the following acceptance criteria?
+
+User Story: "As a customer, I want to track my order so that I know its status."
+
+Acceptance Criteria: "Order tracking should work well."', 1, 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 19, 25),
+
+('00000000-0000-0000-0000-000000000120', 'Which is the primary weakness of the following acceptance criteria?
+
+User Story: "As a customer, I want to filter search results so that I can narrow down options."
+
+Acceptance Criteria: "Filtering should be quick."', 1, 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 20, 25),
+
+('00000000-0000-0000-0000-000000000121', 'Which is the primary weakness of the following acceptance criteria?
+
+User Story: "As a customer, I want to view product photos so that I can see what I am buying."
+
+Acceptance Criteria: "The photo gallery should look great."', 1, 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 21, 25),
+
+('00000000-0000-0000-0000-000000000122', 'Which is the primary weakness of the following acceptance criteria?
+
+User Story: "As a customer, I want to submit a review so that I can share my experience."
+
+Acceptance Criteria: "Review submission must never fail."', 1, 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 22, 25),
+
+('00000000-0000-0000-0000-000000000123', 'Which is the primary weakness of the following acceptance criteria?
+
+User Story: "As a customer, I want to browse the homepage so that I can discover products."
+
+Acceptance Criteria: "The homepage should be appealing."', 1, 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 23, 25),
+
+('00000000-0000-0000-0000-000000000124', 'Which is the primary weakness of the following acceptance criteria?
+
+User Story: "As a customer, I want to apply a discount code so that I pay less."
+
+Acceptance Criteria: "The discount code feature should function properly."', 1, 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 24, 25),
+
+('00000000-0000-0000-0000-000000000125', 'Which is the primary weakness of the following acceptance criteria?
+
+User Story: "As a customer, I want to return a product so that I can get a refund."
+
+Acceptance Criteria: "Returns are accepted."', 2, 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 25, 25),
+
+('00000000-0000-0000-0000-000000000126', 'Which is the primary weakness of the following acceptance criteria?
+
+User Story: "As a customer, I want to unsubscribe from emails so that I stop receiving marketing."
+
+Acceptance Criteria: "A green confirmation banner slides in using CSS animations."', 2, 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 26, 25),
+
+('00000000-0000-0000-0000-000000000127', 'Which is the primary weakness of the following acceptance criteria?
+
+User Story: "As a customer, I want to filter products by category so that I can narrow results."
+
+Acceptance Criteria:
+- Filtering completes in under one second.
+- Filtered results are useful.', 2, 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 27, 25),
+
+('00000000-0000-0000-0000-000000000128', 'Which is the primary weakness of the following acceptance criteria?
+
+User Story: "As a customer, I want to export my data so that I can keep a personal copy."
+
+Acceptance Criteria:
+- Users can export their data.
+- The export is safe.', 2, 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 28, 25),
+
+('00000000-0000-0000-0000-000000000129', 'Which is the primary weakness of the following acceptance criteria?
+
+User Story: "As a customer, I want to enable two-factor authentication so that my account is protected."
+
+Acceptance Criteria: "TOTP codes must be generated using HMAC-SHA1 with a 30-second time step per RFC 6238."', 2, 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 29, 25),
+
+('00000000-0000-0000-0000-000000000130', 'Which is the primary weakness of the following acceptance criteria?
+
+User Story: "As a customer, I want to view my saved addresses so that I can reuse them at checkout."
+
+Acceptance Criteria: "The address list should load fast and look clean."', 2, 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 30, 25),
+
+('00000000-0000-0000-0000-000000000131', 'Which is the primary weakness of the following acceptance criteria?
+
+User Story: "As a customer, I want to set a delivery time window so that I know when to expect my package."
+
+Acceptance Criteria:
+- The delivery window can be changed until 1 hour before delivery.
+- The delivery window cannot be changed once set.
+- The delivery window can always be changed, even after delivery.', 3, 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 31, 25),
+
+('00000000-0000-0000-0000-000000000132', 'Which is the primary weakness of the following acceptance criteria?
+
+User Story: "As a customer, I want to receive product recommendations so that I can discover new items."
+
+Acceptance Criteria:
+- Recommendations are generated using a collaborative-filtering model hosted on AWS SageMaker.
+- Results are cached in Redis with a 10-minute TTL.', 3, 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 32, 25),
+
+('00000000-0000-0000-0000-000000000133', 'Which is the primary weakness of the following acceptance criteria?
+
+User Story: "As a customer, I want to merge duplicate accounts so that I have a single profile."
+
+Acceptance Criteria: "Account merging works correctly."', 3, 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 33, 25),
+
+('00000000-0000-0000-0000-000000000134', 'Which is the primary weakness of the following acceptance criteria?
+
+User Story: "As a customer, I want to complete registration so that I can create an account."
+
+Acceptance Criteria:
+- Email is verified.
+- Welcome email is sent.
+- Loyalty account is created.
+- Referral bonus is applied.
+- Newsletter preference is set.
+- Analytics event is logged.', 3, 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 34, 25),
+
+('00000000-0000-0000-0000-000000000135', 'Which is the primary weakness of the following acceptance criteria?
+
+User Story: "As an administrator, I want to review flagged content so that I can moderate the platform."
+
+Acceptance Criteria: "The moderation dashboard should feel intuitive."', 3, 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 35, 25),
+
+('00000000-0000-0000-0000-000000000136', 'Which is the primary weakness of the following acceptance criteria?
+
+User Story: "As a customer, I want to schedule a recurring order so that I do not have to reorder manually."
+
+Acceptance Criteria: "Scheduling should be fast, flexible, reliable, and easy to use."', 3, 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 36, 25);
 
 
 -- =====================================================================
@@ -609,6 +1029,132 @@ INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
 ('00000000-0000-0000-0001-000000001183', 'The criterion is too short.', 'Incorrect: length is not the core issue here.', false),
 ('00000000-0000-0000-0001-000000001184', 'The criterion contains multiple actors.', 'Incorrect: only the customer is involved.', false);
 
+-- Question 19 ("Order tracking should work well")
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000001191', 'The acceptance criterion is too vague.', 'Correct: "work well" gives no measurable or testable condition.', true),
+('00000000-0000-0000-0001-000000001192', 'The acceptance criterion is too detailed.', 'Incorrect: the criterion is under-specified, not over-specified.', false),
+('00000000-0000-0000-0001-000000001193', 'The acceptance criterion contains too many actors.', 'Incorrect: no actors are mentioned in the criterion at all.', false),
+('00000000-0000-0000-0001-000000001194', 'The acceptance criterion is too long.', 'Incorrect: length is not the problem here; vagueness is.', false);
+
+-- Question 20 ("Filtering should be quick")
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000001201', '"Quick" is not measurable.', 'Correct: without a concrete threshold (e.g. under 1 second), this cannot be objectively tested.', true),
+('00000000-0000-0000-0001-000000001202', 'Too many acceptance criteria are defined.', 'Incorrect: only a single criterion is given.', false),
+('00000000-0000-0000-0001-000000001203', 'The criterion contains implementation details.', 'Incorrect: no technology or implementation is mentioned.', false),
+('00000000-0000-0000-0001-000000001204', 'The criterion contains multiple user stories.', 'Incorrect: it relates to a single user story.', false);
+
+-- Question 21 ("photo gallery should look great")
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000001211', 'The criterion is subjective.', 'Correct: "look great" is a matter of opinion and cannot be objectively verified.', true),
+('00000000-0000-0000-0001-000000001212', 'The criterion is too technical.', 'Incorrect: no technical detail is described.', false),
+('00000000-0000-0000-0001-000000001213', 'The criterion contains multiple actors.', 'Incorrect: no actor is even mentioned in the criterion.', false),
+('00000000-0000-0000-0001-000000001214', 'The criterion is too detailed.', 'Incorrect: the criterion is actually under-specified, not overly detailed.', false);
+
+-- Question 22 ("Review submission must never fail")
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000001221', 'The criterion is unrealistic.', 'Correct: no system can guarantee submission "never" fails (e.g. network outages); this cannot be truthfully tested.', true),
+('00000000-0000-0000-0001-000000001222', 'The criterion is too specific.', 'Incorrect: the criterion is in fact too broad/absolute, not overly specific.', false),
+('00000000-0000-0000-0001-000000001223', 'The criterion contains implementation details.', 'Incorrect: no implementation is described.', false),
+('00000000-0000-0000-0001-000000001224', 'The criterion is missing a title.', 'Incorrect: acceptance criteria don''t require a separate title field to be valid.', false);
+
+-- Question 23 ("homepage should be appealing")
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000001231', '"Appealing" is subjective.', 'Correct: "appealing" has no objective, testable definition.', true),
+('00000000-0000-0000-0001-000000001232', 'The criterion is too long.', 'Incorrect: the criterion is short, not long.', false),
+('00000000-0000-0000-0001-000000001233', 'The criterion specifies implementation.', 'Incorrect: no technology or implementation is mentioned.', false),
+('00000000-0000-0000-0001-000000001234', 'The criterion contains multiple stories.', 'Incorrect: it relates to a single user story.', false);
+
+-- Question 24 ("discount code feature should function properly")
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000001241', '"Properly" is too vague.', 'Correct: "properly" does not define any measurable or testable behavior.', true),
+('00000000-0000-0000-0001-000000001242', 'The criterion is too technical.', 'Incorrect: no technical detail is described.', false),
+('00000000-0000-0000-0001-000000001243', 'The criterion contains multiple actors.', 'Incorrect: no actor is mentioned in the criterion.', false),
+('00000000-0000-0000-0001-000000001244', 'The criterion is too detailed.', 'Incorrect: the criterion is under-specified, not overly detailed.', false);
+
+-- Question 25 ("Returns are accepted")
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000001251', 'Important business conditions are missing.', 'Correct: conditions such as the return window or the item''s required condition are not defined.', true),
+('00000000-0000-0000-0001-000000001252', 'The criterion is too technical.', 'Incorrect: no implementation or technology is mentioned.', false),
+('00000000-0000-0000-0001-000000001253', 'The criterion is too detailed.', 'Incorrect: the criterion is under-specified, not overly detailed.', false),
+('00000000-0000-0000-0001-000000001254', 'The criterion contains multiple actors.', 'Incorrect: no actor is mentioned at all.', false);
+
+-- Question 26 ("green confirmation banner slides in using CSS animations")
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000001261', 'The criterion specifies implementation details.', 'Correct: describing a "green banner" and "CSS animations" defines the technical solution rather than observable behavior.', true),
+('00000000-0000-0000-0001-000000001262', 'The criterion is too vague.', 'Incorrect: the criterion is very specific, not vague.', false),
+('00000000-0000-0000-0001-000000001263', 'The criterion is too short.', 'Incorrect: length is not the issue here.', false),
+('00000000-0000-0000-0001-000000001264', 'The criterion contains multiple user stories.', 'Incorrect: it relates to a single user story.', false);
+
+-- Question 27 (filter: under one second / results are useful)
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000001271', '"Useful" is subjective.', 'Correct: "useful" is not objectively defined or measurable, unlike the one-second criterion.', true),
+('00000000-0000-0000-0001-000000001272', 'There are too many criteria.', 'Incorrect: two criteria for one story is a reasonable amount.', false),
+('00000000-0000-0000-0001-000000001273', 'The criteria contain implementation details.', 'Incorrect: no technology or implementation is described.', false),
+('00000000-0000-0000-0001-000000001274', 'The criteria are too technical.', 'Incorrect: the criteria describe outcomes, not technical solutions.', false);
+
+-- Question 28 (export: users can export / the export is safe)
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000001281', '"Safe" is not measurable.', 'Correct: "safe" has no defined, testable condition (e.g. encryption standard, access control requirement).', true),
+('00000000-0000-0000-0001-000000001282', 'The criteria are too detailed.', 'Incorrect: the criteria are actually under-specified.', false),
+('00000000-0000-0000-0001-000000001283', 'Too many actors exist.', 'Incorrect: only the customer is involved.', false),
+('00000000-0000-0000-0001-000000001284', 'The criteria describe implementation.', 'Incorrect: no specific technology or implementation is named.', false);
+
+-- Question 29 ("TOTP codes via HMAC-SHA1, 30-second step, RFC 6238")
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000001291', 'The criterion specifies implementation rather than behavior.', 'Correct: naming the exact algorithm, hash function, and time step describes a technical solution instead of an observable, user-facing outcome.', true),
+('00000000-0000-0000-0001-000000001292', 'The criterion is too vague.', 'Incorrect: the criterion is highly specific, not vague.', false),
+('00000000-0000-0000-0001-000000001293', 'The criterion contains multiple stories.', 'Incorrect: it relates to a single user story.', false),
+('00000000-0000-0000-0001-000000001294', 'The criterion is too long.', 'Incorrect: length is not the core issue here.', false);
+
+-- Question 30 ("load fast and look clean")
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000001301', 'The criteria contain subjective wording.', 'Correct: both "fast" and "clean" are subjective and lack measurable thresholds.', true),
+('00000000-0000-0000-0001-000000001302', 'Too many acceptance criteria exist.', 'Incorrect: only one combined criterion is given.', false),
+('00000000-0000-0000-0001-000000001303', 'The criteria are too detailed.', 'Incorrect: the criteria are under-specified, not overly detailed.', false),
+('00000000-0000-0000-0001-000000001304', 'The criteria specify implementation.', 'Incorrect: no technology or implementation is described.', false);
+
+-- Question 31 (contradicting delivery-window criteria)
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000001311', 'The acceptance criteria contradict each other.', 'Correct: allowing changes until 1 hour before delivery, forbidding changes once set, and always allowing changes cannot all be true at once.', true),
+('00000000-0000-0000-0001-000000001312', 'The criteria are too technical.', 'Incorrect: no technology or implementation is mentioned.', false),
+('00000000-0000-0000-0001-000000001313', 'The criteria contain multiple actors.', 'Incorrect: only the customer is involved.', false),
+('00000000-0000-0000-0001-000000001314', 'The criteria are too detailed.', 'Incorrect: the real issue is the contradiction, not the level of detail.', false);
+
+-- Question 32 (SageMaker collaborative filtering / Redis TTL)
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000001321', 'The criteria describe implementation instead of observable behavior.', 'Correct: naming the specific model, hosting platform, and caching strategy specifies the technical solution rather than a user-visible outcome.', true),
+('00000000-0000-0000-0001-000000001322', 'The criteria are too vague.', 'Incorrect: the criteria are very specific, not vague.', false),
+('00000000-0000-0000-0001-000000001323', 'The criteria are too short.', 'Incorrect: length is not the issue here.', false),
+('00000000-0000-0000-0001-000000001324', 'The criteria contain multiple stories.', 'Incorrect: they relate to a single user story.', false);
+
+-- Question 33 ("Account merging works correctly")
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000001331', 'The criterion cannot be objectively verified.', 'Correct: "works correctly" defines no concrete, testable condition.', true),
+('00000000-0000-0000-0001-000000001332', 'The criterion is too detailed.', 'Incorrect: the criterion is under-specified, not overly detailed.', false),
+('00000000-0000-0000-0001-000000001333', 'The criterion contains implementation.', 'Incorrect: no technology or implementation is described.', false),
+('00000000-0000-0000-0001-000000001334', 'The criterion contains multiple actors.', 'Incorrect: no actor is mentioned in the criterion.', false);
+
+-- Question 34 (6 unrelated registration criteria)
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000001341', 'The acceptance criteria cover multiple independent behaviors and may be too broad for a single story.', 'Correct: email verification, welcome email, loyalty account, referral bonus, newsletter preference, and analytics are largely independent concerns that likely belong to separate stories.', true),
+('00000000-0000-0000-0001-000000001342', 'The criteria are too technical.', 'Incorrect: the criteria describe outcomes, not implementation.', false),
+('00000000-0000-0000-0001-000000001343', 'The criteria are too short.', 'Incorrect: there are six criteria, which is not "too short".', false),
+('00000000-0000-0000-0001-000000001344', 'The criteria contain multiple actors.', 'Incorrect: only the customer is involved.', false);
+
+-- Question 35 ("moderation dashboard should feel intuitive")
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000001351', '"Intuitive" is subjective and not measurable.', 'Correct: "intuitive" has no objective, testable definition.', true),
+('00000000-0000-0000-0001-000000001352', 'The criterion is too detailed.', 'Incorrect: the criterion is under-specified, not overly detailed.', false),
+('00000000-0000-0000-0001-000000001353', 'The criterion specifies implementation.', 'Incorrect: no technology or implementation is described.', false),
+('00000000-0000-0000-0001-000000001354', 'The criterion contains multiple stories.', 'Incorrect: it relates to a single user story.', false);
+
+-- Question 36 ("fast, flexible, reliable, and easy to use")
+INSERT INTO answer (answer_id, option_text, explanation, is_correct) VALUES
+('00000000-0000-0000-0001-000000001361', 'The criterion combines multiple subjective quality attributes that are not objectively testable.', 'Correct: "fast", "flexible", "reliable", and "easy to use" are all vague quality terms without measurable thresholds.', true),
+('00000000-0000-0000-0001-000000001362', 'The criterion contains implementation details.', 'Incorrect: no technology or implementation is mentioned.', false),
+('00000000-0000-0000-0001-000000001363', 'The criterion is too short.', 'Incorrect: length is not the core issue here.', false),
+('00000000-0000-0000-0001-000000001364', 'The criterion contains multiple actors.', 'Incorrect: only the customer is involved.', false);
+
 
 -- =====================================================================
 -- 3) QUESTION_TO_ANSWER (mapping)
@@ -704,4 +1250,112 @@ INSERT INTO question_to_answer (question_id, answer_id) VALUES
 ('00000000-0000-0000-0000-000000000118', '00000000-0000-0000-0001-000000001181'),
 ('00000000-0000-0000-0000-000000000118', '00000000-0000-0000-0001-000000001182'),
 ('00000000-0000-0000-0000-000000000118', '00000000-0000-0000-0001-000000001183'),
-('00000000-0000-0000-0000-000000000118', '00000000-0000-0000-0001-000000001184');
+('00000000-0000-0000-0000-000000000118', '00000000-0000-0000-0001-000000001184'),
+-- Q19
+('00000000-0000-0000-0000-000000000119', '00000000-0000-0000-0001-000000001191'),
+('00000000-0000-0000-0000-000000000119', '00000000-0000-0000-0001-000000001192'),
+('00000000-0000-0000-0000-000000000119', '00000000-0000-0000-0001-000000001193'),
+('00000000-0000-0000-0000-000000000119', '00000000-0000-0000-0001-000000001194'),
+-- Q20
+('00000000-0000-0000-0000-000000000120', '00000000-0000-0000-0001-000000001201'),
+('00000000-0000-0000-0000-000000000120', '00000000-0000-0000-0001-000000001202'),
+('00000000-0000-0000-0000-000000000120', '00000000-0000-0000-0001-000000001203'),
+('00000000-0000-0000-0000-000000000120', '00000000-0000-0000-0001-000000001204'),
+-- Q21
+('00000000-0000-0000-0000-000000000121', '00000000-0000-0000-0001-000000001211'),
+('00000000-0000-0000-0000-000000000121', '00000000-0000-0000-0001-000000001212'),
+('00000000-0000-0000-0000-000000000121', '00000000-0000-0000-0001-000000001213'),
+('00000000-0000-0000-0000-000000000121', '00000000-0000-0000-0001-000000001214'),
+-- Q22
+('00000000-0000-0000-0000-000000000122', '00000000-0000-0000-0001-000000001221'),
+('00000000-0000-0000-0000-000000000122', '00000000-0000-0000-0001-000000001222'),
+('00000000-0000-0000-0000-000000000122', '00000000-0000-0000-0001-000000001223'),
+('00000000-0000-0000-0000-000000000122', '00000000-0000-0000-0001-000000001224'),
+-- Q23
+('00000000-0000-0000-0000-000000000123', '00000000-0000-0000-0001-000000001231'),
+('00000000-0000-0000-0000-000000000123', '00000000-0000-0000-0001-000000001232'),
+('00000000-0000-0000-0000-000000000123', '00000000-0000-0000-0001-000000001233'),
+('00000000-0000-0000-0000-000000000123', '00000000-0000-0000-0001-000000001234'),
+-- Q24
+('00000000-0000-0000-0000-000000000124', '00000000-0000-0000-0001-000000001241'),
+('00000000-0000-0000-0000-000000000124', '00000000-0000-0000-0001-000000001242'),
+('00000000-0000-0000-0000-000000000124', '00000000-0000-0000-0001-000000001243'),
+('00000000-0000-0000-0000-000000000124', '00000000-0000-0000-0001-000000001244'),
+-- Q25
+('00000000-0000-0000-0000-000000000125', '00000000-0000-0000-0001-000000001251'),
+('00000000-0000-0000-0000-000000000125', '00000000-0000-0000-0001-000000001252'),
+('00000000-0000-0000-0000-000000000125', '00000000-0000-0000-0001-000000001253'),
+('00000000-0000-0000-0000-000000000125', '00000000-0000-0000-0001-000000001254'),
+-- Q26
+('00000000-0000-0000-0000-000000000126', '00000000-0000-0000-0001-000000001261'),
+('00000000-0000-0000-0000-000000000126', '00000000-0000-0000-0001-000000001262'),
+('00000000-0000-0000-0000-000000000126', '00000000-0000-0000-0001-000000001263'),
+('00000000-0000-0000-0000-000000000126', '00000000-0000-0000-0001-000000001264'),
+-- Q27
+('00000000-0000-0000-0000-000000000127', '00000000-0000-0000-0001-000000001271'),
+('00000000-0000-0000-0000-000000000127', '00000000-0000-0000-0001-000000001272'),
+('00000000-0000-0000-0000-000000000127', '00000000-0000-0000-0001-000000001273'),
+('00000000-0000-0000-0000-000000000127', '00000000-0000-0000-0001-000000001274'),
+-- Q28
+('00000000-0000-0000-0000-000000000128', '00000000-0000-0000-0001-000000001281'),
+('00000000-0000-0000-0000-000000000128', '00000000-0000-0000-0001-000000001282'),
+('00000000-0000-0000-0000-000000000128', '00000000-0000-0000-0001-000000001283'),
+('00000000-0000-0000-0000-000000000128', '00000000-0000-0000-0001-000000001284'),
+-- Q29
+('00000000-0000-0000-0000-000000000129', '00000000-0000-0000-0001-000000001291'),
+('00000000-0000-0000-0000-000000000129', '00000000-0000-0000-0001-000000001292'),
+('00000000-0000-0000-0000-000000000129', '00000000-0000-0000-0001-000000001293'),
+('00000000-0000-0000-0000-000000000129', '00000000-0000-0000-0001-000000001294'),
+-- Q30
+('00000000-0000-0000-0000-000000000130', '00000000-0000-0000-0001-000000001301'),
+('00000000-0000-0000-0000-000000000130', '00000000-0000-0000-0001-000000001302'),
+('00000000-0000-0000-0000-000000000130', '00000000-0000-0000-0001-000000001303'),
+('00000000-0000-0000-0000-000000000130', '00000000-0000-0000-0001-000000001304'),
+-- Q31
+('00000000-0000-0000-0000-000000000131', '00000000-0000-0000-0001-000000001311'),
+('00000000-0000-0000-0000-000000000131', '00000000-0000-0000-0001-000000001312'),
+('00000000-0000-0000-0000-000000000131', '00000000-0000-0000-0001-000000001313'),
+('00000000-0000-0000-0000-000000000131', '00000000-0000-0000-0001-000000001314'),
+-- Q32
+('00000000-0000-0000-0000-000000000132', '00000000-0000-0000-0001-000000001321'),
+('00000000-0000-0000-0000-000000000132', '00000000-0000-0000-0001-000000001322'),
+('00000000-0000-0000-0000-000000000132', '00000000-0000-0000-0001-000000001323'),
+('00000000-0000-0000-0000-000000000132', '00000000-0000-0000-0001-000000001324'),
+-- Q33
+('00000000-0000-0000-0000-000000000133', '00000000-0000-0000-0001-000000001331'),
+('00000000-0000-0000-0000-000000000133', '00000000-0000-0000-0001-000000001332'),
+('00000000-0000-0000-0000-000000000133', '00000000-0000-0000-0001-000000001333'),
+('00000000-0000-0000-0000-000000000133', '00000000-0000-0000-0001-000000001334'),
+-- Q34
+('00000000-0000-0000-0000-000000000134', '00000000-0000-0000-0001-000000001341'),
+('00000000-0000-0000-0000-000000000134', '00000000-0000-0000-0001-000000001342'),
+('00000000-0000-0000-0000-000000000134', '00000000-0000-0000-0001-000000001343'),
+('00000000-0000-0000-0000-000000000134', '00000000-0000-0000-0001-000000001344'),
+-- Q35
+('00000000-0000-0000-0000-000000000135', '00000000-0000-0000-0001-000000001351'),
+('00000000-0000-0000-0000-000000000135', '00000000-0000-0000-0001-000000001352'),
+('00000000-0000-0000-0000-000000000135', '00000000-0000-0000-0001-000000001353'),
+('00000000-0000-0000-0000-000000000135', '00000000-0000-0000-0001-000000001354'),
+-- Q36
+('00000000-0000-0000-0000-000000000136', '00000000-0000-0000-0001-000000001361'),
+('00000000-0000-0000-0000-000000000136', '00000000-0000-0000-0001-000000001362'),
+('00000000-0000-0000-0000-000000000136', '00000000-0000-0000-0001-000000001363'),
+('00000000-0000-0000-0000-000000000136', '00000000-0000-0000-0001-000000001364');
+
+
+-- #####################################################################
+-- REQ-GAM-DL-2: Title Definitions
+--
+-- One title per (activity_type, difficulty_level), per the acceptance
+-- criteria design table.
+--
+-- To re-run: DELETE FROM title_definition;
+-- #####################################################################
+
+INSERT INTO title_definition (title_definition_id, activity_type, difficulty_level, title_name) VALUES
+('00000000-0000-0000-0002-000000000001', 'IDENTIFY_WEAK_USER_STORIES', 1, 'Story Apprentice'),
+('00000000-0000-0000-0002-000000000002', 'IDENTIFY_WEAK_USER_STORIES', 2, 'Story Analyst'),
+('00000000-0000-0000-0002-000000000003', 'IDENTIFY_WEAK_USER_STORIES', 3, 'Story Expert'),
+('00000000-0000-0000-0002-000000000004', 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 1, 'Criteria Apprentice'),
+('00000000-0000-0000-0002-000000000005', 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 2, 'Criteria Analyst'),
+('00000000-0000-0000-0002-000000000006', 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 3, 'Criteria Expert');
