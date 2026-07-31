@@ -4,14 +4,10 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { ImageCropModal } from '../../components/ImageCropModal';
-import { getStoredAccessToken } from '../../lib/authClient';
-
-type Profile = { user_id: string; username: string; biography: string; avatar_url: string | null; role: string };
+import { useUser } from '../../components/UserProvider';
 
 export default function ProfilePage() {
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [token, setToken] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { token, profile, loading, setProfile } = useUser();
   const [error, setError] = useState('');
 
   const [editing, setEditing] = useState(false);
@@ -26,24 +22,12 @@ export default function ProfilePage() {
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Profile itself is already loaded (or loading) via UserProvider in the
+  // root layout — this just keeps the biography textarea in sync whenever
+  // the shared profile changes (initial load, create, save, avatar upload).
   useEffect(() => {
-    const stored = getStoredAccessToken();
-    setToken(stored);
-    if (!stored) { setLoading(false); return; }
-    fetchProfile(stored);
-  }, []);
-
-  async function fetchProfile(accessToken: string) {
-    setLoading(true);
-    const res = await fetch('/api/profile', {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    const data = await res.json();
-    setLoading(false);
-    if (!res.ok) { setError(data.error || 'Failed to load profile.'); return; }
-    setProfile(data.profile);
-    if (data.profile) setBiography(data.profile.biography);
-  }
+    if (profile) setBiography(profile.biography);
+  }, [profile]);
 
   async function handleCreate(event: React.FormEvent) {
     event.preventDefault();

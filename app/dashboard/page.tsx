@@ -10,7 +10,7 @@ import {
   getRecentHistory,
   RecentEntry,
 } from "../../lib/activityStore";
-import { useAccessToken } from "../../lib/useAccessToken";
+import { useUser } from "../../components/UserProvider";
 
 type ContinueTarget = {
   slug: string;
@@ -21,7 +21,7 @@ type ContinueTarget = {
 };
 
 export default function DashboardPage() {
-  const { token, loading } = useAccessToken();
+  const { token, profile, loading } = useUser();
   const [statesBySlug, setStatesBySlug] = useState<Record<
     string,
     ActivityState
@@ -116,8 +116,10 @@ export default function DashboardPage() {
   return (
     <AppShell active="dashboard" rightbar={rightbar}>
       <div className="dash-hero-wrap relative mb-2 inline-block rounded-2xl bg-[#1b1642] px-5 py-3">
-        <h2 className="dash-hero relative inline-block text-3xl font-extrabold leading-tight">
-          Welcome back, Anna!
+        <h2
+          className={`dash-hero relative inline-block text-3xl font-extrabold leading-tight transition-opacity duration-300 ${loading ? "opacity-0" : "opacity-100"}`}
+        >
+          Welcome back{profile?.username ? `, ${profile.username}` : ""}!
         </h2>
         <span
           className="dash-sparkle"

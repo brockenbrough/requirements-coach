@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { getCumulativeScore, getHighestTitleOverall } from '../lib/activityStore';
-import { clearStoredAccessToken } from '../lib/authClient';
+import { getInitials } from '../lib/initials';
+import { useUser } from './UserProvider';
 
 type NavKey = 'dashboard' | 'activities' | 'profile';
 
@@ -93,6 +94,7 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   const router = useRouter();
+  const { profile, loading: userLoading, signOut } = useUser();
   const [score, setScore] = useState(0);
   const [levelLine, setLevelLine] = useState('Getting started');
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -104,7 +106,7 @@ export function AppShell({
   }, []);
 
   function handleLogout() {
-    clearStoredAccessToken();
+    signOut();
     router.push('/login');
   }
 
@@ -142,10 +144,22 @@ export function AppShell({
         <div className="mb-5 text-xl font-extrabold text-[#FFD666]">Requirements Coach</div>
 
         <div className="mb-4 text-center">
-          <div className="mx-auto mb-2 flex h-16 w-16 items-center justify-center rounded-full border-[3px] border-[#FFD666] bg-[#241f52] font-extrabold text-[#FFD666]">
-            AS
+          <div
+            className={`mx-auto mb-2 flex h-16 w-16 items-center justify-center overflow-hidden rounded-full border-[3px] border-brand-gold bg-brand-navy-2 font-extrabold text-brand-gold transition-opacity duration-300 ${
+              userLoading ? 'animate-pulse opacity-60' : 'opacity-100'
+            }`}
+          >
+            {profile?.avatar_url ? (
+              <img src={profile.avatar_url} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <span>{userLoading ? '' : getInitials(profile?.username)}</span>
+            )}
           </div>
-          <div className="text-sm font-extrabold text-white">Anna Student</div>
+          <div
+            className={`text-sm font-extrabold text-white transition-opacity duration-300 ${userLoading ? 'opacity-0' : 'opacity-100'}`}
+          >
+            {profile?.username ?? 'Guest'}
+          </div>
           <div className="mt-0.5 text-xs font-bold text-[#A79FC9]">{levelLine}</div>
         </div>
 
