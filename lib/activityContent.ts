@@ -1,3 +1,5 @@
+import type { ActivityType } from './activityTypes';
+
 export type ActivitySlug = 'weak-user-stories' | 'weak-acceptance-criteria';
 
 export type Difficulty = 1 | 2 | 3;
@@ -20,6 +22,12 @@ export type Question = {
 
 export type ActivityDefinition = {
   slug: ActivitySlug;
+  /**
+   * The activity_type the API knows this activity by. The UI routes by slug, the
+   * database keys on activity_type, and this is the only place the two are tied
+   * together — see lib/activityTypes.ts for the allowed values.
+   */
+  activityType: ActivityType;
   name: string;
   summary: string;
   instructions: string;
@@ -305,6 +313,7 @@ const weakAcceptanceCriteria: Question[] = [
 export const ACTIVITIES: ActivityDefinition[] = [
   {
     slug: 'weak-user-stories',
+    activityType: 'IDENTIFY_WEAK_USER_STORIES',
     name: 'Identify Weak User Stories',
     summary: 'Spot the weakest of four user stories and see why it fails the INVEST criteria.',
     instructions:
@@ -315,6 +324,7 @@ export const ACTIVITIES: ActivityDefinition[] = [
   },
   {
     slug: 'weak-acceptance-criteria',
+    activityType: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA',
     name: 'Identify Weak Acceptance Criteria',
     summary: 'Given a user story, find the acceptance criterion that is unclear, incomplete, or not testable.',
     instructions:
