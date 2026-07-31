@@ -5,9 +5,11 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { register } from '../../lib/authClient';
 import { PasswordField } from '../../components/PasswordField';
+import { useUser } from '../../components/UserProvider';
 
 export default function RegisterPage() {
   const router = useRouter();
+  const { refresh } = useUser();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
@@ -26,6 +28,10 @@ export default function RegisterPage() {
       return;
     }
 
+    // No `user` row exists yet at this point (created on the profile page),
+    // but this still loads the token into the shared context so the sidebar
+    // isn't stuck showing a signed-out state on the next screen.
+    await refresh();
     // Registration only creates the auth user; the `user` row is created on the
     // profile page, so send new students there to finish setting up.
     router.push('/profile');

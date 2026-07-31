@@ -5,9 +5,11 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { login } from '../../lib/authClient';
 import { PasswordField } from '../../components/PasswordField';
+import { useUser } from '../../components/UserProvider';
 
 export default function LoginPage() {
   const router = useRouter();
+  const { refresh } = useUser();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
@@ -26,6 +28,10 @@ export default function LoginPage() {
       return;
     }
 
+    // Load the profile into the shared context before navigating, so the
+    // dashboard renders with the real name/avatar already in place instead
+    // of a loading flash.
+    await refresh();
     router.push('/dashboard');
   }
 
