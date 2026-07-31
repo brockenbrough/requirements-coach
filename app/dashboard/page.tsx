@@ -119,7 +119,7 @@ export default function DashboardPage() {
         <h2
           className={`dash-hero relative inline-block text-3xl font-extrabold leading-tight transition-opacity duration-300 ${loading ? "opacity-0" : "opacity-100"}`}
         >
-          Welcome back{profile?.username ? `, ${profile.username}` : ""}!
+          Welcome back{profile?.first_name ? `, ${profile.first_name}` : profile?.username ? `, ${profile.username}` : ""}!
         </h2>
         <span
           className="dash-sparkle"

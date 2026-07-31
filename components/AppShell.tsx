@@ -152,7 +152,7 @@ export function AppShell({
             {profile?.avatar_url ? (
               <img src={profile.avatar_url} alt="" className="h-full w-full object-cover" />
             ) : (
-              <span>{userLoading ? '' : getInitials(profile?.username)}</span>
+              <span>{userLoading ? '' : getInitials(profile?.first_name, profile?.last_name, profile?.username)}</span>
             )}
           </div>
           <div
