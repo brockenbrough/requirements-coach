@@ -53,6 +53,13 @@ type AnswerRow = {
 
 export type SessionPosition = { position: number; question_id: string };
 
+export type QuestionOption = {
+  answer_id: string;
+  option_text: string;
+  explanation: string | null;
+  is_correct: boolean;
+};
+
 /** The student's running session for one activity type, or null. */
 export async function findInProgressSession(
   supabase: SupabaseClient,
@@ -105,6 +112,28 @@ export async function loadSessionPositions(supabase: SupabaseClient, sessionId: 
     .eq('session_id', sessionId);
 
   return { positions: (data ?? []) as SessionPosition[], error };
+}
+
+/**
+ * All options of one question *with* the solution — is_correct, explanation and option_text.
+ *
+ * Only for the feedback route, and only after answered_question_log proves the student has
+ * already committed an answer. Everything the client sees before that goes through
+ * loadSessionQuestions, which deliberately omits these columns.
+ */
+export async function loadQuestionOptions(supabase: SupabaseClient, questionId: string) {
+  const { data, error } = await supabase
+    .from('question_to_answer')
+    .select('answer:answer_id ( answer_id, option_text, explanation, is_correct )')
+    .eq('question_id', questionId);
+
+  if (error) return { options: null, error };
+
+  const options = ((data ?? []) as unknown as { answer: QuestionOption | null }[])
+    .map((row) => row.answer)
+    .filter((answer): answer is QuestionOption => answer !== null);
+
+  return { options, error: null };
 }
 
 /** Answers already submitted, including the feedback they have already earned. */
