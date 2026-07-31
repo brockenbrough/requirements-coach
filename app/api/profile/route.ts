@@ -2,6 +2,20 @@ import { getSupabaseClient } from '../../../lib/supabase';
 
 const PROFILE_COLUMNS = 'user_id, username, biography, avatar_url, role, first_name, last_name, age, semester';
 
+const MIN_AGE = 1;
+const MAX_AGE = 129;
+const MIN_SEMESTER = 1;
+const MAX_SEMESTER = 20;
+
+/** Returns an error message when `value` is set but outside [min, max]; null (unset) is always allowed. */
+function rangeError(value: number | null | undefined, min: number, max: number, field: string): string | null {
+  if (value === undefined || value === null) return null;
+  if (!Number.isInteger(value) || value < min || value > max) {
+    return `${field} must be a whole number between ${min} and ${max}.`;
+  }
+  return null;
+}
+
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
   return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
@@ -43,13 +57,33 @@ export async function POST(request: Request) {
   if (!user) return Response.json({ error: 'Invalid or expired token.' }, { status: 401 });
 
   const body = await request.json();
-  const { username, biography } = body as { username?: string; biography?: string };
+  const { username, biography, first_name, last_name, age, semester } = body as {
+    username?: string;
+    biography?: string;
+    first_name?: string | null;
+    last_name?: string | null;
+    age?: number | null;
+    semester?: number | null;
+  };
 
   if (!username) return Response.json({ error: 'username is required.' }, { status: 400 });
 
+  const ageError = rangeError(age, MIN_AGE, MAX_AGE, 'age');
+  if (ageError) return Response.json({ error: ageError }, { status: 400 });
+  const semesterError = rangeError(semester, MIN_SEMESTER, MAX_SEMESTER, 'semester');
+  if (semesterError) return Response.json({ error: semesterError }, { status: 400 });
+
   const { data, error } = await supabase!
     .from('user')
-    .insert({ user_id: user.id, username, biography: biography ?? '' })
+    .insert({
+      user_id: user.id,
+      username,
+      biography: biography ?? '',
+      first_name: first_name?.trim() || null,
+      last_name: last_name?.trim() || null,
+      age: age ?? null,
+      semester: semester ?? null,
+    })
     .select(PROFILE_COLUMNS)
     .single();
 
@@ -57,11 +91,6 @@ export async function POST(request: Request) {
 
   return Response.json({ profile: data }, { status: 201 });
 }
-
-const MIN_AGE = 1;
-const MAX_AGE = 129;
-const MIN_SEMESTER = 1;
-const MAX_SEMESTER = 20;
 
 export async function PATCH(request: Request) {
   const token = getToken(request);
@@ -87,19 +116,14 @@ export async function PATCH(request: Request) {
   if (last_name !== undefined) updates.last_name = last_name?.trim() || null;
 
   if (age !== undefined) {
-    if (age !== null && (!Number.isInteger(age) || age < MIN_AGE || age > MAX_AGE)) {
-      return Response.json({ error: `age must be a whole number between ${MIN_AGE} and ${MAX_AGE}.` }, { status: 400 });
-    }
+    const ageError = rangeError(age, MIN_AGE, MAX_AGE, 'age');
+    if (ageError) return Response.json({ error: ageError }, { status: 400 });
     updates.age = age;
   }
 
   if (semester !== undefined) {
-    if (semester !== null && (!Number.isInteger(semester) || semester < MIN_SEMESTER || semester > MAX_SEMESTER)) {
-      return Response.json(
-        { error: `semester must be a whole number between ${MIN_SEMESTER} and ${MAX_SEMESTER}.` },
-        { status: 400 }
-      );
-    }
+    const semesterError = rangeError(semester, MIN_SEMESTER, MAX_SEMESTER, 'semester');
+    if (semesterError) return Response.json({ error: semesterError }, { status: 400 });
     updates.semester = semester;
   }
 
