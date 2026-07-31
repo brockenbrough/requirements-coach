@@ -4,6 +4,25 @@
 
 :root {
   color-scheme: dark;
+
+  /* Brand design tokens: single source of truth, consumed both by
+     tailwind.config.js (theme.extend.colors.brand) and by raw CSS in
+     styled-jsx blocks (e.g. app/dashboard/page.tsx). */
+  --rc-navy: #1b1642;
+  --rc-navy-2: #241f52;
+  --rc-navy-border: #332b6b;
+  --rc-void: #0e0b1e;
+  --rc-purple: #7c4dff;
+  --rc-purple-dark: #6234d1;
+  --rc-purple-glow: #8b5cf6;
+  --rc-teal: #2dd4bf;
+  --rc-teal-dark: #0f7d70;
+  --rc-teal-ink: #04241f;
+  --rc-gold: #ffd666;
+  --rc-danger: #ff6b57;
+  --rc-danger-light: #ff8a75;
+  --rc-text: #f3f1ff;
+  --rc-text-muted: #a79fc9;
 }
 
 html, body {
