@@ -78,14 +78,18 @@ export async function GET(request: Request) {
 
   return Response.json(
     {
-      sessions: sessions.map((session) => ({
-        ...session,
-        ...(progress!.get(session.session_id) ?? {
-          questionCount: 0,
-          answeredCount: 0,
-          nextPosition: null,
-        }),
-      })),
+      // Picked field by field rather than spread: loadProgressForSessions also carries the
+      // drawn question ids, and a list view has no use for them.
+      sessions: sessions.map((session) => {
+        const sessionProgress = progress!.get(session.session_id);
+
+        return {
+          ...session,
+          questionCount: sessionProgress?.questionCount ?? 0,
+          answeredCount: sessionProgress?.answeredCount ?? 0,
+          nextPosition: sessionProgress?.nextPosition ?? null,
+        };
+      }),
     },
     { status: 200 },
   );
