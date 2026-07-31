@@ -177,14 +177,6 @@ export function AppShell({
           </span>
         </nav>
 
-        <Link
-          href="/activities"
-          onClick={closeDrawer}
-          className="mb-5 block min-h-[44px] w-full rounded-[10px] bg-[#2DD4BF] px-3 py-2.5 text-center text-sm font-extrabold leading-[1.6] text-[#04241f]"
-        >
-          Browse Activities
-        </Link>
-
         <div className="flex gap-2">
           <span
             className="flex h-11 w-11 cursor-default items-center justify-center rounded-[9px] border border-[#332b6b] bg-[#241f52] text-[#A79FC9]"

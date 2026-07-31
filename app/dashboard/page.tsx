@@ -107,12 +107,9 @@ export default function DashboardPage() {
           ))}
         </div>
       )}
-      <Link
-        href="/activities"
-        className="block w-full rounded-[10px] border border-[#2DD4BF] py-2.5 text-center text-sm font-extrabold text-[#2DD4BF]"
-      >
+      <span className="block w-full cursor-default rounded-[10px] border border-[#2DD4BF]/40 py-2.5 text-center text-sm font-extrabold text-[#2DD4BF]/60">
         View Full Log
-      </Link>
+      </span>
     </>
   );
 
