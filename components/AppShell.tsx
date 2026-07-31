@@ -185,10 +185,6 @@ export function AppShell({
               </Link>
             );
           })}
-          <span className="flex min-h-[44px] cursor-default items-center gap-2.5 rounded-[10px] px-3 py-2.5 text-sm font-bold text-[#5c5480]">
-            <GearIcon />
-            Settings
-          </span>
         </nav>
 
         <div className="flex gap-2">
