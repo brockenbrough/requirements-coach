@@ -64,6 +64,21 @@ CREATE TABLE badge (
     badge_image_uri text,
     PRIMARY KEY (badge_id));
 
+-- ---------------------------------------------------------------------
+-- REQ-GAM-DL-2: Title Definition Storage
+--
+-- Maps (activity_type, difficulty_level) to a title name (e.g. "Story
+-- Apprentice"). A student's current title is derived at query time
+-- (REQ-GAM-BL-1) by looking up the highest passed difficulty_level per
+-- activity_type here — nothing about a title is stored on the student.
+-- ---------------------------------------------------------------------
+CREATE TABLE title_definition (
+    title_definition_id uuid        NOT NULL,
+    activity_type        varchar(50) NOT NULL,
+    difficulty_level      int2        NOT NULL,
+    title_name            text        NOT NULL,
+    PRIMARY KEY (title_definition_id));
+
 CREATE TABLE user_badge (
     user_badge_id uuid NOT NULL,
     created_at timestamp NOT NULL,
@@ -160,6 +175,12 @@ ALTER TABLE session_to_question ADD CONSTRAINT fk_session_to_question_question F
 -- =====================================================================
 
 ALTER TABLE question ADD CONSTRAINT ck_question_difficulty_level CHECK (difficulty_level BETWEEN 1 AND 3);
+
+-- REQ-GAM-DL-2.1: activity type restricted to the known set, one title per
+-- (activity_type, difficulty_level) pair so the BL-1 lookup is unambiguous.
+ALTER TABLE title_definition ADD CONSTRAINT ck_title_definition_difficulty_level CHECK (difficulty_level BETWEEN 1 AND 3);
+ALTER TABLE title_definition ADD CONSTRAINT ck_title_definition_activity_type CHECK (activity_type IN ('IDENTIFY_WEAK_USER_STORIES', 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA'));
+ALTER TABLE title_definition ADD CONSTRAINT uq_title_definition_activity_level UNIQUE (activity_type, difficulty_level);
 
 ALTER TABLE session_log ADD CONSTRAINT ck_session_log_status CHECK (status IN ('in-progress', 'completed', 'abandoned'));
 
@@ -260,7 +281,7 @@ CREATE POLICY own_answers_insert ON answered_question_log
 --
 --   DROP TABLE IF EXISTS session_to_question, answered_question_log,
 --                        session_log, question_to_answer, answer,
---                        question, user_badge, badge CASCADE;
+--                        question, user_badge, badge, title_definition CASCADE;
 --   DROP FUNCTION IF EXISTS bump_session_score() CASCADE;
 --
 -- Leaving "user" out of that list keeps the profiles.
