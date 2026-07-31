@@ -161,6 +161,9 @@ export type SessionProgress = {
   questionCount: number;
   answeredCount: number;
   nextPosition: number | null;
+  /** The drawn question ids in presentation order (REQ-DL-3.1). */
+  questionIds: string[];
+  lastQuestionIndex: number | null;
 };
 
 /**
@@ -204,10 +207,14 @@ export async function loadProgressForSessions(supabase: SupabaseClient, sessionI
   const progress = new Map<string, SessionProgress>();
 
   for (const [sessionId, { positions, answered }] of grouped) {
+    const ordered = [...positions].sort((a, b) => a.position - b.position);
+
     progress.set(sessionId, {
       questionCount: positions.length,
       answeredCount: answered.size,
       nextPosition: nextUnansweredPosition(positions, answered),
+      questionIds: ordered.map((row) => row.question_id),
+      lastQuestionIndex: lastAnsweredPosition(positions, answered),
     });
   }
 
@@ -228,4 +235,23 @@ export function nextUnansweredPosition(
   return positions
     .filter((row) => !answeredQuestionIds.has(row.question_id))
     .sort((a, b) => a.position - b.position)[0]?.position ?? null;
+}
+
+/**
+ * The highest position that already has an answer, or null when nothing is answered yet —
+ * REQ-DL-3.1's "index of the last question answered".
+ *
+ * Derived for the same reason as nextUnansweredPosition: a stored index is the one value two
+ * devices could disagree about. Highest rather than most recent, because answers can only be
+ * submitted for the next unanswered position, so the two coincide.
+ */
+export function lastAnsweredPosition(
+  positions: SessionPosition[],
+  answeredQuestionIds: Set<string>,
+): number | null {
+  const answered = positions
+    .filter((row) => answeredQuestionIds.has(row.question_id))
+    .sort((a, b) => b.position - a.position);
+
+  return answered[0]?.position ?? null;
 }
