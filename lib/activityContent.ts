@@ -339,6 +339,11 @@ export function getActivity(slug: string): ActivityDefinition | undefined {
   return ACTIVITIES.find((a) => a.slug === slug);
 }
 
+/** The counterpart to getActivity for anything coming back from the API, which keys on activity_type. */
+export function getActivityByType(activityType: string): ActivityDefinition | undefined {
+  return ACTIVITIES.find((a) => a.activityType === activityType);
+}
+
 export function questionsForLevel(activity: ActivityDefinition, level: Difficulty): Question[] {
   return activity.questionBank.filter((q) => q.difficulty === level);
 }

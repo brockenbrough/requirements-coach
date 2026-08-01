@@ -48,6 +48,13 @@ export type SessionAnswer = {
   explanation: string | null;
 };
 
+/** A session as the list endpoint returns it: the record plus how far it got. */
+export type SessionListEntry = SessionRecord & {
+  questionCount: number;
+  answeredCount: number;
+  nextPosition: number | null;
+};
+
 export type StartSessionResult = {
   session: SessionRecord;
   questions: SessionQuestion[];
@@ -157,6 +164,20 @@ export function startSession(token: string, activityType: ActivityType) {
 export function loadCurrentSession(token: string, activityType: ActivityType) {
   return request<CurrentSessionResult>(
     `/api/sessions/current?activityType=${encodeURIComponent(activityType)}`,
+    { method: 'GET' },
+    token,
+  );
+}
+
+/**
+ * The student's sessions in one status, across every activity type, newest started first.
+ *
+ * The cross-activity counterpart to loadCompletedAttempts: this one answers "what did I do
+ * lately", that one "how did I do at this activity". Neither carries questions or answers.
+ */
+export function loadSessions(token: string, status: 'in-progress' | 'completed' | 'abandoned') {
+  return request<{ sessions: SessionListEntry[] }>(
+    `/api/sessions?status=${status}`,
     { method: 'GET' },
     token,
   );
