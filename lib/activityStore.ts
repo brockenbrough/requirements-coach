@@ -8,8 +8,6 @@ export type HistoryEntry = {
   completedAt: string;
 };
 
-export type RecentEntry = HistoryEntry & { activitySlug: ActivitySlug; activityName: string };
-
 export type InProgressSession = {
   level: Difficulty;
   questionIds: string[];
@@ -168,32 +166,6 @@ export function getBestScore(slug: ActivitySlug): { score: number; maxScore: num
   const state = getActivityState(slug);
   if (state.history.length === 0) return null;
   return state.history.reduce((best, h) => (h.score > best.score ? h : best), state.history[0]);
-}
-
-export function getCumulativeScore(): number {
-  let total = 0;
-  for (const activity of ACTIVITIES) {
-    const state = getActivityState(activity.slug);
-    const bestByLevel = new Map<Difficulty, number>();
-    for (const h of state.history) {
-      const current = bestByLevel.get(h.level) ?? 0;
-      if (h.score > current) bestByLevel.set(h.level, h.score);
-    }
-    for (const score of bestByLevel.values()) total += score;
-  }
-  return total;
-}
-
-export function getRecentHistory(limit = 5): RecentEntry[] {
-  const all: RecentEntry[] = [];
-  for (const activity of ACTIVITIES) {
-    const state = getActivityState(activity.slug);
-    for (const h of state.history) {
-      all.push({ ...h, activitySlug: activity.slug, activityName: activity.name });
-    }
-  }
-  all.sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
-  return all.slice(0, limit);
 }
 
 export function getHighestTitleOverall(): { title: string; activityName: string } | null {

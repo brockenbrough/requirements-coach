@@ -1,8 +1,8 @@
 'use client';
 
-// Single place where the UI talks to the session API routes, in the same spirit as
-// lib/authClient.ts for the auth routes: no page hand-rolls the Authorization header
-// or picks apart an error body.
+// Single place where the UI talks to the API routes behind a student's practice — sessions
+// and the progress derived from them — in the same spirit as lib/authClient.ts for the auth
+// routes: no page hand-rolls the Authorization header or picks apart an error body.
 //
 // The shapes below mirror what the routes actually return — notably, a question
 // carries its options *without* is_correct or explanation. Those only ever arrive
@@ -190,6 +190,21 @@ export function loadSessions(token: string, status: 'in-progress' | 'completed' 
 export function loadCompletedAttempts(token: string, activityType: ActivityType) {
   return request<{ attempts: CompletedAttempt[] }>(
     `/api/sessions/completed?activityType=${encodeURIComponent(activityType)}`,
+    { method: 'GET' },
+    token,
+  );
+}
+
+/**
+ * The student's cumulative score: the sum of their best passing score at each difficulty level
+ * of each activity type (REQ-GAM-DL-1). Derived from session history on every call, never
+ * stored, so it needs no invalidation — a fresh read after finishing an activity is enough.
+ *
+ * studentId has to be the authenticated student; the route answers 403 for anyone else.
+ */
+export function loadStudentScore(token: string, studentId: string) {
+  return request<{ score: number }>(
+    `/api/students/${encodeURIComponent(studentId)}/score`,
     { method: 'GET' },
     token,
   );
