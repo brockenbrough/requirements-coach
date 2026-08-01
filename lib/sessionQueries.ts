@@ -157,6 +157,67 @@ export async function loadSessionAnswers(supabase: SupabaseClient, sessionId: st
   return { answers, error: null };
 }
 
+/** One finished attempt, as a history list needs it (requirements.md:17, REQ-PL-2.8). */
+export type CompletedAttempt = {
+  sessionId: string;
+  difficultyLevel: number;
+  score: number;
+  maxScore: number;
+  passed: boolean;
+  completedAt: string | null;
+};
+
+// Only what a history row shows. user_id and activity_type are the filter, not the payload,
+// and status is 'completed' for every row here by definition — none of them need shipping.
+const COMPLETED_ATTEMPT_COLUMNS = 'session_id, difficulty_level, cumulative_score, max_score, passed, ended_at';
+
+type CompletedAttemptRow = {
+  session_id: string;
+  difficulty_level: number;
+  cumulative_score: number;
+  max_score: number;
+  passed: boolean;
+  ended_at: string | null;
+};
+
+/**
+ * Every completed attempt of one student at one activity type, newest first.
+ *
+ * Scoped to a single activity type on purpose: the cross-activity list is already served by
+ * GET /api/sessions?status=completed, and two ways to ask the same question drift apart.
+ *
+ * Sorted by ended_at, with started_at as a tiebreaker. Postgres orders DESC as NULLS FIRST,
+ * so a completed row without ended_at would otherwise jump to the top — completeSession always
+ * sets it, but the secondary key makes the order stable without relying on that.
+ */
+export async function loadCompletedAttempts(
+  supabase: SupabaseClient,
+  userId: string,
+  activityType: string,
+) {
+  const { data, error } = await supabase
+    .from('session_log')
+    .select(COMPLETED_ATTEMPT_COLUMNS)
+    .eq('user_id', userId)
+    .eq('activity_type', activityType)
+    .eq('status', 'completed')
+    .order('ended_at', { ascending: false })
+    .order('started_at', { ascending: false });
+
+  if (error) return { attempts: null, error };
+
+  const attempts: CompletedAttempt[] = ((data ?? []) as unknown as CompletedAttemptRow[]).map((row) => ({
+    sessionId: row.session_id,
+    difficultyLevel: row.difficulty_level,
+    score: row.cumulative_score,
+    maxScore: row.max_score,
+    passed: row.passed,
+    completedAt: row.ended_at,
+  }));
+
+  return { attempts, error: null };
+}
+
 export type SessionProgress = {
   questionCount: number;
   answeredCount: number;
