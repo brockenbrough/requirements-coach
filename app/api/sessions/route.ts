@@ -38,6 +38,11 @@ function shuffle<T>(items: T[]): T[] {
  * questions are answered, where to continue) so the page can render a list without calling
  * /api/sessions/current once per activity.
  *
+ * Newest first, by the timestamp that matters for the requested status: ended_at for sessions
+ * that are over, started_at for those still running. Callers that cut the list short — the
+ * dashboard shows the three most recent — therefore get the right ones, which they could not
+ * fix up themselves after the fact.
+ *
  * Questions and answers are deliberately not included: a list view does not need them, and
  * shipping the options of every open session just to draw progress bars is wasteful.
  */
@@ -58,12 +63,22 @@ export async function GET(request: Request) {
   const { data: { user }, error: authError } = await supabase.auth.getUser(token);
   if (authError || !user) return Response.json({ error: 'Invalid or expired token.' }, { status: 401 });
 
-  const { data: rows, error } = await supabase
+  const query = supabase
     .from('session_log')
     .select(SESSION_COLUMNS)
     .eq('user_id', user.id)
-    .eq('status', status)
-    .order('started_at', { ascending: false });
+    .eq('status', status);
+
+  // A session that is over is placed by when it ended, one that is still running by when it
+  // started — a finished attempt is "recent" because of when it finished, and that is also the
+  // date a history shows. 'abandoned' sets ended_at just like 'completed' does, so the split is
+  // running vs. over, not completed vs. the rest.
+  //
+  // started_at as a tiebreaker for the same reason as in loadCompletedAttempts: Postgres orders
+  // DESC as NULLS FIRST, so a finished row without ended_at would otherwise jump to the top.
+  const { data: rows, error } = await (status === 'in-progress'
+    ? query.order('started_at', { ascending: false })
+    : query.order('ended_at', { ascending: false }).order('started_at', { ascending: false }));
 
   if (error) return Response.json({ error: error.message }, { status: 500 });
 

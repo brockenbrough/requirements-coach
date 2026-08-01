@@ -9,6 +9,9 @@ const h = vi.hoisted(() => {
     inserts: [] as { table: string; payload: unknown }[],
     deletes: [] as string[],
     tables: [] as string[],
+    // Recorded rather than ignored: which column a list is sorted by is part of this
+    // endpoint's contract, and a no-op order() would let a wrong one pass unnoticed.
+    orders: [] as { table: string; column: string; ascending: boolean }[],
   };
 
   function makeBuilder(table: string, result: Result) {
@@ -16,7 +19,10 @@ const h = vi.hoisted(() => {
       select: () => builder,
       eq: () => builder,
       in: () => builder,
-      order: () => builder,
+      order: (column: string, opts?: { ascending?: boolean }) => {
+        state.orders.push({ table, column, ascending: opts?.ascending ?? true });
+        return builder;
+      },
       insert: (payload: unknown) => {
         state.inserts.push({ table, payload });
         return builder;
@@ -117,6 +123,7 @@ describe('POST /api/sessions', () => {
     h.state.inserts = [];
     h.state.deletes = [];
     h.state.tables = [];
+    h.state.orders = [];
   });
 
   it('returns 401 without a token', async () => {
@@ -326,6 +333,7 @@ describe('GET /api/sessions', () => {
     h.state.inserts = [];
     h.state.deletes = [];
     h.state.tables = [];
+    h.state.orders = [];
   });
 
   it('returns 401 without a token', async () => {
@@ -422,6 +430,45 @@ describe('GET /api/sessions', () => {
       answeredCount: 4,
       nextPosition: null,
     });
+  });
+
+  /** Only the session_log ordering — the progress lookups sort on their own columns. */
+  function sessionOrdering() {
+    return h.state.orders.filter((o) => o.table === 'session_log').map((o) => [o.column, o.ascending]);
+  }
+
+  // The list is cut short by callers (the dashboard shows three), so the wrong sort order
+  // does not just misplace an entry — it can drop the newest one entirely.
+  it('sorts completed sessions by when they ended', async () => {
+    queue('session_log', { data: [], error: null });
+
+    await GET(listReq('?status=completed'));
+
+    expect(sessionOrdering()).toEqual([
+      ['ended_at', false],
+      ['started_at', false],
+    ]);
+  });
+
+  // ended_at is null while a session runs, so there is nothing to sort on.
+  it('sorts running sessions by when they started', async () => {
+    queue('session_log', { data: [], error: null });
+
+    await GET(listReq());
+
+    expect(sessionOrdering()).toEqual([['started_at', false]]);
+  });
+
+  // Abandoning sets ended_at too, so the split is running vs. over — not completed vs. the rest.
+  it('sorts abandoned sessions by when they ended', async () => {
+    queue('session_log', { data: [], error: null });
+
+    await GET(listReq('?status=abandoned'));
+
+    expect(sessionOrdering()).toEqual([
+      ['ended_at', false],
+      ['started_at', false],
+    ]);
   });
 
   it('returns 500 when the progress lookup fails', async () => {
