@@ -10,9 +10,10 @@ function getToken(request: Request): string | null {
  * GET /api/students/{studentId}/score — the student's cumulative score across all activity
  * types and difficulty levels (REQ-GAM-DL-1, REQ-GAM-PL-1).
  *
- * The sum of the best passing score at each (activity_type, difficulty_level) pair — retaking a
- * level and scoring higher raises the total, and only passed sessions ever contribute. A
- * student with no passing sessions gets 0.
+ * The sum of the best score at each (activity_type, difficulty_level) pair, over the student's
+ * completed sessions — retaking a level raises the total only by beating the previous attempt,
+ * and a level is never counted twice. Passing is not required: a finished attempt keeps the
+ * points it earned. A student with no completed sessions gets 0.
  *
  * studentId must match the authenticated user — there is no instructor exception on this route.
  */

@@ -7,12 +7,18 @@ const h = vi.hoisted(() => {
   const state = {
     queues: {} as Record<string, Result[]>,
     tables: [] as string[],
+    // Which rows the sum is built from is the whole definition of this number, so the
+    // filters are recorded rather than swallowed.
+    filters: [] as { table: string; column: string; value: unknown }[],
   };
 
   function makeBuilder(table: string, result: Result) {
     const builder: Record<string, unknown> = {
       select: () => builder,
-      eq: () => builder,
+      eq: (column: string, value: unknown) => {
+        state.filters.push({ table, column, value });
+        return builder;
+      },
       // PostgrestFilterBuilder is thenable — queries without .single() are awaited directly.
       then: (onOk: (r: Result) => unknown, onErr?: (e: unknown) => unknown) =>
         Promise.resolve(result).then(onOk, onErr),
@@ -60,6 +66,7 @@ describe('GET /api/students/{studentId}/score', () => {
   beforeEach(() => {
     h.state.queues = {};
     h.state.tables = [];
+    h.state.filters = [];
   });
 
   it('returns 401 without a token', async () => {
@@ -80,8 +87,8 @@ describe('GET /api/students/{studentId}/score', () => {
     expect(h.state.tables).not.toContain('session_log');
   });
 
-  // AC 3: no passing sessions at all.
-  it('returns 0 when the student has no passing sessions', async () => {
+  // AC 3: no completed sessions at all.
+  it('returns 0 when the student has no completed sessions', async () => {
     queue('session_log', { data: [], error: null });
 
     const response = await GET(req(), ctx);
@@ -91,9 +98,33 @@ describe('GET /api/students/{studentId}/score', () => {
     expect(body.score).toBe(0);
   });
 
-  // AC 2: passed = true is filtered at the query, so a failed attempt never reaches here —
-  // this test just documents the expectation that the route only sums what it is given.
-  it('sums the passing sessions returned by the query', async () => {
+  // REQ-GAM-DL-1 counts completed sessions, not passed ones: the query filters on status,
+  // so a running or abandoned attempt never reaches the sum, while a finished-but-failed
+  // one keeps the points it earned.
+  it('scopes the query to the student and to completed sessions', async () => {
+    queue('session_log', { data: [], error: null });
+
+    await GET(req(), ctx);
+
+    expect(h.state.filters).toEqual([
+      { table: 'session_log', column: 'user_id', value: STUDENT_ID },
+      { table: 'session_log', column: 'status', value: 'completed' },
+    ]);
+  });
+
+  // A completed attempt below the 80% pass mark still contributes — passing is not the filter.
+  it('counts a completed session that was not passed', async () => {
+    queue('session_log', {
+      data: [{ activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 1, cumulative_score: 50 }],
+      error: null,
+    });
+
+    const body = await (await GET(req(), ctx)).json();
+
+    expect(body.score).toBe(50);
+  });
+
+  it('sums the completed sessions returned by the query', async () => {
     queue('session_log', {
       data: [
         { activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 1, cumulative_score: 80 },
@@ -109,7 +140,7 @@ describe('GET /api/students/{studentId}/score', () => {
     expect(body.score).toBe(180);
   });
 
-  // AC 1: the best passing score per (activity_type, difficulty_level) — a retake that scores
+  // AC 1: the best score per (activity_type, difficulty_level) — a retake that scores
   // higher raises the total, but the level is not double-counted.
   it('counts only the best score per activity type and difficulty level', async () => {
     queue('session_log', {

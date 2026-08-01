@@ -3,14 +3,12 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AppShell } from "../../components/AppShell";
-import { ACTIVITIES, Difficulty } from "../../lib/activityContent";
-import {
-  ActivityState,
-  getActivityState,
-  getRecentHistory,
-  RecentEntry,
-} from "../../lib/activityStore";
+import { ACTIVITIES, Difficulty, getActivityByType } from "../../lib/activityContent";
+import { ActivityState, getActivityState } from "../../lib/activityStore";
+import { type SessionListEntry, loadSessions } from "../../lib/sessionClient";
 import { useUser } from "../../components/UserProvider";
+
+const RECENT_LIMIT = 3;
 
 type ContinueTarget = {
   slug: string;
@@ -26,7 +24,7 @@ export default function DashboardPage() {
     string,
     ActivityState
   > | null>(null);
-  const [recent, setRecent] = useState<RecentEntry[]>([]);
+  const [recent, setRecent] = useState<SessionListEntry[] | null>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -35,7 +33,22 @@ export default function DashboardPage() {
       entries[activity.slug] = getActivityState(activity.slug);
     }
     setStatesBySlug(entries);
-    setRecent(getRecentHistory(3));
+  }, [token]);
+
+  // The completed sessions across all activity types. The route sorts them newest first, so
+  // the most recent ones are simply the head of the list — there is no limit parameter.
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+
+    loadSessions(token, "completed").then((result) => {
+      if (cancelled) return;
+      if (result.ok) setRecent(result.data.sessions.slice(0, RECENT_LIMIT));
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [token]);
 
   if (loading) return null;
@@ -78,15 +91,17 @@ export default function DashboardPage() {
       <h3 className="mb-4 flex items-center gap-2 text-sm font-extrabold text-white">
         Recent activity
       </h3>
-      {recent.length === 0 ? (
+      {/* null means the list has not come back yet — only a loaded, genuinely empty
+          history gets the "nothing here" copy. */}
+      {recent === null ? null : recent.length === 0 ? (
         <p className="text-sm font-semibold text-[#A79FC9]">
           No completed attempts yet — finish a round to see it here.
         </p>
       ) : (
         <div className="relative mb-4 pl-6">
           <span className="absolute bottom-1.5 left-[11px] top-1.5 w-px bg-[#332b6b]" />
-          {recent.map((entry, i) => (
-            <div key={i} className="relative mb-5 last:mb-0">
+          {recent.map((entry) => (
+            <div key={entry.session_id} className="relative mb-5 last:mb-0">
               <span
                 className={`absolute -left-6 top-0 flex h-6 w-6 items-center justify-center rounded-full border-2 border-[#1b1642] text-xs ${
                   entry.passed
@@ -97,11 +112,16 @@ export default function DashboardPage() {
                 {entry.passed ? "✓" : "•"}
               </span>
               <div className="text-sm font-bold leading-tight text-white">
-                {entry.activityName} · Level {entry.level}
+                {/* Falls back to the raw activity_type: a question bank seeded with a type the
+                    UI does not know about should still show up, just unprettified. */}
+                {getActivityByType(entry.activity_type)?.name ?? entry.activity_type} · Level{" "}
+                {entry.difficulty_level}
               </div>
               <div className="mt-0.5 text-xs font-semibold text-[#A79FC9]">
-                {new Date(entry.completedAt).toLocaleDateString()} ·{" "}
-                {entry.score}/{entry.maxScore}
+                {entry.ended_at
+                  ? new Date(entry.ended_at).toLocaleDateString()
+                  : "—"}{" "}
+                · {entry.cumulative_score}/{entry.max_score}
               </div>
             </div>
           ))}

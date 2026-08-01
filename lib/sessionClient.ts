@@ -1,8 +1,8 @@
 'use client';
 
-// Single place where the UI talks to the session API routes, in the same spirit as
-// lib/authClient.ts for the auth routes: no page hand-rolls the Authorization header
-// or picks apart an error body.
+// Single place where the UI talks to the API routes behind a student's practice — sessions
+// and the progress derived from them — in the same spirit as lib/authClient.ts for the auth
+// routes: no page hand-rolls the Authorization header or picks apart an error body.
 //
 // The shapes below mirror what the routes actually return — notably, a question
 // carries its options *without* is_correct or explanation. Those only ever arrive
@@ -48,6 +48,13 @@ export type SessionAnswer = {
   explanation: string | null;
 };
 
+/** A session as the list endpoint returns it: the record plus how far it got. */
+export type SessionListEntry = SessionRecord & {
+  questionCount: number;
+  answeredCount: number;
+  nextPosition: number | null;
+};
+
 export type StartSessionResult = {
   session: SessionRecord;
   questions: SessionQuestion[];
@@ -71,6 +78,17 @@ export type SubmitAnswerResult = {
   answeredCount: number;
   nextPosition: number | null;
   completed: boolean;
+};
+
+/** One finished attempt, as GET /api/sessions/completed returns it. */
+export type CompletedAttempt = {
+  sessionId: string;
+  difficultyLevel: number;
+  score: number;
+  maxScore: number;
+  passed: boolean;
+  /** Nullable because session_log.ended_at is. */
+  completedAt: string | null;
 };
 
 export type FeedbackOption = {
@@ -146,6 +164,47 @@ export function startSession(token: string, activityType: ActivityType) {
 export function loadCurrentSession(token: string, activityType: ActivityType) {
   return request<CurrentSessionResult>(
     `/api/sessions/current?activityType=${encodeURIComponent(activityType)}`,
+    { method: 'GET' },
+    token,
+  );
+}
+
+/**
+ * The student's sessions in one status, across every activity type, newest started first.
+ *
+ * The cross-activity counterpart to loadCompletedAttempts: this one answers "what did I do
+ * lately", that one "how did I do at this activity". Neither carries questions or answers.
+ */
+export function loadSessions(token: string, status: 'in-progress' | 'completed' | 'abandoned') {
+  return request<{ sessions: SessionListEntry[] }>(
+    `/api/sessions?status=${status}`,
+    { method: 'GET' },
+    token,
+  );
+}
+
+/**
+ * The student's finished attempts at one activity, newest first. An empty list is a normal
+ * 200 — a student who has not completed anything yet simply has no history.
+ */
+export function loadCompletedAttempts(token: string, activityType: ActivityType) {
+  return request<{ attempts: CompletedAttempt[] }>(
+    `/api/sessions/completed?activityType=${encodeURIComponent(activityType)}`,
+    { method: 'GET' },
+    token,
+  );
+}
+
+/**
+ * The student's cumulative score: the sum of their best passing score at each difficulty level
+ * of each activity type (REQ-GAM-DL-1). Derived from session history on every call, never
+ * stored, so it needs no invalidation — a fresh read after finishing an activity is enough.
+ *
+ * studentId has to be the authenticated student; the route answers 403 for anyone else.
+ */
+export function loadStudentScore(token: string, studentId: string) {
+  return request<{ score: number }>(
+    `/api/students/${encodeURIComponent(studentId)}/score`,
     { method: 'GET' },
     token,
   );

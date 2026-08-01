@@ -6,16 +6,25 @@ import type { SupabaseClient } from './sessionQueries';
 type SessionRow = { activity_type: string; difficulty_level: number; cumulative_score: number };
 
 /**
- * Sum of the best passing score at each (activity_type, difficulty_level) pair for the student.
- * Retaking a level and scoring higher raises the total; a session that was not passed never
- * contributes. A student with no passing sessions gets 0.
+ * Sum of the student's best cumulative_score at each (activity_type, difficulty_level) pair,
+ * counting every completed session — REQ-GAM-DL-1's "for each difficulty level, find the
+ * highest score out of the completed sessions, add this score to the accumulated total".
+ *
+ * Only a level's best attempt counts, so retaking one raises the total only by scoring higher;
+ * a weaker retake changes nothing, and a level is never counted twice.
+ *
+ * Completed, not passed: an attempt that ended below the 80% threshold still earned its points
+ * and contributes them. Only sessions that are still running or were abandoned stay out — their
+ * cumulative_score is a partial tally of an attempt that was never finished.
+ *
+ * A student with no completed sessions gets 0.
  */
 export async function computeStudentScore(supabase: SupabaseClient, userId: string) {
   const { data, error } = await supabase
     .from('session_log')
     .select('activity_type, difficulty_level, cumulative_score')
     .eq('user_id', userId)
-    .eq('passed', true);
+    .eq('status', 'completed');
 
   if (error) return { score: null, error };
 

@@ -3,8 +3,9 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { getCumulativeScore, getHighestTitleOverall } from '../lib/activityStore';
+import { getHighestTitleOverall } from '../lib/activityStore';
 import { getInitials } from '../lib/initials';
+import { loadStudentScore } from '../lib/sessionClient';
 import { useUser } from './UserProvider';
 
 type NavKey = 'dashboard' | 'activities' | 'profile';
@@ -94,16 +95,33 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const { profile, loading: userLoading, signOut } = useUser();
-  const [score, setScore] = useState(0);
+  const { token, profile, loading: userLoading, signOut } = useUser();
+  const [score, setScore] = useState<number | null>(null);
   const [levelLine, setLevelLine] = useState('Getting started');
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   useEffect(() => {
-    setScore(getCumulativeScore());
     const best = getHighestTitleOverall();
     setLevelLine(best ? best.title : 'Getting started');
   }, []);
+
+  // AppShell is rendered by each page rather than by the layout, so this re-runs on every
+  // navigation — returning from a finished activity picks up the new total by itself.
+  const userId = profile?.user_id;
+
+  useEffect(() => {
+    if (!token || !userId) return;
+    let cancelled = false;
+
+    loadStudentScore(token, userId).then((result) => {
+      if (cancelled) return;
+      if (result.ok) setScore(result.data.score);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, userId]);
 
   function handleLogout() {
     signOut();
@@ -163,8 +181,10 @@ export function AppShell({
           <div className="mt-0.5 text-xs font-bold text-[#A79FC9]">{levelLine}</div>
         </div>
 
+        {/* A dash until the number is actually known: 0 is a real score for a new student,
+            so showing it while loading would state something that may well be wrong. */}
         <div className="mb-5 rounded-full bg-[#7C4DFF] px-4 py-1.5 text-center text-sm font-extrabold text-white">
-          Score: {score.toLocaleString()}
+          Score: {score === null ? '—' : score.toLocaleString()}
         </div>
 
         <nav className="mb-5 flex flex-col gap-1">
