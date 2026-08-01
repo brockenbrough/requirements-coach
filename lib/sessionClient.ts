@@ -73,6 +73,17 @@ export type SubmitAnswerResult = {
   completed: boolean;
 };
 
+/** One finished attempt, as GET /api/sessions/completed returns it. */
+export type CompletedAttempt = {
+  sessionId: string;
+  difficultyLevel: number;
+  score: number;
+  maxScore: number;
+  passed: boolean;
+  /** Nullable because session_log.ended_at is. */
+  completedAt: string | null;
+};
+
 export type FeedbackOption = {
   answerId: string;
   optionText: string;
@@ -146,6 +157,18 @@ export function startSession(token: string, activityType: ActivityType) {
 export function loadCurrentSession(token: string, activityType: ActivityType) {
   return request<CurrentSessionResult>(
     `/api/sessions/current?activityType=${encodeURIComponent(activityType)}`,
+    { method: 'GET' },
+    token,
+  );
+}
+
+/**
+ * The student's finished attempts at one activity, newest first. An empty list is a normal
+ * 200 — a student who has not completed anything yet simply has no history.
+ */
+export function loadCompletedAttempts(token: string, activityType: ActivityType) {
+  return request<{ attempts: CompletedAttempt[] }>(
+    `/api/sessions/completed?activityType=${encodeURIComponent(activityType)}`,
     { method: 'GET' },
     token,
   );

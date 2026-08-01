@@ -6,10 +6,15 @@ import { useEffect, useState } from 'react';
 import { AppShell } from '../../../components/AppShell';
 import { getActivity } from '../../../lib/activityContent';
 import { abandonSession, ActivityState, getActivityState } from '../../../lib/activityStore';
-import { loadCurrentSession, startSession } from '../../../lib/sessionClient';
+import {
+  type CompletedAttempt,
+  loadCompletedAttempts,
+  loadCurrentSession,
+  startSession,
+} from '../../../lib/sessionClient';
 import { useAccessToken } from '../../../lib/useAccessToken';
 
-const DIFFICULTY_LABEL = { 1: 'Easy', 2: 'Medium', 3: 'Hard' } as const;
+const DIFFICULTY_LABEL: Record<number, string> = { 1: 'Easy', 2: 'Medium', 3: 'Hard' };
 
 export default function ActivityDetailPage({ params }: { params: { slug: string } }) {
   const router = useRouter();
@@ -17,6 +22,7 @@ export default function ActivityDetailPage({ params }: { params: { slug: string 
   const activity = getActivity(params.slug);
   const [state, setState] = useState<ActivityState | null>(null);
   const [hasServerSession, setHasServerSession] = useState(false);
+  const [attempts, setAttempts] = useState<CompletedAttempt[] | null>(null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<{ message: string; needsProfile: boolean } | null>(null);
 
@@ -25,15 +31,22 @@ export default function ActivityDetailPage({ params }: { params: { slug: string 
     setState(getActivityState(activity.slug));
   }, [token, activity]);
 
-  // Only to label the button: starting is idempotent, so Start and Continue run the
-  // same call — uq_session_log_one_active guarantees there is at most one to resume.
+  // Both reads in one pass, because the page re-runs this on every return from /play:
+  // the running session decides the button label (starting is idempotent, so Start and
+  // Continue are the same call), the finished ones fill the history below it.
   useEffect(() => {
     if (!token || !activity) return;
     let cancelled = false;
 
-    loadCurrentSession(token, activity.activityType).then((result) => {
+    Promise.all([
+      loadCurrentSession(token, activity.activityType),
+      loadCompletedAttempts(token, activity.activityType),
+    ]).then(([current, completed]) => {
       if (cancelled) return;
-      if (result.ok) setHasServerSession(result.data.session !== null);
+      if (current.ok) setHasServerSession(current.data.session !== null);
+      // An empty list and a failed read are different things, so the history only
+      // renders once it is actually known — null keeps it out of the way until then.
+      if (completed.ok) setAttempts(completed.data.attempts);
     });
 
     return () => {
@@ -168,32 +181,46 @@ export default function ActivityDetailPage({ params }: { params: { slug: string 
           )}
         </div>
 
-        {state && state.history.length > 0 ? (
-          <div className="mt-6 overflow-hidden rounded-2xl border border-[#332b6b]">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-[#1b1642] text-[#A79FC9]">
-                  <th className="px-4 py-2.5 text-left font-bold">Date</th>
-                  <th className="px-4 py-2.5 text-left font-bold">Level</th>
-                  <th className="px-4 py-2.5 text-left font-bold">Score</th>
-                  <th className="px-4 py-2.5 text-left font-bold">Result</th>
-                </tr>
-              </thead>
-              <tbody>
-                {state.history.map((entry, i) => (
-                  <tr key={i} className="border-t border-[#332b6b] bg-[#241f52] text-[#F3F1FF]">
-                    <td className="px-4 py-2.5">{new Date(entry.completedAt).toLocaleDateString()}</td>
-                    <td className="px-4 py-2.5">
-                      {DIFFICULTY_LABEL[entry.level]} · {entry.level}
-                    </td>
-                    <td className="px-4 py-2.5 tabular-nums">
-                      {entry.score} / {entry.maxScore}
-                    </td>
-                    <td className="px-4 py-2.5">{entry.passed ? 'Passed' : 'Not passed'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {/* Completed attempts, newest first — the "list of prior results for the activity"
+            the opening page is meant to show. Still loading (null) renders nothing. */}
+        {attempts ? (
+          <div className="mt-6">
+            <h3 className="mb-3 text-sm font-extrabold text-gray-500">Previous attempts</h3>
+
+            {attempts.length === 0 ? (
+              <p className="rounded-brand-lg border border-gray-100 bg-gray-50 p-4 text-sm font-semibold text-gray-500">
+                You haven&apos;t completed this activity yet.
+              </p>
+            ) : (
+              <div className="overflow-x-auto rounded-2xl border border-[#332b6b]">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-[#1b1642] text-[#A79FC9]">
+                      <th className="px-4 py-2.5 text-left font-bold">Date</th>
+                      <th className="px-4 py-2.5 text-left font-bold">Level</th>
+                      <th className="px-4 py-2.5 text-left font-bold">Score</th>
+                      <th className="px-4 py-2.5 text-left font-bold">Result</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {attempts.map((attempt) => (
+                      <tr key={attempt.sessionId} className="border-t border-[#332b6b] bg-[#241f52] text-[#F3F1FF]">
+                        <td className="px-4 py-2.5">
+                          {attempt.completedAt ? new Date(attempt.completedAt).toLocaleDateString() : '—'}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          {DIFFICULTY_LABEL[attempt.difficultyLevel] ?? 'Level'} · {attempt.difficultyLevel}
+                        </td>
+                        <td className="px-4 py-2.5 tabular-nums">
+                          {attempt.score} / {attempt.maxScore}
+                        </td>
+                        <td className="px-4 py-2.5">{attempt.passed ? 'Passed' : 'Not passed'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         ) : null}
       </div>
