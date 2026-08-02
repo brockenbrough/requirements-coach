@@ -95,7 +95,7 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const { token, profile, loading: userLoading, signOut } = useUser();
+  const { token, profile, signOut } = useUser();
   const [score, setScore] = useState<number | null>(null);
   const [levelLine, setLevelLine] = useState('Getting started');
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -162,21 +162,27 @@ export function AppShell({
         <div className="mb-5 text-xl font-extrabold text-[#FFD666]">Requirements Coach</div>
 
         <div className="mb-4 text-center">
+          {/*
+            No identity is shown until a real profile is loaded — there is deliberately no
+            "Guest" / "?" placeholder. Until then this looks identical to the loading state,
+            covering both "still fetching" and "authenticated but no profile row yet", neither
+            of which should imply an unauthenticated fallback identity.
+          */}
           <div
             className={`mx-auto mb-2 flex h-16 w-16 items-center justify-center overflow-hidden rounded-full border-[3px] border-brand-gold bg-brand-navy-2 font-extrabold text-brand-gold transition-opacity duration-300 ${
-              userLoading ? 'animate-pulse opacity-60' : 'opacity-100'
+              profile ? 'opacity-100' : 'animate-pulse opacity-60'
             }`}
           >
             {profile?.avatar_url ? (
               <img src={profile.avatar_url} alt="" className="h-full w-full object-cover" />
-            ) : (
-              <span>{userLoading ? '' : getInitials(profile?.first_name, profile?.last_name, profile?.username)}</span>
-            )}
+            ) : profile ? (
+              <span>{getInitials(profile.first_name, profile.last_name, profile.username)}</span>
+            ) : null}
           </div>
           <div
-            className={`text-sm font-extrabold text-white transition-opacity duration-300 ${userLoading ? 'opacity-0' : 'opacity-100'}`}
+            className={`text-sm font-extrabold text-white transition-opacity duration-300 ${profile ? 'opacity-100' : 'opacity-0'}`}
           >
-            {profile?.username ?? 'Guest'}
+            {profile?.username}
           </div>
           <div className="mt-0.5 text-xs font-bold text-[#A79FC9]">{levelLine}</div>
         </div>
