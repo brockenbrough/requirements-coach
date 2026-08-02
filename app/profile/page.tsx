@@ -8,6 +8,27 @@ import { ImageCropModal } from '../../components/ImageCropModal';
 import { useUser } from '../../components/UserProvider';
 import { getInitials } from '../../lib/initials';
 
+type ProfileDraft = {
+  first_name: string;
+  last_name: string;
+  age: string;
+  semester: string;
+  biography: string;
+};
+
+/**
+ * Same gear glyph as the sidebar Settings icon-button in AppShell.tsx, so
+ * "this icon means edit/configure" reads consistently across the app.
+ */
+function GearIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.5-2.3.9a7 7 0 0 0-2.1-1.2L14 3h-4l-.5 2.5a7 7 0 0 0-2.1 1.2l-2.3-.9-2 3.5 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.5 2.3-.9c.6.5 1.3.9 2.1 1.2L10 21h4l.5-2.5a7 7 0 0 0 2.1-1.2l2.3.9 2-3.5-2-1.5c.1-.4.1-.8.1-1.2Z" />
+    </svg>
+  );
+}
+
 export default function ProfilePage() {
   const { token, profile, loading, setProfile } = useUser();
   const [error, setError] = useState('');
@@ -20,11 +41,18 @@ export default function ProfilePage() {
   const [newSemester, setNewSemester] = useState('');
   const [newBiography, setNewBiography] = useState('');
 
+  // One editing flag for the whole card (instead of one per field): clicking the single
+  // "Edit Profile" button flips every field into an input at once, and draft holds every
+  // field's in-progress value until Save or Cancel resolves it.
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState<ProfileDraft | null>(null);
+  const [savingProfile, setSavingProfile] = useState(false);
+
   const [uploading, setUploading] = useState(false);
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  /** Shared with saveOptionalNumber's server round-trip below, but validates locally before the create POST. */
+  /** Shared by profile creation and handleSaveAll below — both need the same age/semester validation. */
   function parseOptionalNumber(raw: string, min: number, max: number): { value: number | null; error?: string } {
     const trimmed = raw.trim();
     if (trimmed === '') return { value: null };
@@ -78,16 +106,70 @@ export default function ProfilePage() {
     return null;
   }
 
-  function saveOptionalNumber(field: 'age' | 'semester', min: number, max: number) {
-    return async (raw: string): Promise<string | null> => {
-      const trimmed = raw.trim();
-      if (trimmed === '') return patchProfile({ [field]: null });
-      const n = Number(trimmed);
-      if (!Number.isInteger(n) || n < min || n > max) {
-        return `Please enter a whole number between ${min} and ${max}.`;
-      }
-      return patchProfile({ [field]: n });
+  function draftFromProfile(p: { first_name: string | null; last_name: string | null; age: number | null; semester: number | null; biography: string }): ProfileDraft {
+    return {
+      first_name: p.first_name ?? '',
+      last_name: p.last_name ?? '',
+      age: p.age != null ? String(p.age) : '',
+      semester: p.semester != null ? String(p.semester) : '',
+      biography: p.biography,
     };
+  }
+
+  function startEditing() {
+    if (!profile) return;
+    setDraft(draftFromProfile(profile));
+    setError('');
+    setIsEditing(true);
+  }
+
+  function cancelEditing() {
+    setIsEditing(false);
+    setDraft(null);
+    setError('');
+  }
+
+  function updateDraft<K extends keyof ProfileDraft>(field: K, value: ProfileDraft[K]) {
+    setDraft((current) => (current ? { ...current, [field]: value } : current));
+  }
+
+  /**
+   * Saves every changed field in one PATCH instead of one request per field — only fields
+   * whose draft value actually differs from the stored profile are sent.
+   */
+  async function handleSaveAll() {
+    if (!token || !profile || !draft) return;
+
+    const age = parseOptionalNumber(draft.age, 1, 129);
+    if (age.error) return setError(age.error);
+    const semester = parseOptionalNumber(draft.semester, 1, 20);
+    if (semester.error) return setError(semester.error);
+
+    const trimmedFirst = draft.first_name.trim();
+    const trimmedLast = draft.last_name.trim();
+
+    const updates: Record<string, unknown> = {};
+    if (trimmedFirst !== (profile.first_name ?? '')) updates.first_name = trimmedFirst;
+    if (trimmedLast !== (profile.last_name ?? '')) updates.last_name = trimmedLast;
+    if (age.value !== profile.age) updates.age = age.value;
+    if (semester.value !== profile.semester) updates.semester = semester.value;
+    if (draft.biography !== profile.biography) updates.biography = draft.biography;
+
+    if (Object.keys(updates).length === 0) {
+      cancelEditing();
+      return;
+    }
+
+    setError('');
+    setSavingProfile(true);
+    const err = await patchProfile(updates);
+    setSavingProfile(false);
+    if (err) {
+      setError(err);
+      return;
+    }
+    setIsEditing(false);
+    setDraft(null);
   }
 
   function handleAvatarChange(event: React.ChangeEvent<HTMLInputElement>) {
@@ -174,7 +256,7 @@ export default function ProfilePage() {
                   value={newFirstName}
                   onChange={(e) => setNewFirstName(e.target.value)}
                   className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-brand-navy outline-none transition focus:border-brand-purple"
-                  placeholder="Anna"
+                  placeholder="Enter your first name"
                 />
               </label>
               <label className="block text-sm font-bold text-gray-600">
@@ -184,7 +266,7 @@ export default function ProfilePage() {
                   value={newLastName}
                   onChange={(e) => setNewLastName(e.target.value)}
                   className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-brand-navy outline-none transition focus:border-brand-purple"
-                  placeholder="Student"
+                  placeholder="Enter your last name"
                 />
               </label>
               <div className="grid grid-cols-2 gap-4">
@@ -197,7 +279,7 @@ export default function ProfilePage() {
                     min={1}
                     max={129}
                     className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-brand-navy outline-none transition focus:border-brand-purple"
-                    placeholder="21"
+                    placeholder="Age in years"
                   />
                 </label>
                 <label className="block text-sm font-bold text-gray-600">
@@ -209,7 +291,7 @@ export default function ProfilePage() {
                     min={1}
                     max={20}
                     className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-brand-navy outline-none transition focus:border-brand-purple"
-                    placeholder="4"
+                    placeholder="Enter your current semester"
                   />
                 </label>
               </div>
@@ -262,44 +344,83 @@ export default function ProfilePage() {
               <h1 className="text-3xl font-extrabold text-[#1B1642]">{profile.username}</h1>
             </div>
 
+            {!isEditing ? (
+              <div className="mt-6 flex justify-center">
+                <button
+                  type="button"
+                  onClick={startEditing}
+                  className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-extrabold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple"
+                >
+                  <GearIcon />
+                  Edit Profile
+                </button>
+              </div>
+            ) : null}
+
             <EditableField
               label="First name"
-              value={profile.first_name ?? ''}
-              placeholder="Anna"
-              onSave={(v) => patchProfile({ first_name: v })}
+              editing={isEditing}
+              value={isEditing ? (draft?.first_name ?? '') : (profile.first_name ?? '')}
+              onChange={(v) => updateDraft('first_name', v)}
+              placeholder="Enter your first name"
             />
             <EditableField
               label="Last name"
-              value={profile.last_name ?? ''}
-              placeholder="Student"
-              onSave={(v) => patchProfile({ last_name: v })}
+              editing={isEditing}
+              value={isEditing ? (draft?.last_name ?? '') : (profile.last_name ?? '')}
+              onChange={(v) => updateDraft('last_name', v)}
+              placeholder="Enter your last name"
             />
             <EditableField
               label="Age"
-              value={profile.age != null ? String(profile.age) : ''}
+              editing={isEditing}
+              value={isEditing ? (draft?.age ?? '') : (profile.age != null ? String(profile.age) : '')}
+              onChange={(v) => updateDraft('age', v)}
               inputType="number"
               min={1}
               max={129}
-              placeholder="21"
-              onSave={saveOptionalNumber('age', 1, 129)}
+              placeholder="Age in years"
             />
             <EditableField
               label="Semester"
-              value={profile.semester != null ? String(profile.semester) : ''}
+              editing={isEditing}
+              value={isEditing ? (draft?.semester ?? '') : (profile.semester != null ? String(profile.semester) : '')}
+              onChange={(v) => updateDraft('semester', v)}
               inputType="number"
               min={1}
               max={20}
-              placeholder="4"
-              onSave={saveOptionalNumber('semester', 1, 20)}
+              placeholder="Enter your current semester"
             />
             <EditableField
               label="Biography"
-              value={profile.biography}
+              editing={isEditing}
+              value={isEditing ? (draft?.biography ?? '') : profile.biography}
+              onChange={(v) => updateDraft('biography', v)}
               emptyText="No biography yet."
               inputType="textarea"
               placeholder="Tell us about yourself…"
-              onSave={(v) => patchProfile({ biography: v })}
             />
+
+            {isEditing ? (
+              <div className="mt-6 flex gap-3">
+                <button
+                  type="button"
+                  onClick={handleSaveAll}
+                  disabled={savingProfile}
+                  className="rounded-xl bg-brand-purple px-4 py-2 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark disabled:opacity-70"
+                >
+                  {savingProfile ? 'Saving…' : 'Save'}
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelEditing}
+                  disabled={savingProfile}
+                  className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-bold text-gray-600 transition hover:border-gray-300 disabled:opacity-70"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : null}
           </>
         )}
       </section>
