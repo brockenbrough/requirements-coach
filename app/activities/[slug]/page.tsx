@@ -26,6 +26,12 @@ export default function ActivityDetailPage({ params }: { params: { slug: string 
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<{ message: string; needsProfile: boolean } | null>(null);
 
+  // No session, and we're done checking: send the user to a real "logged out"
+  // screen instead of leaving this page mounted with nothing to show.
+  useEffect(() => {
+    if (!loading && !token) router.replace('/login');
+  }, [loading, token, router]);
+
   useEffect(() => {
     if (!token || !activity) return;
     setState(getActivityState(activity.slug));

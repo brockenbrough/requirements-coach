@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppShell } from "../../components/AppShell";
 import { ACTIVITIES, Difficulty, getActivityByType } from "../../lib/activityContent";
@@ -19,12 +20,19 @@ type ContinueTarget = {
 };
 
 export default function DashboardPage() {
+  const router = useRouter();
   const { token, profile, loading } = useUser();
   const [statesBySlug, setStatesBySlug] = useState<Record<
     string,
     ActivityState
   > | null>(null);
   const [recent, setRecent] = useState<SessionListEntry[] | null>(null);
+
+  // No session, and we're done checking: send the user to a real "logged out"
+  // screen instead of leaving the dashboard mounted with nothing to show.
+  useEffect(() => {
+    if (!loading && !token) router.replace("/login");
+  }, [loading, token, router]);
 
   useEffect(() => {
     if (!token) return;

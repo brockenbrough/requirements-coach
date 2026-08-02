@@ -12,6 +12,12 @@ vi.mock('../../lib/supabase', () => {
         }
         return { data: { user: { email } }, error: null };
       }),
+      refreshSession: vi.fn(async ({ refresh_token }: { refresh_token: string }) => {
+        if (refresh_token === 'expired-refresh-token') {
+          return { data: { session: null }, error: { message: 'Refresh token expired' } };
+        }
+        return { data: { session: { access_token: 'new-access-token', refresh_token: 'new-refresh-token' } }, error: null };
+      }),
       admin: {
         createUser: vi.fn(async ({ email }: { email: string }) => {
           if (email === 'exists@example.com') {
@@ -32,6 +38,7 @@ vi.mock('../../lib/supabase', () => {
 
 import { POST as registerPost } from '../../app/api/auth/register/route';
 import { POST as loginPost } from '../../app/api/auth/login/route';
+import { POST as refreshPost } from '../../app/api/auth/refresh/route';
 
 describe('Auth API routes', () => {
   beforeEach(() => {
@@ -80,5 +87,40 @@ describe('Auth API routes', () => {
 
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ error: 'Invalid credentials' });
+  });
+
+  it('exchanges a refresh token for a fresh session', async () => {
+    const response = await refreshPost(new Request('http://localhost/api/auth/refresh', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ refresh_token: 'valid-refresh-token' }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      session: { session: { access_token: 'new-access-token', refresh_token: 'new-refresh-token' } },
+    });
+  });
+
+  it('rejects a missing refresh token', async () => {
+    const response = await refreshPost(new Request('http://localhost/api/auth/refresh', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'refresh_token is required.' });
+  });
+
+  it('rejects an expired refresh token', async () => {
+    const response = await refreshPost(new Request('http://localhost/api/auth/refresh', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ refresh_token: 'expired-refresh-token' }),
+    }));
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: 'Refresh token expired' });
   });
 });
