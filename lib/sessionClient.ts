@@ -9,6 +9,7 @@
 // from the feedback route, and only after the answer has been committed.
 
 import type { ActivityType } from './activityTypes';
+import { getCachedScore, setCachedScore } from './scoreStore';
 
 export type SessionRecord = {
   session_id: string;
@@ -197,17 +198,36 @@ export function loadCompletedAttempts(token: string, activityType: ActivityType)
 
 /**
  * The student's cumulative score: the sum of their best passing score at each difficulty level
- * of each activity type (REQ-GAM-DL-1). Derived from session history on every call, never
- * stored, so it needs no invalidation — a fresh read after finishing an activity is enough.
+ * of each activity type (REQ-GAM-DL-1). Cached in localStorage (lib/scoreStore.ts) keyed by
+ * studentId, since it otherwise gets refetched on every AppShell mount i.e. every navigation.
+ * A plain call is served from the cache when present; pass forceRefresh to bypass it and
+ * re-cache the server's answer — the play flow does this once a session completes, since
+ * that's the only thing that actually changes the score.
  *
  * studentId has to be the authenticated student; the route answers 403 for anyone else.
  */
-export function loadStudentScore(token: string, studentId: string) {
+export function loadStudentScore(
+  token: string,
+  studentId: string,
+  options: { forceRefresh?: boolean } = {},
+) {
+  if (!options.forceRefresh) {
+    const cached = getCachedScore(studentId);
+    if (cached !== null) {
+      return Promise.resolve<ApiResult<{ score: number }>>({ ok: true, data: { score: cached } });
+    }
+  }
+
   return request<{ score: number }>(
     `/api/students/${encodeURIComponent(studentId)}/score`,
     { method: 'GET' },
     token,
-  );
+  ).then((result) => {
+    if (result.ok) {
+      setCachedScore(studentId, result.data.score);
+    }
+    return result;
+  });
 }
 
 /**
