@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { AppShell } from '../../../../components/AppShell';
 import { FeedbackCard } from '../../../../components/FeedbackCard';
 import { QuestionCard } from '../../../../components/QuestionCard';
+import { useUser } from '../../../../components/UserProvider';
 import { getActivity } from '../../../../lib/activityContent';
 import {
   type CurrentSessionResult,
@@ -13,6 +14,7 @@ import {
   type SessionQuestion,
   loadCurrentSession,
   loadFeedback,
+  loadStudentScore,
   submitAnswer,
 } from '../../../../lib/sessionClient';
 import { useAccessToken } from '../../../../lib/useAccessToken';
@@ -28,6 +30,7 @@ type AnswerOutcome = {
 export default function PlayActivityPage({ params }: { params: { slug: string } }) {
   const router = useRouter();
   const { token, loading } = useAccessToken();
+  const { profile } = useUser();
   const activity = getActivity(params.slug);
 
   const [session, setSession] = useState<CurrentSessionResult | null>(null);
@@ -152,6 +155,9 @@ export default function PlayActivityPage({ params }: { params: { slug: string } 
   function handleContinue() {
     if (!outcome) return;
     if (outcome.completed) {
+      if (token && profile?.user_id) {
+        void loadStudentScore(token, profile.user_id, { forceRefresh: true });
+      }
       router.push(`/activities/${activity!.slug}`);
       return;
     }
