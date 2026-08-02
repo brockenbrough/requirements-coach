@@ -9,6 +9,7 @@
 // from the feedback route, and only after the answer has been committed.
 
 import type { ActivityType } from './activityTypes';
+import { getCachedCompletedSessions, setCachedCompletedSessions } from './completedSessionsStore';
 import { getCachedScore, setCachedScore } from './scoreStore';
 
 export type SessionRecord = {
@@ -175,13 +176,40 @@ export function loadCurrentSession(token: string, activityType: ActivityType) {
  *
  * The cross-activity counterpart to loadCompletedAttempts: this one answers "what did I do
  * lately", that one "how did I do at this activity". Neither carries questions or answers.
+ *
+ * The 'completed' list is cached in localStorage (lib/completedSessionsStore.ts) keyed by
+ * studentId, since it's the one status the dashboard actually asks for on every mount.
+ * Pass studentId to opt into that cache; without it (or for 'in-progress'/'abandoned') this
+ * always hits the network, unchanged. forceRefresh bypasses the cache and re-caches the
+ * server's answer — the play flow does this once a session completes.
  */
-export function loadSessions(token: string, status: 'in-progress' | 'completed' | 'abandoned') {
+export function loadSessions(
+  token: string,
+  status: 'in-progress' | 'completed' | 'abandoned',
+  options: { studentId?: string; forceRefresh?: boolean } = {},
+) {
+  const { studentId, forceRefresh } = options;
+
+  if (status === 'completed' && studentId && !forceRefresh) {
+    const cached = getCachedCompletedSessions(studentId);
+    if (cached !== null) {
+      return Promise.resolve<ApiResult<{ sessions: SessionListEntry[] }>>({
+        ok: true,
+        data: { sessions: cached },
+      });
+    }
+  }
+
   return request<{ sessions: SessionListEntry[] }>(
     `/api/sessions?status=${status}`,
     { method: 'GET' },
     token,
-  );
+  ).then((result) => {
+    if (result.ok && status === 'completed' && studentId) {
+      setCachedCompletedSessions(studentId, result.data.sessions);
+    }
+    return result;
+  });
 }
 
 /**
