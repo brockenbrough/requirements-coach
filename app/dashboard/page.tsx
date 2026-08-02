@@ -49,7 +49,7 @@ export default function DashboardPage() {
     if (!token) return;
     let cancelled = false;
 
-    loadSessions(token, "completed").then((result) => {
+    loadSessions(token, "completed", { studentId: profile?.user_id }).then((result) => {
       if (cancelled) return;
       if (result.ok) setRecent(result.data.sessions.slice(0, RECENT_LIMIT));
     });
@@ -57,7 +57,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, profile?.user_id]);
 
   if (loading) return null;
 

@@ -14,6 +14,7 @@ import {
   type SessionQuestion,
   loadCurrentSession,
   loadFeedback,
+  loadSessions,
   loadStudentScore,
   submitAnswer,
 } from '../../../../lib/sessionClient';
@@ -173,6 +174,7 @@ export default function PlayActivityPage({ params }: { params: { slug: string } 
     if (outcome.completed) {
       if (token && profile?.user_id) {
         void loadStudentScore(token, profile.user_id, { forceRefresh: true });
+        void loadSessions(token, 'completed', { studentId: profile.user_id, forceRefresh: true });
       }
       router.push(`/activities/${activity!.slug}`);
       return;
