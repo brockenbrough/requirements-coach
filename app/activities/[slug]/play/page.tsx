@@ -38,6 +38,12 @@ export default function PlayActivityPage({ params }: { params: { slug: string } 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // No session, and we're done checking: send the user to a real "logged out"
+  // screen instead of leaving this page mounted with nothing to show.
+  useEffect(() => {
+    if (!loading && !token) router.replace('/login');
+  }, [loading, token, router]);
+
   /**
    * The server is the only source of progress — there is no stored "current question",
    * it is derived from which of the drawn questions have an answer logged. So resuming,
@@ -49,6 +55,11 @@ export default function PlayActivityPage({ params }: { params: { slug: string } 
     const result = await loadCurrentSession(token, activity.activityType);
 
     if (!result.ok) {
+      // The session expired mid-play: back to login, not a dead-end error screen.
+      if (result.status === 401) {
+        router.replace('/login');
+        return;
+      }
       setError(result.error);
       return;
     }
@@ -122,6 +133,11 @@ export default function PlayActivityPage({ params }: { params: { slug: string } 
       // wins, so re-read instead of reporting a conflict the student cannot act on.
       if (submitted.status === 409) {
         await syncFromServer();
+        return;
+      }
+      // The session expired mid-answer: back to login, not a dead-end error screen.
+      if (submitted.status === 401) {
+        router.replace('/login');
         return;
       }
       setError(submitted.error);

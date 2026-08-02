@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useEffect, useRef, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { EditableField } from '../../components/EditableField';
 import { ImageCropModal } from '../../components/ImageCropModal';
@@ -30,8 +31,15 @@ function GearIcon() {
 }
 
 export default function ProfilePage() {
+  const router = useRouter();
   const { token, profile, loading, setProfile } = useUser();
   const [error, setError] = useState('');
+
+  // No session, and we're done checking: send the user to a real "logged out"
+  // screen instead of leaving the profile page mounted with nothing to show.
+  useEffect(() => {
+    if (!loading && !token) router.replace('/login');
+  }, [loading, token, router]);
 
   const [creating, setCreating] = useState(false);
   const [newUsername, setNewUsername] = useState('');

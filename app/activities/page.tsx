@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { ActivityCard } from '../../components/ActivityCard';
@@ -17,8 +18,15 @@ type CardData = {
 };
 
 export default function ActivitiesPage() {
+  const router = useRouter();
   const { token, loading } = useAccessToken();
   const [cards, setCards] = useState<CardData[] | null>(null);
+
+  // No session, and we're done checking: send the user to a real "logged out"
+  // screen instead of leaving the activities list mounted with nothing to show.
+  useEffect(() => {
+    if (!loading && !token) router.replace('/login');
+  }, [loading, token, router]);
 
   useEffect(() => {
     if (!token) return;
