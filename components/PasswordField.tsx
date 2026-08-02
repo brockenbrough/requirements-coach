@@ -21,22 +21,41 @@ function EyeOffIcon() {
   );
 }
 
+// Login/register sit on the dark background; the profile page's "Change password" form
+// sits inside a light card. Same component, same show/hide behavior — only the palette
+// (and, since the light side matches the page's other inputs, the corner radius) differs.
+const VARIANT_STYLES = {
+  dark: {
+    label: 'text-[#A79FC9]',
+    input: 'rounded-brand-md border-[#332b6b] bg-[#1b1642] text-[#F3F1FF] focus:border-[#7C4DFF]',
+    toggle: 'rounded-r-brand-md text-[#A79FC9] hover:text-[#2DD4BF] focus-visible:outline-[#2DD4BF]',
+  },
+  light: {
+    label: 'text-gray-600',
+    input: 'rounded-xl border-gray-200 bg-white text-brand-navy focus:border-brand-purple',
+    toggle: 'rounded-r-xl text-gray-400 hover:text-brand-purple focus-visible:outline-brand-purple',
+  },
+} as const;
+
 export function PasswordField({
   label,
   value,
   onChange,
   placeholder,
   autoComplete,
+  variant = 'dark',
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
   autoComplete?: string;
+  variant?: 'dark' | 'light';
 }) {
   const id = useId();
   const [visible, setVisible] = useState(false);
   const [spinKey, setSpinKey] = useState(0);
+  const styles = VARIANT_STYLES[variant];
 
   function toggle() {
     setVisible((v) => !v);
@@ -44,7 +63,7 @@ export function PasswordField({
   }
 
   return (
-    <label htmlFor={id} className="block text-sm font-bold text-[#A79FC9]">
+    <label htmlFor={id} className={`block text-sm font-bold ${styles.label}`}>
       {label}
       <div className="relative mt-1">
         <input
@@ -55,14 +74,14 @@ export function PasswordField({
           required
           autoComplete={autoComplete}
           placeholder={placeholder}
-          className="w-full rounded-[10px] border border-[#332b6b] bg-[#1b1642] px-4 py-3 pr-11 text-[#F3F1FF] outline-none ring-0 transition focus:border-[#7C4DFF]"
+          className={`w-full border px-4 py-3 pr-11 outline-none ring-0 transition ${styles.input}`}
         />
         <button
           type="button"
           onClick={toggle}
           aria-label={visible ? 'Hide password' : 'Show password'}
           aria-pressed={visible}
-          className="pw-toggle-btn absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-[10px] text-[#A79FC9] transition-colors hover:text-[#2DD4BF] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#2DD4BF]"
+          className={`pw-toggle-btn absolute inset-y-0 right-0 flex w-11 items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 ${styles.toggle}`}
         >
           <span key={spinKey} className="pw-icon-spin relative inline-flex">
             {visible ? <EyeOffIcon /> : <EyeIcon />}

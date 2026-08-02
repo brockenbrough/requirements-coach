@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
+import { ChangePasswordForm } from '../../components/ChangePasswordForm';
 import { EditableField } from '../../components/EditableField';
 import { ImageCropModal } from '../../components/ImageCropModal';
 import { useUser } from '../../components/UserProvider';
@@ -26,6 +27,15 @@ function GearIcon() {
     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2}>
       <circle cx="12" cy="12" r="3" />
       <path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.5-2.3.9a7 7 0 0 0-2.1-1.2L14 3h-4l-.5 2.5a7 7 0 0 0-2.1 1.2l-2.3-.9-2 3.5 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.5 2.3-.9c.6.5 1.3.9 2.1 1.2L10 21h4l.5-2.5a7 7 0 0 0 2.1-1.2l2.3.9 2-3.5-2-1.5c.1-.4.1-.8.1-1.2Z" />
+    </svg>
+  );
+}
+
+function LockIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <rect x="5" y="11" width="14" height="9" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
     </svg>
   );
 }
@@ -55,6 +65,8 @@ export default function ProfilePage() {
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState<ProfileDraft | null>(null);
   const [savingProfile, setSavingProfile] = useState(false);
+
+  const [showPasswordForm, setShowPasswordForm] = useState(false);
 
   const [uploading, setUploading] = useState(false);
   const [pendingImage, setPendingImage] = useState<string | null>(null);
@@ -429,6 +441,23 @@ export default function ProfilePage() {
                 </button>
               </div>
             ) : null}
+
+            <div className="mt-8 border-t border-gray-100 pt-6">
+              <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Change Password</p>
+
+              {showPasswordForm ? (
+                <ChangePasswordForm token={token} onCancel={() => setShowPasswordForm(false)} />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowPasswordForm(true)}
+                  className="mt-3 flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-extrabold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple"
+                >
+                  <LockIcon />
+                  Change Password
+                </button>
+              )}
+            </div>
           </>
         )}
       </section>
