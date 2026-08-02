@@ -1,18 +1,16 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { getStoredAccessToken } from './authClient';
+import { useUser } from '../components/UserProvider';
 
-// Reads the session stored by lib/authClient on login/register, so every
-// REQ-PL-6 screen gates on the same session in the same way.
+/**
+ * Thin wrapper around useUser() for pages that only need the token, not the
+ * full profile. Deliberately *not* its own independent read of localStorage:
+ * UserProvider is the single place that decides whether a session is still
+ * valid (including the silent-refresh-then-logout flow), so every page has
+ * to observe that same state — otherwise a page could keep rendering as
+ * "logged in" with a token UserProvider has already discarded as invalid.
+ */
 export function useAccessToken() {
-  const [token, setToken] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setToken(getStoredAccessToken());
-    setLoading(false);
-  }, []);
-
+  const { token, loading } = useUser();
   return { token, loading };
 }
