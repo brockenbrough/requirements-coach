@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppShell } from "../../components/AppShell";
 import { ActivityLogRow } from "../../components/ActivityLogRow";
@@ -9,7 +8,7 @@ import { ACTIVITIES, Difficulty } from "../../lib/activityContent";
 import { toActivityLogEntry } from "../../lib/activityLogTypes";
 import { ActivityState, getActivityState } from "../../lib/activityStore";
 import { type SessionListEntry, loadSessions } from "../../lib/sessionClient";
-import { useUser } from "../../components/UserProvider";
+import { useRequireRole } from "../../lib/useRequireRole";
 
 const RECENT_LIMIT = 3;
 
@@ -22,19 +21,14 @@ type ContinueTarget = {
 };
 
 export default function DashboardPage() {
-  const router = useRouter();
-  const { token, profile, loading } = useUser();
-  const [statesBySlug, setStatesBySlug] = useState<Record<
+  // Also redirects an instructor account to /instructor (GitHub #82) — the student dashboard
+  // and its "take a quiz" links are not something that role should land on.
+  const { token, profile, loading, authorized } = useRequireRole("student");
+  const [statesBySlug, setStatesBySlug] = useState<Record
     string,
     ActivityState
   > | null>(null);
   const [recent, setRecent] = useState<SessionListEntry[] | null>(null);
-
-  // No session, and we're done checking: send the user to a real "logged out"
-  // screen instead of leaving the dashboard mounted with nothing to show.
-  useEffect(() => {
-    if (!loading && !token) router.replace("/login");
-  }, [loading, token, router]);
 
   useEffect(() => {
     if (!token) return;
@@ -61,23 +55,9 @@ export default function DashboardPage() {
     };
   }, [token, profile?.user_id]);
 
-  if (loading) return null;
-
-  if (!token) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-[#0e0b1e] px-6 text-center text-[#F3F1FF]">
-        <div>
-          <p className="mb-4">You must be logged in to view your dashboard.</p>
-          <Link
-            href="/login"
-            className="rounded-full bg-[#7C4DFF] px-4 py-2 text-sm font-bold text-white"
-          >
-            Go to login
-          </Link>
-        </div>
-      </main>
-    );
-  }
+  // Blank rather than a "logged out" message while useRequireRole's effect redirects — for
+  // a wrong role that message would be actively misleading (an instructor isn't logged out).
+  if (loading || !authorized) return null;
 
   const continueTarget: ContinueTarget | null = (() => {
     if (!statesBySlug) return null;

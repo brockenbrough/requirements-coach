@@ -191,6 +191,11 @@ ALTER TABLE title_definition ADD CONSTRAINT uq_title_definition_activity_level U
 
 ALTER TABLE session_log ADD CONSTRAINT ck_session_log_status CHECK (status IN ('in-progress', 'completed', 'abandoned'));
 
+-- GitHub #82: the only two roles the app understands. Set at profile-creation time from
+-- auth.users.raw_user_meta_data.role (see app/api/profile/route.ts) — INSTRUCTOR_SIGNUP_CODE
+-- is what gets a signup that metadata in the first place (app/api/auth/register/route.ts).
+ALTER TABLE "user" ADD CONSTRAINT ck_user_role CHECK (role IN ('student', 'instructor'));
+
 -- The draw for a new session filters on exactly this pair.
 CREATE INDEX ix_question_activity_type_difficulty ON question (activity_type, difficulty_level);
 
@@ -303,3 +308,10 @@ CREATE POLICY own_answers_insert ON answered_question_log
 --     CHECK (age IS NULL OR (age > 0 AND age < 130));
 --   ALTER TABLE "user" ADD COLUMN IF NOT EXISTS semester int2
 --     CHECK (semester IS NULL OR (semester > 0 AND semester <= 20));
+
+-- GitHub #82 (instructor role): if your "user" table predates the role column entirely, add it
+-- (it already has DEFAULT 'student' above for fresh databases); either way, add the check
+-- constraint so a typo can't silently create a third role the app doesn't know how to route:
+--
+--   ALTER TABLE "user" ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'student';
+--   ALTER TABLE "user" ADD CONSTRAINT ck_user_role CHECK (role IN ('student', 'instructor'));

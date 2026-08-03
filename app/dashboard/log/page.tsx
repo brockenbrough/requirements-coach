@@ -1,10 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../../../components/AppShell';
-import { useUser } from '../../../components/UserProvider';
 import {
   ActivityFilters,
   type ActivityFilterValue,
@@ -15,12 +13,14 @@ import { ActivityLogTable } from '../../../components/ActivityLogTable';
 import { ActivityStatsCards } from '../../../components/ActivityStatsCards';
 import { resultStateOf, toActivityLogEntry, type ActivityLogEntry } from '../../../lib/activityLogTypes';
 import { loadActivityLog } from '../../../lib/sessionClient';
+import { useRequireRole } from '../../../lib/useRequireRole';
 
 const PAGE_SIZE = 8;
 
 export default function ActivityLogPage() {
-  const router = useRouter();
-  const { token, profile, loading } = useUser();
+  // Also redirects an instructor account away (GitHub #82) — this is the student's own
+  // activity history, not something an instructor account should be viewing here.
+  const { token, profile, loading, authorized } = useRequireRole('student');
 
   const [entries, setEntries] = useState<ActivityLogEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -29,12 +29,6 @@ export default function ActivityLogPage() {
   const [status, setStatus] = useState<StatusFilterValue>('all');
   const [sort, setSort] = useState<SortOrder>('newest');
   const [page, setPage] = useState(1);
-
-  // No session, and we're done checking: send the user to a real "logged out"
-  // screen instead of leaving this page mounted with nothing to show.
-  useEffect(() => {
-    if (!loading && !token) router.replace('/login');
-  }, [loading, token, router]);
 
   // GET /api/students/{id}/activities (GitHub #48), cached in localStorage
   // (lib/activityLogStore.ts) and refreshed wherever a session's progress changes.
@@ -84,20 +78,7 @@ export default function ActivityLogPage() {
     setPage(1);
   }
 
-  if (loading) return null;
-
-  if (!token) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-[#0e0b1e] px-6 text-center text-[#F3F1FF]">
-        <div>
-          <p className="mb-4">You must be logged in to view your activity log.</p>
-          <Link href="/login" className="rounded-full bg-[#7C4DFF] px-4 py-2 text-sm font-bold text-white">
-            Go to login
-          </Link>
-        </div>
-      </main>
-    );
-  }
+  if (loading || !authorized) return null;
 
   return (
     <AppShell active="dashboard">

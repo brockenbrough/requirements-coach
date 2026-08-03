@@ -16,12 +16,18 @@ import {
   loadCurrentSession,
   startSession,
 } from '../../../lib/sessionClient';
+import { useRequireRole } from '../../../lib/useRequireRole';
 
 const DIFFICULTY_LABEL: Record<number, string> = { 1: 'Easy', 2: 'Medium', 3: 'Hard' };
 
 export default function ActivityDetailPage({ params }: { params: { slug: string } }) {
   const router = useRouter();
-  const { token, profile, loading } = useUser();
+  // Also redirects an instructor account away (GitHub #82) — starting/resuming/abandoning a
+  // quiz is exactly the "quiz durchführen" capability instructors must not have.
+  const { token, loading, authorized } = useRequireRole('student');
+  // useRequireRole only exposes token/loading/authorized — profile.user_id is still needed
+  // below (handleStart, handleAbandon) to refresh the activity log, so we pull it separately.
+  const { profile } = useUser();
   const activity = getActivity(params.slug);
 
   // The server is the only source of "does this activity have a run in progress" (REQ-PL-6.3) —
@@ -32,12 +38,6 @@ export default function ActivityDetailPage({ params }: { params: { slug: string 
   const [starting, setStarting] = useState(false);
   const [abandoning, setAbandoning] = useState(false);
   const [error, setError] = useState<{ message: string; needsProfile: boolean } | null>(null);
-
-  // No session, and we're done checking: send the user to a real "logged out"
-  // screen instead of leaving this page mounted with nothing to show.
-  useEffect(() => {
-    if (!loading && !token) router.replace('/login');
-  }, [loading, token, router]);
 
   // Both reads in one pass, because the page re-runs this on every return from /play: the
   // running session decides Start vs. Resume/Abandon, the finished ones fill the history below.
@@ -61,20 +61,7 @@ export default function ActivityDetailPage({ params }: { params: { slug: string 
     };
   }, [token, activity]);
 
-  if (loading) return null;
-
-  if (!token) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-[#0e0b1e] px-6 text-center text-[#F3F1FF]">
-        <div>
-          <p className="mb-4">You must be logged in to view this activity.</p>
-          <Link href="/login" className="rounded-full bg-[#7C4DFF] px-4 py-2 text-sm font-bold text-white">
-            Go to login
-          </Link>
-        </div>
-      </main>
-    );
-  }
+  if (loading || !authorized) return null;
 
   if (!activity) {
     return (
@@ -237,47 +224,78 @@ export default function ActivityDetailPage({ params }: { params: { slug: string 
         </div>
 
         {/* Completed attempts, newest first — the "list of prior results for the activity"
-            the opening page is meant to show. Still loading (null) renders nothing. */}
-        {attempts ? (
-          <div className="mt-6">
-            <h3 className="mb-3 text-sm font-extrabold text-gray-500">Previous attempts</h3>
+            the opening page is meant to show. Still loading (null) shows a skeleton in the
+            same shape as the real table (GitHub #80) instead of popping in abruptly once the
+            request resolves. */}
+        <div className="mt-6">
+          <h3 className="mb-3 text-sm font-extrabold text-gray-500">Previous attempts</h3>
 
-            {attempts.length === 0 ? (
-              <p className="rounded-brand-lg border border-gray-100 bg-gray-50 p-4 text-sm font-semibold text-gray-500">
-                You haven&apos;t completed this activity yet.
-              </p>
-            ) : (
-              <div className="overflow-x-auto rounded-2xl border border-[#332b6b]">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-[#1b1642] text-[#A79FC9]">
-                      <th className="px-4 py-2.5 text-left font-bold">Date</th>
-                      <th className="px-4 py-2.5 text-left font-bold">Level</th>
-                      <th className="px-4 py-2.5 text-left font-bold">Score</th>
-                      <th className="px-4 py-2.5 text-left font-bold">Result</th>
+          {attempts === null ? (
+            <div className="overflow-x-auto rounded-2xl border border-[#332b6b]">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-[#1b1642] text-[#A79FC9]">
+                    <th className="px-4 py-2.5 text-left font-bold">Date</th>
+                    <th className="px-4 py-2.5 text-left font-bold">Level</th>
+                    <th className="px-4 py-2.5 text-left font-bold">Score</th>
+                    <th className="px-4 py-2.5 text-left font-bold">Result</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[0, 1, 2].map((i) => (
+                    <tr key={i} className="border-t border-[#332b6b] bg-[#241f52]">
+                      <td className="px-4 py-3">
+                        <span className="block h-3 w-16 animate-pulse rounded-full bg-white/10" />
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="block h-3 w-20 animate-pulse rounded-full bg-white/10" />
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="block h-3 w-14 animate-pulse rounded-full bg-white/10" />
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="block h-3 w-24 animate-pulse rounded-full bg-white/10" />
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {attempts.map((attempt) => (
-                      <tr key={attempt.sessionId} className="border-t border-[#332b6b] bg-[#241f52] text-[#F3F1FF]">
-                        <td className="px-4 py-2.5">
-                          {attempt.completedAt ? new Date(attempt.completedAt).toLocaleDateString() : '—'}
-                        </td>
-                        <td className="px-4 py-2.5">
-                          {DIFFICULTY_LABEL[attempt.difficultyLevel] ?? 'Level'} · {attempt.difficultyLevel}
-                        </td>
-                        <td className="px-4 py-2.5 tabular-nums">
-                          {attempt.score} / {attempt.maxScore}
-                        </td>
-                        <td className="px-4 py-2.5">{attempt.passed ? 'Passed' : 'Not passed'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        ) : null}
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : attempts.length === 0 ? (
+            <p className="rounded-brand-lg border border-gray-100 bg-gray-50 p-4 text-sm font-semibold text-gray-500">
+              You haven&apos;t completed this activity yet.
+            </p>
+          ) : (
+            <div className="overflow-x-auto rounded-2xl border border-[#332b6b]">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-[#1b1642] text-[#A79FC9]">
+                    <th className="px-4 py-2.5 text-left font-bold">Date</th>
+                    <th className="px-4 py-2.5 text-left font-bold">Level</th>
+                    <th className="px-4 py-2.5 text-left font-bold">Score</th>
+                    <th className="px-4 py-2.5 text-left font-bold">Result</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {attempts.map((attempt) => (
+                    <tr key={attempt.sessionId} className="border-t border-[#332b6b] bg-[#241f52] text-[#F3F1FF]">
+                      <td className="px-4 py-2.5">
+                        {attempt.completedAt ? new Date(attempt.completedAt).toLocaleDateString() : '—'}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        {DIFFICULTY_LABEL[attempt.difficultyLevel] ?? 'Level'} · {attempt.difficultyLevel}
+                      </td>
+                      <td className="px-4 py-2.5 tabular-nums">
+                        {attempt.score} / {attempt.maxScore}
+                      </td>
+                      <td className="px-4 py-2.5">{attempt.passed ? 'Passed' : 'Not passed'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
     </AppShell>
   );

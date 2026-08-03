@@ -6,7 +6,6 @@ import { useCallback, useEffect, useState } from "react";
 import { AppShell } from "../../../../components/AppShell";
 import { FeedbackCard } from "../../../../components/FeedbackCard";
 import { QuestionCard } from "../../../../components/QuestionCard";
-import { useUser } from "../../../../components/UserProvider";
 import { getActivity } from "../../../../lib/activityContent";
 import {
   type CurrentSessionResult,
@@ -19,7 +18,7 @@ import {
   loadStudentScore,
   submitAnswer,
 } from "../../../../lib/sessionClient";
-import { useAccessToken } from "../../../../lib/useAccessToken";
+import { useRequireRole } from "../../../../lib/useRequireRole";
 
 /** What the last submitted answer earned, alongside the explanations for it. */
 type AnswerOutcome = {
@@ -35,8 +34,9 @@ export default function PlayActivityPage({
   params: { slug: string };
 }) {
   const router = useRouter();
-  const { token, loading } = useAccessToken();
-  const { profile } = useUser();
+  // Also redirects an instructor account away (GitHub #82) — this page is the "quiz
+  // durchführen" flow itself, exactly what an instructor must not be able to reach.
+  const { token, profile, loading, authorized } = useRequireRole("student");
   const activity = getActivity(params.slug);
 
   const [session, setSession] = useState<CurrentSessionResult | null>(null);
@@ -46,12 +46,6 @@ export default function PlayActivityPage({
   const [outcome, setOutcome] = useState<AnswerOutcome | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // No session, and we're done checking: send the user to a real "logged out"
-  // screen instead of leaving this page mounted with nothing to show.
-  useEffect(() => {
-    if (!loading && !token) router.replace("/login");
-  }, [loading, token, router]);
 
   /**
    * The server is the only source of progress — there is no stored "current question",
@@ -90,23 +84,7 @@ export default function PlayActivityPage({
     void syncFromServer();
   }, [syncFromServer]);
 
-  if (loading) return null;
-
-  if (!token) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-[#0e0b1e] px-6 text-center text-[#F3F1FF]">
-        <div>
-          <p className="mb-4">You must be logged in to play this activity.</p>
-          <Link
-            href="/login"
-            className="rounded-full bg-[#7C4DFF] px-4 py-2 text-sm font-bold text-white"
-          >
-            Go to login
-          </Link>
-        </div>
-      </main>
-    );
-  }
+  if (loading || !authorized) return null;
 
   if (!activity) return null;
 
