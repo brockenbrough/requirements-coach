@@ -1,14 +1,12 @@
 'use client';
 
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { ActivityCard } from '../../components/ActivityCard';
 import { ACTIVITIES, ActivityDefinition, Difficulty } from '../../lib/activityContent';
 import { getActivityState, getBestScore, getTitle } from '../../lib/activityStore';
 import { loadSessions } from '../../lib/sessionClient';
-import { useAccessToken } from '../../lib/useAccessToken';
+import { useRequireRole } from '../../lib/useRequireRole';
 
 type CardData = {
   activity: ActivityDefinition;
@@ -19,15 +17,8 @@ type CardData = {
 };
 
 export default function ActivitiesPage() {
-  const router = useRouter();
-  const { token, loading } = useAccessToken();
+  const { token, loading, authorized } = useRequireRole('student');
   const [cards, setCards] = useState<CardData[] | null>(null);
-
-  // No session, and we're done checking: send the user to a real "logged out"
-  // screen instead of leaving the activities list mounted with nothing to show.
-  useEffect(() => {
-    if (!loading && !token) router.replace('/login');
-  }, [loading, token, router]);
 
   // hasInProgress comes from the real session API (REQ-PL-6.3 must hold for every activity,
   // not just whichever one the mock happened to remember) — one list covers every card, rather
@@ -63,20 +54,7 @@ export default function ActivitiesPage() {
     };
   }, [token]);
 
-  if (loading) return null;
-
-  if (!token) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-[#0e0b1e] px-6 text-center text-[#F3F1FF]">
-        <div>
-          <p className="mb-4">You must be logged in to view activities.</p>
-          <Link href="/login" className="rounded-full bg-[#7C4DFF] px-4 py-2 text-sm font-bold text-white">
-            Go to login
-          </Link>
-        </div>
-      </main>
-    );
-  }
+  if (loading || !authorized) return null;
 
   return (
     <AppShell active="activities">

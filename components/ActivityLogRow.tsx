@@ -33,9 +33,12 @@ function scoreText(entry: ActivityLogEntry, state: ActivityResultState) {
 export function ActivityLogRow({
   entry,
   variant = 'table',
+  studentName,
 }: {
   entry: ActivityLogEntry;
   variant?: 'table' | 'compact';
+  /** Instructor Dashboard only (GitHub #82): renders a leading Student column in the table variant. */
+  studentName?: string;
 }) {
   const state = resultStateOf(entry);
   const category = getActivityByType(entry.activityType)?.category ?? '';
@@ -58,6 +61,7 @@ export function ActivityLogRow({
 
   return (
     <tr className="border-t border-brand-navy-border bg-brand-navy-2 text-brand-ink">
+      {studentName ? <td className="whitespace-nowrap px-4 py-3.5 font-bold text-white">{studentName}</td> : null}
       <td className="px-4 py-3.5">
         <div className="flex items-center gap-2.5">
           <span

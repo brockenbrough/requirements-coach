@@ -19,11 +19,11 @@ vi.mock('../../lib/supabase', () => {
         return { data: { session: { access_token: 'new-access-token', refresh_token: 'new-refresh-token' } }, error: null };
       }),
       admin: {
-        createUser: vi.fn(async ({ email }: { email: string }) => {
+        createUser: vi.fn(async ({ email, user_metadata }: { email: string; user_metadata?: Record<string, unknown> }) => {
           if (email === 'exists@example.com') {
             return { data: null, error: { message: 'User exists' } };
           }
-          return { data: { user: { email } }, error: null };
+          return { data: { user: { email, user_metadata } }, error: null };
         }),
       },
     },
@@ -45,7 +45,7 @@ describe('Auth API routes', () => {
     vi.clearAllMocks();
   });
 
-  it('registers a new user', async () => {
+  it('registers a new user as a student by default', async () => {
     const response = await registerPost(new Request('http://localhost/api/auth/register', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -53,7 +53,30 @@ describe('Auth API routes', () => {
     }));
 
     expect(response.status).toBe(201);
-    expect(await response.json()).toEqual({ user: { email: 'new@example.com' } });
+    expect(await response.json()).toEqual({ user: { email: 'new@example.com', user_metadata: { role: 'student' } } });
+  });
+
+  it('registers as an instructor when the signup code matches', async () => {
+    const response = await registerPost(new Request('http://localhost/api/auth/register', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      // Must match INSTRUCTOR_SIGNUP_CODE in app/api/auth/register/route.ts.
+      body: JSON.stringify({ email: 'prof@example.com', password: 'secret123', instructorCode: 'CHANGE-ME-instructor-2026' }),
+    }));
+
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual({ user: { email: 'prof@example.com', user_metadata: { role: 'instructor' } } });
+  });
+
+  it('falls back to student when the signup code is wrong', async () => {
+    const response = await registerPost(new Request('http://localhost/api/auth/register', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'imposter@example.com', password: 'secret123', instructorCode: 'wrong-code' }),
+    }));
+
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual({ user: { email: 'imposter@example.com', user_metadata: { role: 'student' } } });
   });
 
   it('returns a 400 error for an existing user', async () => {

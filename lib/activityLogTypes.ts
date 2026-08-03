@@ -38,3 +38,15 @@ export function resultStateOf(entry: Pick<ActivityLogEntry, 'status' | 'passed'>
   if (entry.status === 'in-progress') return 'in-progress';
   return entry.passed ? 'passed' : 'not-passed';
 }
+
+/**
+ * One student's attempt, as the Instructor Dashboard (GitHub #82) needs it — every field of
+ * ActivityLogEntry plus who it belongs to. Deliberately an extension rather than a parallel
+ * type: ActivityLogRow/ActivityLogTable/resultStateOf all keep working on this unchanged, and
+ * a real "list every student's activity" endpoint only has to add studentId/studentName to
+ * whatever it already returns for the single-student log.
+ */
+export type StudentActivitySummary = ActivityLogEntry & {
+  studentId: string;
+  studentName: string;
+};

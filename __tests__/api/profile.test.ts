@@ -16,7 +16,10 @@ vi.mock('../../lib/supabase', () => ({
     auth: {
       getUser: vi.fn(async (token: string) => {
         if (token === 'valid-token') {
-          return { data: { user: { id: 'user-123' } }, error: null };
+          return { data: { user: { id: 'user-123', user_metadata: {} } }, error: null };
+        }
+        if (token === 'instructor-token') {
+          return { data: { user: { id: 'user-456', user_metadata: { role: 'instructor' } } }, error: null };
         }
         return { data: { user: null }, error: { message: 'Invalid token' } };
       }),
@@ -76,6 +79,18 @@ describe('Profile API routes', () => {
     const response = await POST(req('POST', { username: 'testuser', biography: 'Hello!' }));
     expect(response.status).toBe(201);
     expect(await response.json()).toEqual({ profile: mockProfile });
+  });
+
+  it('POST defaults role to student when the token carries no instructor metadata', async () => {
+    await POST(req('POST', { username: 'testuser', biography: 'Hello!' }));
+    const insertedRow = mockBuilder.insert.mock.calls[0][0];
+    expect(insertedRow).toMatchObject({ role: 'student' });
+  });
+
+  it('POST sets role to instructor when the auth user metadata says so (GitHub #82)', async () => {
+    await POST(req('POST', { username: 'prof', biography: 'Hi class' }, 'instructor-token'));
+    const insertedRow = mockBuilder.insert.mock.calls[0][0];
+    expect(insertedRow).toMatchObject({ role: 'instructor' });
   });
 
   it('POST returns 400 when username is missing', async () => {

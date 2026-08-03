@@ -16,6 +16,16 @@ function rangeError(value: number | null | undefined, min: number, max: number, 
   return null;
 }
 
+/**
+ * The "user" row is created here, not at registration — role has to wait until now too. It
+ * travels from app/api/auth/register/route.ts as auth user_metadata (checked against
+ * INSTRUCTOR_SIGNUP_CODE there, server-side only) and is read back off the authenticated user
+ * rather than trusted from the request body, so a profile POST can never self-promote.
+ */
+function deriveRole(user: { user_metadata?: { role?: unknown } }): 'student' | 'instructor' {
+  return user.user_metadata?.role === 'instructor' ? 'instructor' : 'student';
+}
+
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
   return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
@@ -79,6 +89,7 @@ export async function POST(request: Request) {
       user_id: user.id,
       username,
       biography: biography ?? '',
+      role: deriveRole(user),
       first_name: first_name?.trim() || null,
       last_name: last_name?.trim() || null,
       age: age ?? null,

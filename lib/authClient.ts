@@ -72,9 +72,12 @@ export async function login(email: string, password: string): Promise<AuthResult
  * POSTs to /api/auth/register and then signs the new user in, because the
  * register route uses the admin API (createUser) and therefore returns a user
  * but no session.
+ *
+ * instructorCode is passed through as-is and checked only on the server (GitHub #82) — this
+ * function never compares it itself, so there is nothing here for the browser to bypass.
  */
-export async function register(email: string, password: string): Promise<AuthResult> {
-  const response = await postJson('/api/auth/register', { email, password });
+export async function register(email: string, password: string, instructorCode?: string): Promise<AuthResult> {
+  const response = await postJson('/api/auth/register', { email, password, instructorCode });
 
   if (!response) return { ok: false, error: 'Could not reach the server. Please try again.' };
   if (!response.ok) return { ok: false, error: response.body?.error || 'Registration failed.' };
