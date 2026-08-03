@@ -50,3 +50,53 @@ export type StudentActivitySummary = ActivityLogEntry & {
   studentId: string;
   studentName: string;
 };
+
+// Deliberately simple, visible thresholds rather than a statistical model — an instructor
+// scanning a roster needs a reason they can eyeball, not a black-box score.
+const LOW_SCORE_THRESHOLD = 70;
+const HIGH_ABANDON_THRESHOLD = 2;
+
+export type StudentAggregate = {
+  studentId: string;
+  studentName: string;
+  attempts: number;
+  averageScore: number | null;
+  abandonedCount: number;
+  needsAttention: boolean;
+};
+
+/**
+ * One row per student instead of one per attempt — the Instructor Dashboard's roster and the
+ * All Students page (GitHub #82) both answer "who", leaving "what happened" to ActivityLogTable.
+ * Sorted needs-attention first (the whole point of surfacing this at all), then alphabetically,
+ * so the order is stable and predictable rather than shuffling by score.
+ */
+export function summarizeStudents(entries: StudentActivitySummary[]): StudentAggregate[] {
+  const byStudent = new Map<string, StudentActivitySummary[]>();
+  for (const entry of entries) {
+    const list = byStudent.get(entry.studentId) ?? [];
+    list.push(entry);
+    byStudent.set(entry.studentId, list);
+  }
+
+  return [...byStudent.entries()]
+    .map(([studentId, list]) => {
+      const completed = list.filter((entry) => entry.status === 'completed');
+      const averageScore =
+        completed.length === 0 ? null : Math.round(completed.reduce((sum, entry) => sum + entry.score, 0) / completed.length);
+      const abandonedCount = list.filter((entry) => entry.status === 'abandoned').length;
+
+      return {
+        studentId,
+        studentName: list[0].studentName,
+        attempts: list.length,
+        averageScore,
+        abandonedCount,
+        needsAttention: (averageScore !== null && averageScore < LOW_SCORE_THRESHOLD) || abandonedCount >= HIGH_ABANDON_THRESHOLD,
+      };
+    })
+    .sort((a, b) => {
+      if (a.needsAttention !== b.needsAttention) return a.needsAttention ? -1 : 1;
+      return a.studentName.localeCompare(b.studentName);
+    });
+}
