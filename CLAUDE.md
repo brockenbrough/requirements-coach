@@ -33,12 +33,15 @@ Next.js 14 App Router, Tailwind, Supabase. The product is a requirements-practic
 
 ### Two half-connected worlds — read this first
 
-The backend and the UI are currently built against different data sources:
+The backend and the UI started against different data sources, and the wiring-over is in progress, not finished:
 
-- **API routes + `lib/*Queries.ts` + `supabase/schema.sql`** are the real implementation (sessions, answers, feedback, score, titles), fully covered by tests.
-- **`lib/activityContent.ts` + `lib/activityStore.ts`** are a **localStorage mock** of that same domain — a hardcoded question bank and a `rc_activity_progress_v1` key. Every activity page (`app/activities/**`) and `components/AppShell.tsx` still reads from the mock, not the API. Only `app/profile/page.tsx` and login/register talk to real routes.
+- **API routes + `lib/*Queries.ts` + `supabase/schema.sql`** are the real implementation (sessions, answers, feedback, score, titles), fully covered by tests. `lib/sessionClient.ts` is the UI's one gateway to these routes — same role as `lib/authClient.ts` for auth — and is now used by `app/activities/[slug]/page.tsx`, `app/activities/[slug]/play/page.tsx`, `components/AppShell.tsx` (score), and `app/dashboard/page.tsx` (completed-sessions list). The slug↔`activity_type` mapping that used to be missing now exists: `ActivityDefinition.activityType` in `lib/activityContent.ts` is the one place it's declared.
+- **`lib/activityStore.ts`** is still a **localStorage mock** (`rc_activity_progress_v1`) of the leveling/history side of the domain — current difficulty level, best score, earned title, and the "N of M answered" progress bar shown on the activity detail page while a session is in-progress. Those same pages now also read the real session/score/history from the API, so a page can end up trusting two disagreeing sources at once (e.g. the mock's `state.inProgress` bar vs. the API-backed `hasServerSession` that actually decides the Start/Resume/Continue label). Don't assume the mock is authoritative for anything progress-related — check whether the page also called `sessionClient` before trusting `activityStore`.
+- **`lib/activityContent.ts`'s `questionBank`** (and its `getQuestion`/`questionsForLevel` helpers) is dead weight for actual gameplay — the play page gets question prompts, options, and scoring from the server (`SessionQuestion`/`submitAnswer`/`loadFeedback`), not from this file. `activityContent.ts` is still live for display-only fields (`name`, `summary`, `instructions`, `category`, `titles`) and the slug↔activityType mapping.
+- Two GET routes (`/api/activities/:activityType/questions`, `/api/questions/:questionId/options`) were added for the DL requirements and are test-covered, but nothing in the UI calls them yet — grep before assuming they're wired to a page.
+- Only `app/profile/page.tsx`, login/register, and now the session/score/history reads above talk to real routes; the leveling mock in `activityStore.ts` is what's left to migrate.
 
-The two halves don't even share vocabulary: the UI keys activities by slug (`weak-user-stories`), the DB by `activity_type` (`IDENTIFY_WEAK_USER_STORIES`), and no mapping exists yet. Wiring a page to the backend means adding that mapping and replacing `activityStore` calls with `fetch`, keeping the function signatures — `lib/activityStore.ts` was written to be swapped out this way.
+`lib/scoreStore.ts` and `lib/completedSessionsStore.ts` are a *different* kind of localStorage use — not a mock, but a cache in front of real API calls (`GET .../score`, `GET /api/sessions?status=completed`), keyed by `studentId`, read by `AppShell`/dashboard on every mount and invalidated with `forceRefresh` once a session completes (see `handleContinue` in the play page). Same shape both places: versioned key, SSR-guarded read/write, only typed getters/setters exported.
 
 ### Auth flow
 
