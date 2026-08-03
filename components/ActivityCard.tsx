@@ -10,7 +10,7 @@ const DIFFICULTY_CLASSES: Record<Difficulty, string> = {
   3: 'bg-[#FFD666]/25 text-[#8a6100]',
 };
 
-function CategoryIcon({ category }: { category: string }) {
+export function CategoryIcon({ category }: { category: string }) {
   if (category === 'Acceptance Criteria') {
     return (
       <svg viewBox="0 0 24 24" className="h-[22px] w-[22px]" fill="none" stroke="#2DD4BF" strokeWidth={2}>

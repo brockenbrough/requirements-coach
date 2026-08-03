@@ -4,12 +4,37 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppShell } from "../../components/AppShell";
+import { ActivityLogRow } from "../../components/ActivityLogRow";
 import { ACTIVITIES, Difficulty, getActivityByType } from "../../lib/activityContent";
+import type { ActivityLogEntry } from "../../lib/activityLogTypes";
 import { ActivityState, getActivityState } from "../../lib/activityStore";
 import { type SessionListEntry, loadSessions } from "../../lib/sessionClient";
+import type { ActivityType } from "../../lib/activityTypes";
 import { useUser } from "../../components/UserProvider";
 
 const RECENT_LIMIT = 3;
+
+/**
+ * Adapts the real GET /api/sessions?status=completed shape to the ActivityLogEntry shape
+ * ActivityLogRow expects, so the dashboard preview and the mock-data-driven /dashboard/log page
+ * (GitHub #48) can share one row component without either page knowing about the other's data
+ * source.
+ */
+function toActivityLogEntry(session: SessionListEntry): ActivityLogEntry {
+  return {
+    id: session.session_id,
+    activityType: session.activity_type as ActivityType,
+    activityName: getActivityByType(session.activity_type)?.name ?? session.activity_type,
+    level: session.difficulty_level as 1 | 2 | 3,
+    dateTime: session.ended_at ?? session.started_at,
+    status: session.status === "in-progress" || session.status === "abandoned" ? session.status : "completed",
+    passed: session.passed,
+    score: session.cumulative_score,
+    maxScore: session.max_score,
+    totalQuestions: session.questionCount,
+    answeredQuestions: session.answeredCount,
+  };
+}
 
 type ContinueTarget = {
   slug: string;
@@ -102,42 +127,22 @@ export default function DashboardPage() {
       {/* null means the list has not come back yet — only a loaded, genuinely empty
           history gets the "nothing here" copy. */}
       {recent === null ? null : recent.length === 0 ? (
-        <p className="text-sm font-semibold text-[#A79FC9]">
+        <p className="mb-4 text-sm font-semibold text-[#A79FC9]">
           No completed attempts yet — finish a round to see it here.
         </p>
       ) : (
-        <div className="relative mb-4 pl-6">
-          <span className="absolute bottom-1.5 left-[11px] top-1.5 w-px bg-[#332b6b]" />
-          {recent.map((entry) => (
-            <div key={entry.session_id} className="relative mb-5 last:mb-0">
-              <span
-                className={`absolute -left-6 top-0 flex h-6 w-6 items-center justify-center rounded-full border-2 border-[#1b1642] text-xs ${
-                  entry.passed
-                    ? "bg-[#2DD4BF] text-[#04241f]"
-                    : "bg-[#7C4DFF] text-white"
-                }`}
-              >
-                {entry.passed ? "✓" : "•"}
-              </span>
-              <div className="text-sm font-bold leading-tight text-white">
-                {/* Falls back to the raw activity_type: a question bank seeded with a type the
-                    UI does not know about should still show up, just unprettified. */}
-                {getActivityByType(entry.activity_type)?.name ?? entry.activity_type} · Level{" "}
-                {entry.difficulty_level}
-              </div>
-              <div className="mt-0.5 text-xs font-semibold text-[#A79FC9]">
-                {entry.ended_at
-                  ? new Date(entry.ended_at).toLocaleDateString()
-                  : "—"}{" "}
-                · {entry.cumulative_score}/{entry.max_score}
-              </div>
-            </div>
+        <div className="mb-4">
+          {recent.map((session) => (
+            <ActivityLogRow key={session.session_id} entry={toActivityLogEntry(session)} variant="compact" />
           ))}
         </div>
       )}
-      <span className="block w-full cursor-default rounded-[10px] border border-[#2DD4BF]/40 py-2.5 text-center text-sm font-extrabold text-[#2DD4BF]/60">
+      <Link
+        href="/dashboard/log"
+        className="block w-full rounded-brand-md border border-brand-teal py-2.5 text-center text-sm font-extrabold text-brand-teal transition hover:bg-brand-teal/10"
+      >
         View Full Log
-      </span>
+      </Link>
     </>
   );
 
