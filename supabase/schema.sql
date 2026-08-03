@@ -31,8 +31,8 @@ CREATE TABLE "user" (
     -- Issue #61: optional profile fields, filled in on the profile page
     -- after account creation. All nullable — a user_id with a username
     -- is still a valid row without these.
-    first_name text,
-    last_name text,
+    first_name text NOT NULL,
+    last_name text NOT NULL,
     age int2 CHECK (age IS NULL OR (age > 0 AND age < 130)),
     semester int2 CHECK (semester IS NULL OR (semester > 0 AND semester <= 20)),
     PRIMARY KEY (user_id));
