@@ -1,8 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { AppShell } from '../../../components/AppShell';
 import { useUser } from '../../../components/UserProvider';
 import {
@@ -24,6 +23,7 @@ export default function ActivityLogPage() {
 
   const [entries, setEntries] = useState<ActivityLogEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { loading, authorized } = useRequireRole('student');
 
   const [activity, setActivity] = useState<ActivityFilterValue>('all');
   const [status, setStatus] = useState<StatusFilterValue>('all');
@@ -84,20 +84,7 @@ export default function ActivityLogPage() {
     setPage(1);
   }
 
-  if (loading) return null;
-
-  if (!token) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-[#0e0b1e] px-6 text-center text-[#F3F1FF]">
-        <div>
-          <p className="mb-4">You must be logged in to view your activity log.</p>
-          <Link href="/login" className="rounded-full bg-[#7C4DFF] px-4 py-2 text-sm font-bold text-white">
-            Go to login
-          </Link>
-        </div>
-      </main>
-    );
-  }
+  if (loading || !authorized) return null;
 
   return (
     <AppShell active="dashboard">

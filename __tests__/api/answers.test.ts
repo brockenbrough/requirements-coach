@@ -89,6 +89,19 @@ const wrongOption = {
   answer: { answer_id: 'a-1-wrong', is_correct: false, explanation: 'Incorrect: no technical detail.' },
 };
 
+/** The answered_question_log row the insert echoes back, as the database would return it. */
+function answerLogRow(overrides: Record<string, unknown> = {}) {
+  return {
+    log_id: 'log-1',
+    session_id: SESSION_ID,
+    question_id: 'q-1',
+    answer_id: 'a-1-correct',
+    score: 25,
+    submitted_at: '2026-07-29T10:05:00.000Z',
+    ...overrides,
+  };
+}
+
 function req(body?: object, token: string | null = 'valid-token') {
   return new Request(`http://localhost/api/sessions/${SESSION_ID}/answers`, {
     method: 'POST',
@@ -111,15 +124,21 @@ function queueSubmission({
   option = correctOption,
   alreadyAnswered = [] as string[],
   submitted = 'q-1',
-  insertResult = { data: null, error: null } as Result,
+  insertResult = null as Result | null,
   cumulativeAfter = 25,
   maxScore = 25 as number | null,
 } = {}) {
+  // The insert echoes back the row it wrote, so by default it mirrors what was submitted.
+  const echoed: Result = insertResult ?? {
+    data: answerLogRow({ question_id: submitted, answer_id: option.answer.answer_id }),
+    error: null,
+  };
+
   queue('session_log', { data: sessionRow(), error: null });                    // ownership + status
   queue('session_to_question', { data: sessionQuestions, error: null });        // the 4 drawn questions
   queue('question_to_answer', { data: option, error: null });                   // option belongs to question
   queue('question', { data: { max_score: maxScore }, error: null });            // points available
-  queue('answered_question_log', insertResult);                                 // the insert
+  queue('answered_question_log', echoed);                                       // the insert
   // loadProgress
   queue('session_log', { data: sessionRow({ cumulative_score: cumulativeAfter }), error: null });
   queue('answered_question_log', {
@@ -241,6 +260,41 @@ describe('POST /api/sessions/{sessionId}/answers', () => {
     expect(log.log_id).toEqual(expect.any(String));
   });
 
+  // REQ-DL-4.1: the caller gets back the record that was created, not just the outcome.
+  it('returns the created answer log record', async () => {
+    queueSubmission({
+      insertResult: { data: answerLogRow({ log_id: 'log-42' }), error: null },
+    });
+
+    const response = await POST(req({ questionId: 'q-1', selectedOptionId: 'a-1-correct' }), ctx);
+    const body = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(body.answer).toEqual({
+      logId: 'log-42',
+      sessionId: SESSION_ID,
+      questionId: 'q-1',
+      selectedOptionId: 'a-1-correct',
+      score: 25,
+      submittedAt: '2026-07-29T10:05:00.000Z',
+    });
+  });
+
+  // The write is committed even if the row does not come back, so the submission must not fail:
+  // only the timestamp, which exists solely in the database, is reported as unknown.
+  it('still returns the record when the insert does not echo the row back', async () => {
+    queueSubmission({ insertResult: { data: null, error: null } });
+
+    const response = await POST(req({ questionId: 'q-1', selectedOptionId: 'a-1-correct' }), ctx);
+    const body = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(body.answer.submittedAt).toBeNull();
+    expect(body.answer.questionId).toBe('q-1');
+    expect(body.answer.selectedOptionId).toBe('a-1-correct');
+    expect(body.answer.logId).toEqual(expect.any(String));
+  });
+
   it('records a wrong answer with score 0', async () => {
     queueSubmission({ option: wrongOption, cumulativeAfter: 0 });
 
@@ -299,8 +353,10 @@ describe('POST /api/sessions/{sessionId}/answers', () => {
     expect(body.error).toMatch(/already been answered/i);
     expect(body.session.cumulative_score).toBe(25);
     expect(body.nextPosition).toBe(1);
-    // The conflict must not leak the outcome of an answer that was not recorded.
+    // The conflict must not leak the outcome of an answer that was not recorded, and there is
+    // no new log record to hand back — the first write is the one that stands.
     expect(body).not.toHaveProperty('correct');
+    expect(body).not.toHaveProperty('answer');
     expect(h.state.updates).toHaveLength(0);
   });
 

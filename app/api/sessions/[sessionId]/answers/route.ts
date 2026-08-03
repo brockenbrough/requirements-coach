@@ -9,6 +9,10 @@ import {
 
 const UNIQUE_VIOLATION = '23505';
 
+// What a caller needs to identify the record it just created (REQ-DL-4.1). user_id is left
+// out on purpose — it is the requesting student's own id, a filter rather than payload.
+const ANSWER_LOG_COLUMNS = 'log_id, session_id, question_id, answer_id, score, submitted_at';
+
 type SessionRow = {
   session_id: string;
   status: string;
@@ -17,6 +21,15 @@ type SessionRow = {
 };
 
 type SubmittedOption = { answer_id: string; is_correct: boolean; explanation: string | null };
+
+type AnswerLogRow = {
+  log_id: string;
+  session_id: string;
+  question_id: string;
+  answer_id: string;
+  score: number;
+  submitted_at: string;
+};
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -125,16 +138,24 @@ export async function POST(request: Request, { params }: { params: { sessionId: 
 
   const score = scoreForAnswer(option.is_correct, (questionRow as { max_score: number | null } | null)?.max_score ?? null);
 
-  const { error: insertError } = await supabase
+  const logRow = {
+    log_id: crypto.randomUUID(),
+    session_id: sessionId,
+    user_id: user.id,
+    question_id: questionId,
+    answer_id: option.answer_id,
+    score,
+  };
+
+  // The written row is read back rather than assumed: submitted_at is a database default
+  // (now()), so REQ-DL-4.1's timestamp only exists after the insert — neither the client nor
+  // this route can supply it. The column list stays explicit for the same reason
+  // COMPLETED_ATTEMPT_COLUMNS is: user_id is the filter here, not part of the payload.
+  const { data: inserted, error: insertError } = await supabase
     .from('answered_question_log')
-    .insert({
-      log_id: crypto.randomUUID(),
-      session_id: sessionId,
-      user_id: user.id,
-      question_id: questionId,
-      answer_id: option.answer_id,
-      score,
-    });
+    .insert(logRow)
+    .select(ANSWER_LOG_COLUMNS)
+    .maybeSingle();
 
   if (insertError) {
     // uq_answered_question_log_session_question: this question was already answered.
@@ -166,6 +187,7 @@ export async function POST(request: Request, { params }: { params: { sessionId: 
 
   return Response.json(
     {
+      answer: answerRecord(inserted as AnswerLogRow | null, logRow),
       correct: option.is_correct,
       explanation: option.explanation,
       score,
@@ -176,6 +198,29 @@ export async function POST(request: Request, { params }: { params: { sessionId: 
     },
     { status: 201 },
   );
+}
+
+/**
+ * The answer log record as the client sees it (REQ-DL-4.1), camelCased like FeedbackResult.
+ *
+ * `written` is what the insert echoed back; `sent` is what we asked it to store. They only
+ * differ if the echo is missing, which the insert succeeding says should not happen — but if
+ * it ever does, the row is committed all the same. Failing the request at that point would
+ * tell the student their answer was not recorded while it was, and their retry would come
+ * back as a 409. So the request stands and only submittedAt, the one value that exists solely
+ * in the database, is reported as unknown.
+ */
+function answerRecord(written: AnswerLogRow | null, sent: Omit<AnswerLogRow, 'submitted_at'>) {
+  const row = written ?? sent;
+
+  return {
+    logId: row.log_id,
+    sessionId: row.session_id,
+    questionId: row.question_id,
+    selectedOptionId: row.answer_id,
+    score: row.score,
+    submittedAt: written?.submitted_at ?? null,
+  };
 }
 
 /**

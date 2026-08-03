@@ -8,11 +8,19 @@ import { getInitials } from '../lib/initials';
 import { loadStudentScore } from '../lib/sessionClient';
 import { useUser } from './UserProvider';
 
-type NavKey = 'dashboard' | 'activities' | 'profile';
+type NavKey = 'dashboard' | 'activities' | 'profile' | 'instructor' | 'instructor-questions';
 
-const NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
+const STUDENT_NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
   { key: 'dashboard', label: 'Dashboard', href: '/dashboard' },
   { key: 'activities', label: 'Activities', href: '/activities' },
+  { key: 'profile', label: 'Profile', href: '/profile' },
+];
+
+// GitHub #82: instructors get a different set of destinations — no Dashboard/Activities, since
+// those are the "take a quiz" flow instructors must not access, only Profile is shared.
+const INSTRUCTOR_NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
+  { key: 'instructor', label: 'Instructor Dashboard', href: '/instructor' },
+  { key: 'instructor-questions', label: 'Question Bank', href: '/instructor/questions' },
   { key: 'profile', label: 'Profile', href: '/profile' },
 ];
 
@@ -40,6 +48,26 @@ function UserIcon() {
     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2}>
       <circle cx="12" cy="8" r="4" />
       <path d="M4 21c0-4 4-6 8-6s8 2 8 6" />
+    </svg>
+  );
+}
+
+function UsersIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="9" cy="8" r="3" />
+      <path d="M2 20c0-3.3 3.1-5.5 7-5.5s7 2.2 7 5.5" />
+      <path d="M16 8.5a3 3 0 1 0 0-6" />
+      <path d="M18 14.5c2.6.5 4 2.1 4 5.5" />
+    </svg>
+  );
+}
+
+function BookIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v17H6.5A2.5 2.5 0 0 0 4 21.5v-17Z" />
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
     </svg>
   );
 }
@@ -83,6 +111,8 @@ const NAV_ICONS: Record<NavKey, () => JSX.Element> = {
   dashboard: GridIcon,
   activities: ListIcon,
   profile: UserIcon,
+  instructor: UsersIcon,
+  'instructor-questions': BookIcon,
 };
 
 export function AppShell({
@@ -99,18 +129,23 @@ export function AppShell({
   const [score, setScore] = useState<number | null>(null);
   const [levelLine, setLevelLine] = useState('Getting started');
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const isInstructor = profile?.role === 'instructor';
+  const navItems = isInstructor ? INSTRUCTOR_NAV_ITEMS : STUDENT_NAV_ITEMS;
 
+  // Score and mastery titles are a student concept — an instructor has neither, so there is
+  // nothing to fetch or show under their avatar.
   useEffect(() => {
+    if (isInstructor) return;
     const best = getHighestTitleOverall();
     setLevelLine(best ? best.title : 'Getting started');
-  }, []);
+  }, [isInstructor]);
 
   // AppShell is rendered by each page rather than by the layout, so this re-runs on every
   // navigation — returning from a finished activity picks up the new total by itself.
   const userId = profile?.user_id;
 
   useEffect(() => {
-    if (!token || !userId) return;
+    if (!token || !userId || isInstructor) return;
     let cancelled = false;
 
     loadStudentScore(token, userId).then((result) => {
@@ -121,7 +156,7 @@ export function AppShell({
     return () => {
       cancelled = true;
     };
-  }, [token, userId]);
+  }, [token, userId, isInstructor]);
 
   function handleLogout() {
     signOut();
@@ -184,17 +219,24 @@ export function AppShell({
           >
             {profile?.username}
           </div>
-          <div className="mt-0.5 text-xs font-bold text-[#A79FC9]">{levelLine}</div>
+          {isInstructor ? (
+            <div className="mt-0.5 text-xs font-bold uppercase tracking-wide text-[#FFD666]">Instructor</div>
+          ) : (
+            <div className="mt-0.5 text-xs font-bold text-[#A79FC9]">{levelLine}</div>
+          )}
         </div>
 
         {/* A dash until the number is actually known: 0 is a real score for a new student,
-            so showing it while loading would state something that may well be wrong. */}
-        <div className="mb-5 rounded-full bg-[#7C4DFF] px-4 py-1.5 text-center text-sm font-extrabold text-white">
-          Score: {score === null ? '—' : score.toLocaleString()}
-        </div>
+            so showing it while loading would state something that may well be wrong. Score
+            is a student concept, so an instructor doesn't get this pill at all. */}
+        {isInstructor ? null : (
+          <div className="mb-5 rounded-full bg-[#7C4DFF] px-4 py-1.5 text-center text-sm font-extrabold text-white">
+            Score: {score === null ? '—' : score.toLocaleString()}
+          </div>
+        )}
 
         <nav className="mb-5 flex flex-col gap-1">
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             const Icon = NAV_ICONS[item.key];
             const isActive = active === item.key;
             return (
