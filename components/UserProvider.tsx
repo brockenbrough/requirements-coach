@@ -3,12 +3,14 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { clearStoredAccessToken, getStoredAccessToken, refreshAccessToken } from '../lib/authClient';
 
+export type Role = 'student' | 'instructor';
+
 export type Profile = {
   user_id: string;
   username: string;
   biography: string;
   avatar_url: string | null;
-  role: string;
+  role: Role;
   first_name: string | null;
   last_name: string | null;
   age: number | null;
