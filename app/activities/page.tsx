@@ -7,6 +7,7 @@ import { AppShell } from '../../components/AppShell';
 import { ActivityCard } from '../../components/ActivityCard';
 import { ACTIVITIES, ActivityDefinition, Difficulty } from '../../lib/activityContent';
 import { getActivityState, getBestScore, getTitle } from '../../lib/activityStore';
+import { loadSessions } from '../../lib/sessionClient';
 import { useAccessToken } from '../../lib/useAccessToken';
 
 type CardData = {
@@ -28,20 +29,38 @@ export default function ActivitiesPage() {
     if (!loading && !token) router.replace('/login');
   }, [loading, token, router]);
 
+  // hasInProgress comes from the real session API (REQ-PL-6.3 must hold for every activity,
+  // not just whichever one the mock happened to remember) — one list covers every card, rather
+  // than a per-activity round trip. level/title/bestScore are still mock-derived; see CLAUDE.md's
+  // migration notes for what's left to wire up there.
   useEffect(() => {
     if (!token) return;
-    setCards(
-      ACTIVITIES.map((activity) => {
-        const state = getActivityState(activity.slug);
-        return {
-          activity,
-          level: state.level,
-          title: getTitle(activity.slug),
-          bestScore: getBestScore(activity.slug),
-          hasInProgress: state.inProgress !== null,
-        };
-      })
-    );
+    let cancelled = false;
+
+    loadSessions(token, 'in-progress').then((result) => {
+      if (cancelled) return;
+
+      const inProgressTypes = new Set(
+        result.ok ? result.data.sessions.map((session) => session.activity_type) : [],
+      );
+
+      setCards(
+        ACTIVITIES.map((activity) => {
+          const state = getActivityState(activity.slug);
+          return {
+            activity,
+            level: state.level,
+            title: getTitle(activity.slug),
+            bestScore: getBestScore(activity.slug),
+            hasInProgress: inProgressTypes.has(activity.activityType),
+          };
+        }),
+      );
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [token]);
 
   if (loading) return null;
