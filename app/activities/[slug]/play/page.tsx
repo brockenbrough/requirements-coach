@@ -12,6 +12,7 @@ import {
   type CurrentSessionResult,
   type FeedbackResult,
   type SessionQuestion,
+  loadActivityLog,
   loadCurrentSession,
   loadFeedback,
   loadSessions,
@@ -146,6 +147,13 @@ export default function PlayActivityPage({ params }: { params: { slug: string } 
       }
       setError(submitted.error);
       return;
+    }
+
+    // The activity log's answeredCount for this session is now stale, whether or not this
+    // was the final question — refresh regardless of handleContinue's own score/completed-
+    // sessions refresh, which only fires once the whole session is done.
+    if (profile?.user_id) {
+      void loadActivityLog(token, profile.user_id, { forceRefresh: true });
     }
 
     // Committed first, disclosed second: the explanations only exist for an answer that

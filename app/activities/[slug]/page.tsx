@@ -4,23 +4,24 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../../components/AppShell';
+import { useUser } from '../../../components/UserProvider';
 import { getActivity } from '../../../lib/activityContent';
 import { START_DIFFICULTY_LEVEL } from '../../../lib/sessionRules';
 import {
   type CompletedAttempt,
   type CurrentSessionResult,
   abandonSession,
+  loadActivityLog,
   loadCompletedAttempts,
   loadCurrentSession,
   startSession,
 } from '../../../lib/sessionClient';
-import { useAccessToken } from '../../../lib/useAccessToken';
 
 const DIFFICULTY_LABEL: Record<number, string> = { 1: 'Easy', 2: 'Medium', 3: 'Hard' };
 
 export default function ActivityDetailPage({ params }: { params: { slug: string } }) {
   const router = useRouter();
-  const { token, loading } = useAccessToken();
+  const { token, profile, loading } = useUser();
   const activity = getActivity(params.slug);
 
   // The server is the only source of "does this activity have a run in progress" (REQ-PL-6.3) —
@@ -97,6 +98,10 @@ export default function ActivityDetailPage({ params }: { params: { slug: string 
     const result = await startSession(token, activity!.activityType);
 
     if (result.ok) {
+      // A fresh (or resumed) session now shows up in the activity log too.
+      if (profile?.user_id) {
+        void loadActivityLog(token, profile.user_id, { forceRefresh: true });
+      }
       router.push(`/activities/${activity!.slug}/play`);
       return;
     }
@@ -147,6 +152,10 @@ export default function ActivityDetailPage({ params }: { params: { slug: string 
       return;
     }
 
+    // The abandoned session's status just changed — the activity log's cached copy hasn't.
+    if (profile?.user_id) {
+      void loadActivityLog(token, profile.user_id, { forceRefresh: true });
+    }
     setCurrent(null);
   }
 

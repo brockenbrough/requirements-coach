@@ -5,36 +5,13 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppShell } from "../../components/AppShell";
 import { ActivityLogRow } from "../../components/ActivityLogRow";
-import { ACTIVITIES, Difficulty, getActivityByType } from "../../lib/activityContent";
-import type { ActivityLogEntry } from "../../lib/activityLogTypes";
+import { ACTIVITIES, Difficulty } from "../../lib/activityContent";
+import { toActivityLogEntry } from "../../lib/activityLogTypes";
 import { ActivityState, getActivityState } from "../../lib/activityStore";
 import { type SessionListEntry, loadSessions } from "../../lib/sessionClient";
-import type { ActivityType } from "../../lib/activityTypes";
 import { useUser } from "../../components/UserProvider";
 
 const RECENT_LIMIT = 3;
-
-/**
- * Adapts the real GET /api/sessions?status=completed shape to the ActivityLogEntry shape
- * ActivityLogRow expects, so the dashboard preview and the mock-data-driven /dashboard/log page
- * (GitHub #48) can share one row component without either page knowing about the other's data
- * source.
- */
-function toActivityLogEntry(session: SessionListEntry): ActivityLogEntry {
-  return {
-    id: session.session_id,
-    activityType: session.activity_type as ActivityType,
-    activityName: getActivityByType(session.activity_type)?.name ?? session.activity_type,
-    level: session.difficulty_level as 1 | 2 | 3,
-    dateTime: session.ended_at ?? session.started_at,
-    status: session.status === "in-progress" || session.status === "abandoned" ? session.status : "completed",
-    passed: session.passed,
-    score: session.cumulative_score,
-    maxScore: session.max_score,
-    totalQuestions: session.questionCount,
-    answeredQuestions: session.answeredCount,
-  };
-}
 
 type ContinueTarget = {
   slug: string;
