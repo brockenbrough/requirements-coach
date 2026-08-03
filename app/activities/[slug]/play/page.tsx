@@ -1,12 +1,12 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
-import { AppShell } from '../../../../components/AppShell';
-import { FeedbackCard } from '../../../../components/FeedbackCard';
-import { QuestionCard } from '../../../../components/QuestionCard';
-import { getActivity } from '../../../../lib/activityContent';
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+import { AppShell } from "../../../../components/AppShell";
+import { FeedbackCard } from "../../../../components/FeedbackCard";
+import { QuestionCard } from "../../../../components/QuestionCard";
+import { getActivity } from "../../../../lib/activityContent";
 import {
   type CurrentSessionResult,
   type FeedbackResult,
@@ -16,8 +16,8 @@ import {
   loadSessions,
   loadStudentScore,
   submitAnswer,
-} from '../../../../lib/sessionClient';
-import { useRequireRole } from '../../../../lib/useRequireRole';
+} from "../../../../lib/sessionClient";
+import { useRequireRole } from "../../../../lib/useRequireRole";
 
 /** What the last submitted answer earned, alongside the explanations for it. */
 type AnswerOutcome = {
@@ -27,11 +27,15 @@ type AnswerOutcome = {
   completed: boolean;
 };
 
-export default function PlayActivityPage({ params }: { params: { slug: string } }) {
+export default function PlayActivityPage({
+  params,
+}: {
+  params: { slug: string };
+}) {
   const router = useRouter();
   // Also redirects an instructor account away (GitHub #82) — this page is the "quiz
   // durchführen" flow itself, exactly what an instructor must not be able to reach.
-  const { token, profile, loading, authorized } = useRequireRole('student');
+  const { token, profile, loading, authorized } = useRequireRole("student");
   const activity = getActivity(params.slug);
 
   const [session, setSession] = useState<CurrentSessionResult | null>(null);
@@ -55,7 +59,7 @@ export default function PlayActivityPage({ params }: { params: { slug: string } 
     if (!result.ok) {
       // The session expired mid-play: back to login, not a dead-end error screen.
       if (result.status === 401) {
-        router.replace('/login');
+        router.replace("/login");
         return;
       }
       setError(result.error);
@@ -88,7 +92,10 @@ export default function PlayActivityPage({ params }: { params: { slug: string } 
       <AppShell active="activities">
         <div className="mx-auto max-w-xl rounded-brand-lg border border-brand-danger/40 bg-brand-danger/10 p-6 text-sm font-semibold text-brand-danger-light">
           {error}
-          <Link href={`/activities/${activity.slug}`} className="ml-1 underline hover:text-white">
+          <Link
+            href={`/activities/${activity.slug}`}
+            className="ml-1 underline hover:text-white"
+          >
             Back to the activity
           </Link>
         </div>
@@ -110,7 +117,12 @@ export default function PlayActivityPage({ params }: { params: { slug: string } 
     const sessionId = session!.session!.session_id;
     setSubmitting(true);
 
-    const submitted = await submitAnswer(token, sessionId, currentQuestion.question_id, answerId);
+    const submitted = await submitAnswer(
+      token,
+      sessionId,
+      currentQuestion.question_id,
+      answerId,
+    );
 
     if (!submitted.ok) {
       setSubmitting(false);
@@ -122,7 +134,7 @@ export default function PlayActivityPage({ params }: { params: { slug: string } 
       }
       // The session expired mid-answer: back to login, not a dead-end error screen.
       if (submitted.status === 401) {
-        router.replace('/login');
+        router.replace("/login");
         return;
       }
       setError(submitted.error);
@@ -131,7 +143,12 @@ export default function PlayActivityPage({ params }: { params: { slug: string } 
 
     // Committed first, disclosed second: the explanations only exist for an answer that
     // is already in the log, which is why this is a second call rather than one response.
-    const feedback = await loadFeedback(token, sessionId, currentQuestion.question_id, answerId);
+    const feedback = await loadFeedback(
+      token,
+      sessionId,
+      currentQuestion.question_id,
+      answerId,
+    );
     setSubmitting(false);
 
     if (!feedback.ok) {
@@ -155,7 +172,10 @@ export default function PlayActivityPage({ params }: { params: { slug: string } 
     if (outcome.completed) {
       if (token && profile?.user_id) {
         void loadStudentScore(token, profile.user_id, { forceRefresh: true });
-        void loadSessions(token, 'completed', { studentId: profile.user_id, forceRefresh: true });
+        void loadSessions(token, "completed", {
+          studentId: profile.user_id,
+          forceRefresh: true,
+        });
       }
       router.push(`/activities/${activity!.slug}`);
       return;
@@ -178,13 +198,18 @@ export default function PlayActivityPage({ params }: { params: { slug: string } 
               <span
                 key={i}
                 className={`h-2 w-2 rounded-full ${
-                  i < answeredDots ? 'bg-[#2DD4BF]' : i === answeredDots ? 'bg-[#7C4DFF]' : 'bg-[#332b6b]'
+                  i < answeredDots
+                    ? "bg-[#2DD4BF]"
+                    : i === answeredDots
+                      ? "bg-[#7C4DFF]"
+                      : "bg-[#332b6b]"
                 }`}
               />
             ))}
           </div>
           <span className="text-sm font-bold text-gray-500">
-            Question {Math.min(answeredDots + 1, totalQuestions)} of {totalQuestions} · {cumulativeScore} pts
+            Question {Math.min(answeredDots + 1, totalQuestions)} of{" "}
+            {totalQuestions} · {cumulativeScore} pts
           </span>
         </div>
 
@@ -196,10 +221,14 @@ export default function PlayActivityPage({ params }: { params: { slug: string } 
               selectedAnswerId={feedback.selectedOption.answerId}
               // The route only sends correctOption when the pick was wrong — a correct
               // pick is its own correct option.
-              correctAnswerId={feedback.correctOption?.answerId ?? feedback.selectedOption.answerId}
+              correctAnswerId={
+                feedback.correctOption?.answerId ??
+                feedback.selectedOption.answerId
+              }
               selectedExplanation={feedback.selectedOption.explanation}
               correctExplanation={
-                feedback.correctOption?.explanation ?? feedback.selectedOption.explanation
+                feedback.correctOption?.explanation ??
+                feedback.selectedOption.explanation
               }
               awardedScore={outcome.awardedScore}
               isCorrect={feedback.correct}
@@ -209,7 +238,7 @@ export default function PlayActivityPage({ params }: { params: { slug: string } 
                 onClick={handleContinue}
                 className="rounded-full bg-[#7C4DFF] px-6 py-3 text-sm font-extrabold text-white hover:bg-[#6234d1]"
               >
-                {outcome.completed ? 'Finish' : 'Next question'} →
+                {outcome.completed ? "Finish" : "Next question"} →
               </button>
             </div>
           </>
