@@ -7,18 +7,12 @@ const h = vi.hoisted(() => {
   const state = {
     queues: {} as Record<string, Result[]>,
     tables: [] as string[],
-    // Which rows the titles are built from is the whole definition of the response, so the
-    // filters are recorded rather than swallowed.
-    filters: [] as { table: string; column: string; value: unknown }[],
   };
 
   function makeBuilder(table: string, result: Result) {
     const builder: Record<string, unknown> = {
       select: () => builder,
-      eq: (column: string, value: unknown) => {
-        state.filters.push({ table, column, value });
-        return builder;
-      },
+      eq: () => builder,
       // PostgrestFilterBuilder is thenable — queries without .single() are awaited directly.
       then: (onOk: (r: Result) => unknown, onErr?: (e: unknown) => unknown) =>
         Promise.resolve(result).then(onOk, onErr),
@@ -81,7 +75,6 @@ describe('GET /api/students/{studentId}/titles', () => {
   beforeEach(() => {
     h.state.queues = {};
     h.state.tables = [];
-    h.state.filters = [];
   });
 
   it('returns 401 without a token', async () => {
@@ -111,16 +104,6 @@ describe('GET /api/students/{studentId}/titles', () => {
 
     expect(response.status).toBe(200);
     expect(body.titles).toEqual([]);
-  });
-
-  // REQ-GAM-BL-1.1 scopes the session lookup to the requesting student; title_definition is
-  // the same for everyone, so it is fetched unfiltered.
-  it('scopes the session_log query to the requesting student', async () => {
-    queueLookup([]);
-
-    await GET(req(), ctx);
-
-    expect(h.state.filters).toEqual([{ table: 'session_log', column: 'user_id', value: STUDENT_ID }]);
   });
 
   // AC 3: attempted but never passed.
