@@ -9,6 +9,7 @@
 // from the feedback route, and only after the answer has been committed.
 
 import type { ActivityType } from './activityTypes';
+import { getCachedActivityLog, setCachedActivityLog } from './activityLogStore';
 import { getCachedCompletedSessions, setCachedCompletedSessions } from './completedSessionsStore';
 import { getCachedScore, setCachedScore } from './scoreStore';
 
@@ -275,6 +276,45 @@ export function loadStudentScore(
   ).then((result) => {
     if (result.ok) {
       setCachedScore(studentId, result.data.score);
+    }
+    return result;
+  });
+}
+
+/**
+ * The student's full activity log — every session across every activity type and status
+ * (GET /api/students/{id}/activities), newest-relevant-timestamp first. Cached in localStorage
+ * (lib/activityLogStore.ts) keyed by studentId for the same reason as loadStudentScore.
+ *
+ * Unlike the score and completed-sessions caches, this list includes in-progress and abandoned
+ * sessions, whose progress changes as soon as the student answers a question or starts/abandons
+ * an activity elsewhere — callers must forceRefresh at those points too, not only once a session
+ * completes.
+ *
+ * studentId has to be the authenticated student; the route answers 403 for anyone else.
+ */
+export function loadActivityLog(
+  token: string,
+  studentId: string,
+  options: { forceRefresh?: boolean } = {},
+) {
+  if (!options.forceRefresh) {
+    const cached = getCachedActivityLog(studentId);
+    if (cached !== null) {
+      return Promise.resolve<ApiResult<{ activities: SessionListEntry[] }>>({
+        ok: true,
+        data: { activities: cached },
+      });
+    }
+  }
+
+  return request<{ activities: SessionListEntry[] }>(
+    `/api/students/${encodeURIComponent(studentId)}/activities`,
+    { method: 'GET' },
+    token,
+  ).then((result) => {
+    if (result.ok) {
+      setCachedActivityLog(studentId, result.data.activities);
     }
     return result;
   });

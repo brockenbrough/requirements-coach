@@ -228,6 +228,77 @@ export type SessionProgress = {
 };
 
 /**
+ * A session plus its progress, exactly the shape lib/sessionClient.ts's SessionListEntry
+ * describes for the UI — this is the server-side counterpart, kept as its own type rather than
+ * imported from that 'use client' module. Not to be confused with lib/activityLogTypes.ts's
+ * ActivityLogEntry, the display shape the profile/dashboard log UI (GitHub #48) actually renders
+ * — that one is derived from this one client-side (see toActivityLogEntry in app/dashboard/page.tsx).
+ */
+export type ActivityLogRow = {
+  session_id: string;
+  user_id: string;
+  activity_type: string;
+  difficulty_level: number;
+  started_at: string;
+  ended_at: string | null;
+  status: string;
+  cumulative_score: number;
+  max_score: number;
+  passed: boolean;
+  badge_id: string | null;
+  questionCount: number;
+  answeredCount: number;
+  nextPosition: number | null;
+};
+
+/**
+ * Every session the student has ever started, across every activity type and status — the full
+ * history behind the profile's activity log. Unlike loadCompletedAttempts (one activity type,
+ * completed only) or the per-status list behind GET /api/sessions (one status at a time), this
+ * merges in-progress, completed and abandoned sessions onto a single timeline.
+ *
+ * Ordered by whichever timestamp is the "when did this last matter" one for its row — ended_at
+ * for a session that is over, started_at for one still running — computed in JS rather than by
+ * the query, since a mixed-status list has no single column both kinds can be ordered on.
+ */
+export async function loadActivityLog(supabase: SupabaseClient, userId: string) {
+  const { data, error } = await supabase
+    .from('session_log')
+    .select(SESSION_COLUMNS)
+    .eq('user_id', userId);
+
+  if (error) return { activities: null, error };
+
+  type SessionRow = Omit<ActivityLogRow, 'questionCount' | 'answeredCount' | 'nextPosition'>;
+
+  const ordered = ((data ?? []) as SessionRow[]).slice().sort((a, b) => {
+    const at = new Date(a.ended_at ?? a.started_at).getTime();
+    const bt = new Date(b.ended_at ?? b.started_at).getTime();
+    return bt - at;
+  });
+
+  const { progress, error: progressError } = await loadProgressForSessions(
+    supabase,
+    ordered.map((session) => session.session_id),
+  );
+
+  if (progressError) return { activities: null, error: progressError };
+
+  const activities: ActivityLogRow[] = ordered.map((session) => {
+    const sessionProgress = progress!.get(session.session_id);
+
+    return {
+      ...session,
+      questionCount: sessionProgress?.questionCount ?? 0,
+      answeredCount: sessionProgress?.answeredCount ?? 0,
+      nextPosition: sessionProgress?.nextPosition ?? null,
+    };
+  });
+
+  return { activities, error: null };
+}
+
+/**
  * Progress for several sessions at once, keyed by session id.
  *
  * Two queries regardless of how many sessions are passed in — a per-session lookup would turn
