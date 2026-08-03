@@ -72,7 +72,20 @@ export type CurrentSessionResult = {
   completed?: boolean;
 };
 
+/** The answered_question_log row created by a submission (REQ-DL-4.1). */
+export type SubmittedAnswerRecord = {
+  logId: string;
+  sessionId: string;
+  questionId: string;
+  /** The answer_id that was recorded — named after the request field that carried it. */
+  selectedOptionId: string;
+  score: number;
+  /** Set by the database, so null only in the pathological case where the write did not echo it back. */
+  submittedAt: string | null;
+};
+
 export type SubmitAnswerResult = {
+  answer: SubmittedAnswerRecord;
   correct: boolean;
   explanation: string | null;
   score: number;
