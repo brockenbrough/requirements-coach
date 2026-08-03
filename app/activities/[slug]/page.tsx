@@ -14,13 +14,15 @@ import {
   loadCurrentSession,
   startSession,
 } from '../../../lib/sessionClient';
-import { useAccessToken } from '../../../lib/useAccessToken';
+import { useRequireRole } from '../../../lib/useRequireRole';
 
 const DIFFICULTY_LABEL: Record<number, string> = { 1: 'Easy', 2: 'Medium', 3: 'Hard' };
 
 export default function ActivityDetailPage({ params }: { params: { slug: string } }) {
   const router = useRouter();
-  const { token, loading } = useAccessToken();
+  // Also redirects an instructor account away (GitHub #82) — starting/resuming/abandoning a
+  // quiz is exactly the "quiz durchführen" capability instructors must not have.
+  const { token, loading, authorized } = useRequireRole('student');
   const activity = getActivity(params.slug);
 
   // The server is the only source of "does this activity have a run in progress" (REQ-PL-6.3) —
@@ -31,12 +33,6 @@ export default function ActivityDetailPage({ params }: { params: { slug: string 
   const [starting, setStarting] = useState(false);
   const [abandoning, setAbandoning] = useState(false);
   const [error, setError] = useState<{ message: string; needsProfile: boolean } | null>(null);
-
-  // No session, and we're done checking: send the user to a real "logged out"
-  // screen instead of leaving this page mounted with nothing to show.
-  useEffect(() => {
-    if (!loading && !token) router.replace('/login');
-  }, [loading, token, router]);
 
   // Both reads in one pass, because the page re-runs this on every return from /play: the
   // running session decides Start vs. Resume/Abandon, the finished ones fill the history below.
@@ -60,20 +56,7 @@ export default function ActivityDetailPage({ params }: { params: { slug: string 
     };
   }, [token, activity]);
 
-  if (loading) return null;
-
-  if (!token) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-[#0e0b1e] px-6 text-center text-[#F3F1FF]">
-        <div>
-          <p className="mb-4">You must be logged in to view this activity.</p>
-          <Link href="/login" className="rounded-full bg-[#7C4DFF] px-4 py-2 text-sm font-bold text-white">
-            Go to login
-          </Link>
-        </div>
-      </main>
-    );
-  }
+  if (loading || !authorized) return null;
 
   if (!activity) {
     return (

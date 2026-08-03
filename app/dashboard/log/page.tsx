@@ -1,8 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { AppShell } from '../../../components/AppShell';
 import {
   ActivityFilters,
@@ -14,24 +13,17 @@ import { ActivityLogTable } from '../../../components/ActivityLogTable';
 import { ActivityStatsCards } from '../../../components/ActivityStatsCards';
 import { resultStateOf } from '../../../lib/activityLogTypes';
 import { MOCK_ACTIVITY_LOGS } from '../../../lib/mockActivityLogs';
-import { useAccessToken } from '../../../lib/useAccessToken';
+import { useRequireRole } from '../../../lib/useRequireRole';
 
 const PAGE_SIZE = 8;
 
 export default function ActivityLogPage() {
-  const router = useRouter();
-  const { token, loading } = useAccessToken();
+  const { loading, authorized } = useRequireRole('student');
 
   const [activity, setActivity] = useState<ActivityFilterValue>('all');
   const [status, setStatus] = useState<StatusFilterValue>('all');
   const [sort, setSort] = useState<SortOrder>('newest');
   const [page, setPage] = useState(1);
-
-  // No session, and we're done checking: send the user to a real "logged out"
-  // screen instead of leaving this page mounted with nothing to show.
-  useEffect(() => {
-    if (!loading && !token) router.replace('/login');
-  }, [loading, token, router]);
 
   // GitHub #48: UI only, against MOCK_ACTIVITY_LOGS. Filtering/sorting is genuinely client-side
   // here (not a preview of a server query) — that's what makes the filters testable without a
@@ -65,20 +57,7 @@ export default function ActivityLogPage() {
     setPage(1);
   }
 
-  if (loading) return null;
-
-  if (!token) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-[#0e0b1e] px-6 text-center text-[#F3F1FF]">
-        <div>
-          <p className="mb-4">You must be logged in to view your activity log.</p>
-          <Link href="/login" className="rounded-full bg-[#7C4DFF] px-4 py-2 text-sm font-bold text-white">
-            Go to login
-          </Link>
-        </div>
-      </main>
-    );
-  }
+  if (loading || !authorized) return null;
 
   return (
     <AppShell active="dashboard">
