@@ -1,6 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { ActivityLogTable } from '../../components/ActivityLogTable';
 import { InstructorActivityStats } from '../../components/InstructorActivityStats';
@@ -10,16 +12,28 @@ import {
   type LevelFilterValue,
   type StudentFilterValue,
 } from '../../components/InstructorFilters';
-import { InstructorRoster, summarizeStudents } from '../../components/InstructorRoster';
+import { InstructorRoster } from '../../components/InstructorRoster';
+import { summarizeStudents } from '../../lib/activityLogTypes';
 import { MOCK_STUDENT_ACTIVITY } from '../../lib/mockStudentActivity';
 import { useRequireRole } from '../../lib/useRequireRole';
 
 const PAGE_SIZE = 10;
 
+// useSearchParams() (for the ?student= deep link from app/instructor/students/page.tsx) opts
+// this page out of static rendering unless it's wrapped in Suspense.
 export default function InstructorDashboardPage() {
+  return (
+    <Suspense fallback={null}>
+      <InstructorDashboardContent />
+    </Suspense>
+  );
+}
+
+function InstructorDashboardContent() {
   // GitHub #82: redirects anyone who isn't a confirmed instructor — see lib/useRequireRole.ts
   // for exactly what "confirmed" means for a profile-less or student account.
   const { loading, authorized } = useRequireRole('instructor');
+  const searchParams = useSearchParams();
 
   const [studentId, setStudentId] = useState<StudentFilterValue>('all');
   const [level, setLevel] = useState<LevelFilterValue>('all');
@@ -34,6 +48,13 @@ export default function InstructorDashboardPage() {
   }, []);
 
   const studentNameById = useMemo(() => new Map(MOCK_STUDENT_ACTIVITY.map((entry) => [entry.id, entry.studentName])), []);
+
+  // Lets app/instructor/students/page.tsx link straight into a filtered table
+  // (/instructor?student=<id>) instead of needing its own detail view.
+  useEffect(() => {
+    const studentParam = searchParams.get('student');
+    if (studentParam) setStudentId(studentParam);
+  }, [searchParams]);
 
   const filteredSorted = useMemo(() => {
     const rows = MOCK_STUDENT_ACTIVITY.filter((entry) => {
@@ -77,7 +98,12 @@ export default function InstructorDashboardPage() {
 
         <InstructorActivityStats entries={MOCK_STUDENT_ACTIVITY} />
 
-        <h2 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-gray-400">Students</h2>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h2 className="text-xs font-extrabold uppercase tracking-wide text-gray-400">Students</h2>
+          <Link href="/instructor/students" className="text-xs font-bold text-brand-purple hover:underline">
+            View all students →
+          </Link>
+        </div>
         <InstructorRoster students={roster} selectedStudentId={studentId} onSelectStudent={handleStudentChange} />
 
         <InstructorFilters

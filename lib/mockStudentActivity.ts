@@ -41,4 +41,30 @@ export const MOCK_STUDENT_ACTIVITY: StudentActivitySummary[] = [
   // Taylor Kim — just getting started.
   { id: 'sa-20', studentId: 'student-6', studentName: 'Taylor Kim', activityType: 'IDENTIFY_WEAK_USER_STORIES', activityName: 'Identify Weak User Stories', level: 1, dateTime: '2026-08-02T15:50:00', status: 'in-progress', passed: false, score: 25, maxScore: 100, totalQuestions: 4, answeredQuestions: 2 },
   { id: 'sa-21', studentId: 'student-6', studentName: 'Taylor Kim', activityType: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', activityName: 'Identify Weak Acceptance Criteria', level: 1, dateTime: '2026-07-30T14:00:00', status: 'completed', passed: true, score: 100, maxScore: 100, totalQuestions: 4, answeredQuestions: 4 },
+
+  // Casey Nguyen — mixed.
+  { id: 'sa-22', studentId: 'student-7', studentName: 'Casey Nguyen', activityType: 'IDENTIFY_WEAK_USER_STORIES', activityName: 'Identify Weak User Stories', level: 2, dateTime: '2026-08-01T09:25:00', status: 'completed', passed: true, score: 100, maxScore: 100, totalQuestions: 4, answeredQuestions: 4 },
+  { id: 'sa-23', studentId: 'student-7', studentName: 'Casey Nguyen', activityType: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', activityName: 'Identify Weak Acceptance Criteria', level: 1, dateTime: '2026-07-28T13:45:00', status: 'completed', passed: false, score: 75, maxScore: 100, totalQuestions: 4, answeredQuestions: 4 },
+  { id: 'sa-24', studentId: 'student-7', studentName: 'Casey Nguyen', activityType: 'IDENTIFY_WEAK_USER_STORIES', activityName: 'Identify Weak User Stories', level: 1, dateTime: '2026-07-23T10:10:00', status: 'completed', passed: true, score: 100, maxScore: 100, totalQuestions: 4, answeredQuestions: 4 },
+
+  // Riley Johnson — strong.
+  { id: 'sa-25', studentId: 'student-8', studentName: 'Riley Johnson', activityType: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', activityName: 'Identify Weak Acceptance Criteria', level: 3, dateTime: '2026-08-02T11:40:00', status: 'completed', passed: true, score: 100, maxScore: 100, totalQuestions: 4, answeredQuestions: 4 },
+  { id: 'sa-26', studentId: 'student-8', studentName: 'Riley Johnson', activityType: 'IDENTIFY_WEAK_USER_STORIES', activityName: 'Identify Weak User Stories', level: 2, dateTime: '2026-07-29T16:05:00', status: 'completed', passed: true, score: 100, maxScore: 100, totalQuestions: 4, answeredQuestions: 4 },
+
+  // Devon Brooks — another one who needs help.
+  { id: 'sa-27', studentId: 'student-9', studentName: 'Devon Brooks', activityType: 'IDENTIFY_WEAK_USER_STORIES', activityName: 'Identify Weak User Stories', level: 1, dateTime: '2026-08-01T14:55:00', status: 'abandoned', passed: false, score: 25, maxScore: 100, totalQuestions: 4, answeredQuestions: 1 },
+  { id: 'sa-28', studentId: 'student-9', studentName: 'Devon Brooks', activityType: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', activityName: 'Identify Weak Acceptance Criteria', level: 1, dateTime: '2026-07-26T09:30:00', status: 'abandoned', passed: false, score: 0, maxScore: 100, totalQuestions: 4, answeredQuestions: 0 },
+  { id: 'sa-29', studentId: 'student-9', studentName: 'Devon Brooks', activityType: 'IDENTIFY_WEAK_USER_STORIES', activityName: 'Identify Weak User Stories', level: 1, dateTime: '2026-07-21T15:20:00', status: 'completed', passed: false, score: 50, maxScore: 100, totalQuestions: 4, answeredQuestions: 4 },
+
+  // Jamie Rivera — strong.
+  { id: 'sa-30', studentId: 'student-10', studentName: 'Jamie Rivera', activityType: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', activityName: 'Identify Weak Acceptance Criteria', level: 2, dateTime: '2026-07-31T08:15:00', status: 'completed', passed: true, score: 100, maxScore: 100, totalQuestions: 4, answeredQuestions: 4 },
+  { id: 'sa-31', studentId: 'student-10', studentName: 'Jamie Rivera', activityType: 'IDENTIFY_WEAK_USER_STORIES', activityName: 'Identify Weak User Stories', level: 1, dateTime: '2026-07-24T12:50:00', status: 'completed', passed: true, score: 100, maxScore: 100, totalQuestions: 4, answeredQuestions: 4 },
+
+  // Quinn Alvarez — mixed.
+  { id: 'sa-32', studentId: 'student-11', studentName: 'Quinn Alvarez', activityType: 'IDENTIFY_WEAK_USER_STORIES', activityName: 'Identify Weak User Stories', level: 2, dateTime: '2026-07-30T17:00:00', status: 'completed', passed: false, score: 75, maxScore: 100, totalQuestions: 4, answeredQuestions: 4 },
+  { id: 'sa-33', studentId: 'student-11', studentName: 'Quinn Alvarez', activityType: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', activityName: 'Identify Weak Acceptance Criteria', level: 1, dateTime: '2026-07-19T11:35:00', status: 'completed', passed: true, score: 100, maxScore: 100, totalQuestions: 4, answeredQuestions: 4 },
+
+  // Harper Wilson — new-ish, doing fine so far.
+  { id: 'sa-34', studentId: 'student-12', studentName: 'Harper Wilson', activityType: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', activityName: 'Identify Weak Acceptance Criteria', level: 1, dateTime: '2026-08-02T13:05:00', status: 'in-progress', passed: false, score: 25, maxScore: 100, totalQuestions: 4, answeredQuestions: 1 },
+  { id: 'sa-35', studentId: 'student-12', studentName: 'Harper Wilson', activityType: 'IDENTIFY_WEAK_USER_STORIES', activityName: 'Identify Weak User Stories', level: 1, dateTime: '2026-07-25T09:50:00', status: 'completed', passed: true, score: 100, maxScore: 100, totalQuestions: 4, answeredQuestions: 4 },
 ];

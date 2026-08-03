@@ -1,0 +1,187 @@
+'use client';
+
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useMemo, useState } from 'react';
+import { AppShell } from '../../../components/AppShell';
+import { InstructorStudentCard } from '../../../components/InstructorStudentCard';
+import { summarizeStudents, type StudentAggregate } from '../../../lib/activityLogTypes';
+import { MOCK_STUDENT_ACTIVITY } from '../../../lib/mockStudentActivity';
+import { useRequireRole } from '../../../lib/useRequireRole';
+
+const PAGE_SIZE = 9;
+
+type SortOrder = 'needs-attention' | 'score-asc' | 'score-desc' | 'attempts-desc' | 'name';
+
+/** null (no completed attempts yet) always sorts after every known average, in either direction. */
+function compareByScore(a: StudentAggregate, b: StudentAggregate, direction: 1 | -1) {
+  if (a.averageScore === null) return b.averageScore === null ? 0 : 1;
+  if (b.averageScore === null) return -1;
+  return (a.averageScore - b.averageScore) * direction;
+}
+
+/**
+ * The full class roster (GitHub #82) — where the Instructor Dashboard's "View more students"
+ * inline expansion doesn't scale (a real class, or several sections, can run well past what's
+ * comfortable in a growing single-page grid). Same InstructorStudentCard as the dashboard, same
+ * summarizeStudents aggregation, but paginated and with its own search/sort so an instructor can
+ * find one specific student directly instead of scrolling.
+ */
+export default function AllStudentsPage() {
+  const router = useRouter();
+  const { loading, authorized } = useRequireRole('instructor');
+
+  const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<SortOrder>('needs-attention');
+  const [page, setPage] = useState(1);
+
+  const allStudents = useMemo(() => summarizeStudents(MOCK_STUDENT_ACTIVITY), []);
+
+  const filteredSorted = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const rows = q ? allStudents.filter((student) => student.studentName.toLowerCase().includes(q)) : allStudents;
+    const sorted = [...rows];
+
+    switch (sort) {
+      case 'score-asc':
+        sorted.sort((a, b) => compareByScore(a, b, 1));
+        break;
+      case 'score-desc':
+        sorted.sort((a, b) => compareByScore(a, b, -1));
+        break;
+      case 'attempts-desc':
+        sorted.sort((a, b) => b.attempts - a.attempts);
+        break;
+      case 'name':
+        sorted.sort((a, b) => a.studentName.localeCompare(b.studentName));
+        break;
+      default:
+        // summarizeStudents already returns this order (needs-attention first, then
+        // alphabetical); re-sorting here just keeps it stable after a search/sort round trip.
+        sorted.sort((a, b) => {
+          if (a.needsAttention !== b.needsAttention) return a.needsAttention ? -1 : 1;
+          return a.studentName.localeCompare(b.studentName);
+        });
+    }
+
+    return sorted;
+  }, [allStudents, query, sort]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredSorted.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageStudents = filteredSorted.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  function handleQueryChange(value: string) {
+    setQuery(value);
+    setPage(1);
+  }
+
+  function handleSortChange(value: SortOrder) {
+    setSort(value);
+    setPage(1);
+  }
+
+  // No per-student detail page exists yet — this is the same "jump to the filtered Activity
+  // Log" the dashboard's own roster cards do, just reachable from a different page.
+  function goToStudent(studentId: string) {
+    router.push(`/instructor?student=${encodeURIComponent(studentId)}`);
+  }
+
+  if (loading || !authorized) return null;
+
+  return (
+    <AppShell active="instructor">
+      <div className="mx-auto max-w-5xl">
+        <Link href="/instructor" className="mb-5 inline-flex items-center gap-1 text-sm font-bold text-gray-500 hover:text-brand-navy">
+          ← Back to Dashboard
+        </Link>
+
+        <h1 className="mb-1.5 text-2xl font-extrabold text-brand-navy">All Students</h1>
+        <p className="mb-6 max-w-2xl text-sm font-semibold text-gray-500">
+          Every student in the class. Search by name, sort, or click through to a student&apos;s activity log.
+        </p>
+
+        <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
+          <label className="block text-xs font-extrabold uppercase tracking-wide text-gray-400">
+            Search
+            <input
+              type="text"
+              value={query}
+              onChange={(event) => handleQueryChange(event.target.value)}
+              placeholder="Search by name…"
+              className="mt-1 block w-56 rounded-brand-md border border-gray-300 bg-white px-3.5 py-2 text-sm font-bold text-gray-600 outline-none transition focus:border-brand-purple"
+            />
+          </label>
+
+          <label className="block text-xs font-extrabold uppercase tracking-wide text-gray-400">
+            Sort
+            <select
+              value={sort}
+              onChange={(event) => handleSortChange(event.target.value as SortOrder)}
+              className="mt-1 block rounded-brand-md border border-gray-300 bg-white px-3.5 py-2 text-sm font-bold text-gray-600 outline-none transition focus:border-brand-purple"
+            >
+              <option value="needs-attention">Needs attention first</option>
+              <option value="score-asc">Average score: Low to high</option>
+              <option value="score-desc">Average score: High to low</option>
+              <option value="attempts-desc">Most attempts</option>
+              <option value="name">Name (A–Z)</option>
+            </select>
+          </label>
+        </div>
+
+        {pageStudents.length === 0 ? (
+          <p className="rounded-brand-lg border border-gray-100 bg-gray-50 p-6 text-center text-sm font-semibold text-gray-500">
+            No students match &quot;{query}&quot;.
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {pageStudents.map((student) => (
+              <InstructorStudentCard key={student.studentId} student={student} onClick={() => goToStudent(student.studentId)} />
+            ))}
+          </div>
+        )}
+
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <span className="text-xs font-semibold text-gray-500">
+            {filteredSorted.length === 0
+              ? '0 students'
+              : `Showing ${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, filteredSorted.length)} of ${filteredSorted.length} students`}
+          </span>
+
+          <div className="flex gap-1.5">
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="min-w-9 rounded-brand-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-bold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-gray-300 disabled:hover:text-gray-600"
+            >
+              Prev
+            </button>
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => setPage(p)}
+                className={`min-w-9 rounded-brand-md border px-2.5 py-1.5 text-xs font-bold transition ${
+                  p === currentPage
+                    ? 'border-brand-purple bg-brand-purple text-white'
+                    : 'border-gray-300 bg-white text-gray-600 hover:border-brand-purple hover:text-brand-purple'
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="min-w-9 rounded-brand-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-bold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-gray-300 disabled:hover:text-gray-600"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      </div>
+    </AppShell>
+  );
+}
