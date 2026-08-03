@@ -160,6 +160,15 @@ export function startSession(token: string, activityType: ActivityType) {
 }
 
 /**
+ * Gives up a running session (REQ-PL-6.3's "Abandon"). The only way out of in-progress other
+ * than answering every question — after this, POST /api/sessions draws a fresh set for the
+ * same activity type instead of handing back the abandoned one.
+ */
+export function abandonSession(token: string, sessionId: string) {
+  return request<{ session: SessionRecord }>(`/api/sessions/${sessionId}/abandon`, postJson({}), token);
+}
+
+/**
  * The running session with its questions and the answers given so far.
  * session: null (with a 200) means nothing is in progress — not an error.
  */

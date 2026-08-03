@@ -5,9 +5,11 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../../components/AppShell';
 import { getActivity } from '../../../lib/activityContent';
-import { abandonSession, ActivityState, getActivityState } from '../../../lib/activityStore';
+import { START_DIFFICULTY_LEVEL } from '../../../lib/sessionRules';
 import {
   type CompletedAttempt,
+  type CurrentSessionResult,
+  abandonSession,
   loadCompletedAttempts,
   loadCurrentSession,
   startSession,
@@ -20,10 +22,14 @@ export default function ActivityDetailPage({ params }: { params: { slug: string 
   const router = useRouter();
   const { token, loading } = useAccessToken();
   const activity = getActivity(params.slug);
-  const [state, setState] = useState<ActivityState | null>(null);
-  const [hasServerSession, setHasServerSession] = useState(false);
+
+  // The server is the only source of "does this activity have a run in progress" (REQ-PL-6.3) —
+  // there is no local/mock notion of progress anymore. null means "not checked yet or nothing
+  // running", which the render below treats the same as "not started".
+  const [current, setCurrent] = useState<CurrentSessionResult | null>(null);
   const [attempts, setAttempts] = useState<CompletedAttempt[] | null>(null);
   const [starting, setStarting] = useState(false);
+  const [abandoning, setAbandoning] = useState(false);
   const [error, setError] = useState<{ message: string; needsProfile: boolean } | null>(null);
 
   // No session, and we're done checking: send the user to a real "logged out"
@@ -32,14 +38,8 @@ export default function ActivityDetailPage({ params }: { params: { slug: string 
     if (!loading && !token) router.replace('/login');
   }, [loading, token, router]);
 
-  useEffect(() => {
-    if (!token || !activity) return;
-    setState(getActivityState(activity.slug));
-  }, [token, activity]);
-
-  // Both reads in one pass, because the page re-runs this on every return from /play:
-  // the running session decides the button label (starting is idempotent, so Start and
-  // Continue are the same call), the finished ones fill the history below it.
+  // Both reads in one pass, because the page re-runs this on every return from /play: the
+  // running session decides Start vs. Resume/Abandon, the finished ones fill the history below.
   useEffect(() => {
     if (!token || !activity) return;
     let cancelled = false;
@@ -47,9 +47,9 @@ export default function ActivityDetailPage({ params }: { params: { slug: string 
     Promise.all([
       loadCurrentSession(token, activity.activityType),
       loadCompletedAttempts(token, activity.activityType),
-    ]).then(([current, completed]) => {
+    ]).then(([currentResult, completed]) => {
       if (cancelled) return;
-      if (current.ok) setHasServerSession(current.data.session !== null);
+      if (currentResult.ok) setCurrent(currentResult.data);
       // An empty list and a failed read are different things, so the history only
       // renders once it is actually known — null keeps it out of the way until then.
       if (completed.ok) setAttempts(completed.data.attempts);
@@ -113,10 +113,50 @@ export default function ActivityDetailPage({ params }: { params: { slug: string 
     setError({ message: result.error, needsProfile: result.status === 409 });
   }
 
-  function handleAbandon() {
-    if (!confirm('Abandon this in-progress attempt? Your answers so far will be discarded.')) return;
-    setState(abandonSession(activity!.slug));
+  function handleResume() {
+    // The whole point of a running session is that it is already in hand server-side —
+    // resuming is just navigating there, not another start/resume network round trip.
+    router.push(`/activities/${activity!.slug}/play`);
   }
+
+  async function handleAbandon() {
+    const session = current?.session;
+    if (!token || !session || abandoning) return;
+    if (!confirm('Abandon this in-progress attempt? Your answers so far will be discarded.')) return;
+
+    setAbandoning(true);
+    setError(null);
+
+    const result = await abandonSession(token, session.session_id);
+
+    setAbandoning(false);
+
+    if (!result.ok) {
+      if (result.status === 401) {
+        router.push('/login');
+        return;
+      }
+      // 409: the session already left in-progress by some other route (finished, or already
+      // abandoned elsewhere) — treat it the same as a successful abandon rather than reporting
+      // a conflict the student cannot act on.
+      if (result.status === 409) {
+        setCurrent(null);
+        return;
+      }
+      setError({ message: result.error, needsProfile: false });
+      return;
+    }
+
+    setCurrent(null);
+  }
+
+  const session = current?.session ?? null;
+  const totalQuestions = current?.questions.length ?? 0;
+  const answeredCount = current?.answers.length ?? 0;
+  // Every new session is currently drawn at START_DIFFICULTY_LEVEL (see POST /api/sessions) —
+  // real level progression isn't implemented server-side yet, so this always matches what
+  // clicking Start would actually produce, and the running session's own level once one exists.
+  const displayLevel = session?.difficulty_level ?? START_DIFFICULTY_LEVEL;
 
   return (
     <AppShell active="activities">
@@ -128,63 +168,63 @@ export default function ActivityDetailPage({ params }: { params: { slug: string 
         <div className="rounded-2xl border border-[#332b6b] bg-[#1b1642] p-8 text-[#F3F1FF]">
           <div className="mb-4 flex flex-wrap gap-2">
             <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-extrabold text-[#2DD4BF]">
-              {state ? DIFFICULTY_LABEL[state.level] : ''} · Level {state?.level ?? 1}
+              {DIFFICULTY_LABEL[displayLevel] ?? 'Level'} · Level {displayLevel}
             </span>
             <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-bold text-[#A79FC9]">{activity.category}</span>
           </div>
           <h2 className="mb-2 text-2xl font-extrabold text-white">{activity.name}</h2>
           <p className="mb-6 text-sm font-semibold text-[#A79FC9]">{activity.instructions}</p>
 
-          {state?.inProgress ? (
+          {session ? (
             <>
+              <p className="mb-4 text-sm font-bold text-[#FFD666]">You have a previous attempt in progress.</p>
               <div className="mb-6 flex items-center gap-3">
                 <div className="h-2 flex-1 overflow-hidden rounded-full bg-[#241f52]">
                   <span
                     className="block h-full bg-[#2DD4BF]"
-                    style={{ width: `${(state.inProgress.answeredIds.length / state.inProgress.questionIds.length) * 100}%` }}
+                    style={{ width: totalQuestions > 0 ? `${(answeredCount / totalQuestions) * 100}%` : '0%' }}
                   />
                 </div>
                 <span className="whitespace-nowrap text-sm font-extrabold text-[#A79FC9]">
-                  {state.inProgress.answeredIds.length} / {state.inProgress.questionIds.length} answered
+                  {answeredCount} / {totalQuestions} answered
                 </span>
               </div>
               <div className="flex flex-wrap gap-3">
                 <button
-                  onClick={() => router.push(`/activities/${activity.slug}/play`)}
+                  onClick={handleResume}
                   className="rounded-full bg-[#7C4DFF] px-6 py-3 text-sm font-extrabold text-white hover:bg-[#6234d1]"
                 >
                   Resume
                 </button>
                 <button
                   onClick={handleAbandon}
-                  className="rounded-full border border-[#ff6b57]/40 bg-[#ff6b57]/10 px-6 py-3 text-sm font-extrabold text-[#ff8a75]"
+                  disabled={abandoning}
+                  className="rounded-full border border-[#ff6b57]/40 bg-[#ff6b57]/10 px-6 py-3 text-sm font-extrabold text-[#ff8a75] disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Abandon
+                  {abandoning ? 'Abandoning…' : 'Abandon'}
                 </button>
               </div>
             </>
           ) : (
-            <>
-              <button
-                onClick={handleStart}
-                disabled={starting}
-                className="rounded-full bg-[#7C4DFF] px-6 py-3 text-sm font-extrabold text-white hover:bg-[#6234d1] disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {starting ? 'Starting…' : hasServerSession ? 'Continue' : 'Start'}
-              </button>
-
-              {error ? (
-                <div className="mt-4 rounded-brand-md border border-brand-danger/40 bg-brand-danger/10 p-4 text-sm font-semibold text-brand-danger-light">
-                  {error.message}
-                  {error.needsProfile ? (
-                    <Link href="/profile" className="ml-1 underline hover:text-white">
-                      Go to your profile
-                    </Link>
-                  ) : null}
-                </div>
-              ) : null}
-            </>
+            <button
+              onClick={handleStart}
+              disabled={starting}
+              className="rounded-full bg-[#7C4DFF] px-6 py-3 text-sm font-extrabold text-white hover:bg-[#6234d1] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {starting ? 'Starting…' : 'Start'}
+            </button>
           )}
+
+          {error ? (
+            <div className="mt-4 rounded-brand-md border border-brand-danger/40 bg-brand-danger/10 p-4 text-sm font-semibold text-brand-danger-light">
+              {error.message}
+              {error.needsProfile ? (
+                <Link href="/profile" className="ml-1 underline hover:text-white">
+                  Go to your profile
+                </Link>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         {/* Completed attempts, newest first — the "list of prior results for the activity"
