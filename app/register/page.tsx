@@ -14,13 +14,15 @@ export default function RegisterPage() {
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showInstructorCode, setShowInstructorCode] = useState(false);
+  const [instructorCode, setInstructorCode] = useState('');
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
     setMessage('');
 
-    const result = await register(email, password);
+    const result = await register(email, password, instructorCode.trim() || undefined);
 
     if (!result.ok) {
       setLoading(false);
@@ -69,6 +71,27 @@ export default function RegisterPage() {
             placeholder="••••••••"
             autoComplete="new-password"
           />
+
+          <button
+            type="button"
+            onClick={() => setShowInstructorCode((v) => !v)}
+            className="text-xs font-semibold text-[#A79FC9] hover:text-[#2DD4BF] hover:underline"
+          >
+            Registering as an instructor?
+          </button>
+
+          {showInstructorCode ? (
+            <label className="block text-sm font-bold text-[#A79FC9]">
+              Instructor Access Code
+              <input
+                type="text"
+                value={instructorCode}
+                onChange={(event) => setInstructorCode(event.target.value)}
+                className="mt-1 w-full rounded-[10px] border border-[#332b6b] bg-[#1b1642] px-4 py-3 text-[#F3F1FF] outline-none ring-0 transition focus:border-[#7C4DFF]"
+                placeholder="Provided by your department"
+              />
+            </label>
+          ) : null}
 
           <button
             type="submit"
