@@ -76,25 +76,35 @@ describe('Profile API routes', () => {
   });
 
   it('POST creates a new profile', async () => {
-    const response = await POST(req('POST', { username: 'testuser', biography: 'Hello!' }));
+    const response = await POST(req('POST', { username: 'testuser', biography: 'Hello!', first_name: 'Test', last_name: 'User' }));
     expect(response.status).toBe(201);
     expect(await response.json()).toEqual({ profile: mockProfile });
   });
 
   it('POST defaults role to student when the token carries no instructor metadata', async () => {
-    await POST(req('POST', { username: 'testuser', biography: 'Hello!' }));
+    await POST(req('POST', { username: 'testuser', biography: 'Hello!', first_name: 'Test', last_name: 'User' }));
     const insertedRow = mockBuilder.insert.mock.calls[0][0];
     expect(insertedRow).toMatchObject({ role: 'student' });
   });
 
   it('POST sets role to instructor when the auth user metadata says so (GitHub #82)', async () => {
-    await POST(req('POST', { username: 'prof', biography: 'Hi class' }, 'instructor-token'));
+    await POST(req('POST', { username: 'prof', biography: 'Hi class', first_name: 'Prof', last_name: 'Smith' }, 'instructor-token'));
     const insertedRow = mockBuilder.insert.mock.calls[0][0];
     expect(insertedRow).toMatchObject({ role: 'instructor' });
   });
 
   it('POST returns 400 when username is missing', async () => {
-    const response = await POST(req('POST', { biography: 'Hello!' }));
+    const response = await POST(req('POST', { biography: 'Hello!', first_name: 'Test', last_name: 'User' }));
+    expect(response.status).toBe(400);
+  });
+
+  it('POST returns 400 when first_name is missing', async () => {
+    const response = await POST(req('POST', { username: 'testuser', biography: 'Hello!', last_name: 'User' }));
+    expect(response.status).toBe(400);
+  });
+
+  it('POST returns 400 when last_name is missing', async () => {
+    const response = await POST(req('POST', { username: 'testuser', biography: 'Hello!', first_name: 'Test' }));
     expect(response.status).toBe(400);
   });
 

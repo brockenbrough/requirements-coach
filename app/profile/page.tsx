@@ -13,6 +13,7 @@ import { getInitials } from '../../lib/initials';
 type ProfileDraft = {
   first_name: string;
   last_name: string;
+
   age: string;
   semester: string;
   biography: string;
@@ -126,10 +127,10 @@ export default function ProfilePage() {
     return null;
   }
 
-  function draftFromProfile(p: { first_name: string | null; last_name: string | null; age: number | null; semester: number | null; biography: string }): ProfileDraft {
+  function draftFromProfile(p: { first_name: string; last_name: string; age: number | null; semester: number | null; biography: string }): ProfileDraft {
     return {
-      first_name: p.first_name ?? '',
-      last_name: p.last_name ?? '',
+      first_name: p.first_name,
+      last_name: p.last_name,
       age: p.age != null ? String(p.age) : '',
       semester: p.semester != null ? String(p.semester) : '',
       biography: p.biography,

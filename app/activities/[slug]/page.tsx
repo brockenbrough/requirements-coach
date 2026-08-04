@@ -10,6 +10,7 @@ import {
   type CompletedAttempt,
   type CurrentSessionResult,
   abandonSession,
+  loadActivityLog,
   loadCompletedAttempts,
   loadCurrentSession,
   startSession,
@@ -30,7 +31,7 @@ export default function ActivityDetailPage({
   const router = useRouter();
   // Also redirects an instructor account away (GitHub #82) — starting/resuming/abandoning a
   // quiz is exactly the "quiz durchführen" capability instructors must not have.
-  const { token, profile, loading, authorized } = useRequireRole("student");
+  const { token, profile, loading, authorized } = useRequireRole('student');
   const activity = getActivity(params.slug);
 
   // The server is the only source of "does this activity have a run in progress" (REQ-PL-6.3) —
@@ -94,6 +95,10 @@ export default function ActivityDetailPage({
     const result = await startSession(token, activity!.activityType);
 
     if (result.ok) {
+      // A fresh (or resumed) session now shows up in the activity log too.
+      if (profile?.user_id) {
+        void loadActivityLog(token, profile.user_id, { forceRefresh: true });
+      }
       router.push(`/activities/${activity!.slug}/play`);
       return;
     }
@@ -149,6 +154,10 @@ export default function ActivityDetailPage({
       return;
     }
 
+    // The abandoned session's status just changed — the activity log's cached copy hasn't.
+    if (profile?.user_id) {
+      void loadActivityLog(token, profile.user_id, { forceRefresh: true });
+    }
     setCurrent(null);
   }
 
