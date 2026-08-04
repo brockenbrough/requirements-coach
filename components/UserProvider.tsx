@@ -11,8 +11,8 @@ export type Profile = {
   biography: string;
   avatar_url: string | null;
   role: Role;
-  first_name: string | null;
-  last_name: string | null;
+  first_name: string;
+  last_name: string;
   age: number | null;
   semester: number | null;
 };

@@ -70,13 +70,15 @@ export async function POST(request: Request) {
   const { username, biography, first_name, last_name, age, semester } = body as {
     username?: string;
     biography?: string;
-    first_name?: string | null;
-    last_name?: string | null;
+    first_name?: string;
+    last_name?: string;
     age?: number | null;
     semester?: number | null;
   };
 
   if (!username) return Response.json({ error: 'username is required.' }, { status: 400 });
+  if (!first_name?.trim()) return Response.json({ error: 'first_name is required.' }, { status: 400 });
+  if (!last_name?.trim()) return Response.json({ error: 'last_name is required.' }, { status: 400 });
 
   const ageError = rangeError(age, MIN_AGE, MAX_AGE, 'age');
   if (ageError) return Response.json({ error: ageError }, { status: 400 });
@@ -90,8 +92,8 @@ export async function POST(request: Request) {
       username,
       biography: biography ?? '',
       role: deriveRole(user),
-      first_name: first_name?.trim() || null,
-      last_name: last_name?.trim() || null,
+      first_name: first_name.trim(),
+      last_name: last_name.trim(),
       age: age ?? null,
       semester: semester ?? null,
     })
@@ -114,8 +116,8 @@ export async function PATCH(request: Request) {
   const body = await request.json();
   const { biography, first_name, last_name, age, semester } = body as {
     biography?: string;
-    first_name?: string | null;
-    last_name?: string | null;
+    first_name?: string;
+    last_name?: string;
     age?: number | null;
     semester?: number | null;
   };
@@ -123,8 +125,14 @@ export async function PATCH(request: Request) {
   const updates: Record<string, unknown> = {};
 
   if (biography !== undefined) updates.biography = biography;
-  if (first_name !== undefined) updates.first_name = first_name?.trim() || null;
-  if (last_name !== undefined) updates.last_name = last_name?.trim() || null;
+  if (first_name !== undefined) {
+    if (!first_name.trim()) return Response.json({ error: 'first_name cannot be empty.' }, { status: 400 });
+    updates.first_name = first_name.trim();
+  }
+  if (last_name !== undefined) {
+    if (!last_name.trim()) return Response.json({ error: 'last_name cannot be empty.' }, { status: 400 });
+    updates.last_name = last_name.trim();
+  }
 
   if (age !== undefined) {
     const ageError = rangeError(age, MIN_AGE, MAX_AGE, 'age');
