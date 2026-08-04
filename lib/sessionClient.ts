@@ -9,6 +9,7 @@
 // from the feedback route, and only after the answer has been committed.
 
 import type { ActivityType } from './activityTypes';
+import { getCachedCompletedAttempts, setCachedCompletedAttempts } from './completedAttemptsStore';
 import { getCachedActivityLog, setCachedActivityLog } from './activityLogStore';
 import { getCachedCompletedSessions, setCachedCompletedSessions } from './completedSessionsStore';
 import { getCachedScore, setCachedScore } from './scoreStore';
@@ -238,13 +239,36 @@ export function loadSessions(
 /**
  * The student's finished attempts at one activity, newest first. An empty list is a normal
  * 200 — a student who has not completed anything yet simply has no history.
+ *
+ * Cached in localStorage (lib/completedAttemptsStore.ts) keyed by studentId *and* activityType,
+ * the same pattern as loadStudentScore/loadSessions('completed', ...), since the activity detail
+ * page otherwise refetches this on every mount. A plain call is served from the cache when
+ * present; pass forceRefresh to bypass it and re-cache the server's answer — the play flow does
+ * this once a session for that activity completes, since that's the only thing that changes it.
  */
-export function loadCompletedAttempts(token: string, activityType: ActivityType) {
+export function loadCompletedAttempts(
+  token: string,
+  studentId: string,
+  activityType: ActivityType,
+  options: { forceRefresh?: boolean } = {},
+) {
+  if (!options.forceRefresh) {
+    const cached = getCachedCompletedAttempts(studentId, activityType);
+    if (cached !== null) {
+      return Promise.resolve<ApiResult<{ attempts: CompletedAttempt[] }>>({ ok: true, data: { attempts: cached } });
+    }
+  }
+
   return request<{ attempts: CompletedAttempt[] }>(
     `/api/sessions/completed?activityType=${encodeURIComponent(activityType)}`,
     { method: 'GET' },
     token,
-  );
+  ).then((result) => {
+    if (result.ok) {
+      setCachedCompletedAttempts(studentId, activityType, result.data.attempts);
+    }
+    return result;
+  });
 }
 
 /**
