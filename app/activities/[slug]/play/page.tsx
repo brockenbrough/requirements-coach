@@ -180,14 +180,24 @@ export default function PlayActivityPage({
     if (!outcome) return;
     if (outcome.completed) {
       if (token && profile?.user_id) {
-        void loadStudentScore(token, profile.user_id, { forceRefresh: true });
-        void loadSessions(token, "completed", {
-          studentId: profile.user_id,
-          forceRefresh: true,
+        // Refresh the score, the completed-sessions list, and the previous-attempts
+        // table caches BEFORE navigating, so the activity page's history table shows
+        // the new session_log record instead of the stale cached one. These calls
+        // were previously fire-and-forget, so a fast navigation could read the old
+        // cache and leave the table one attempt behind. GitHub #130.
+        void Promise.all([
+          loadStudentScore(token, profile.user_id, { forceRefresh: true }),
+          loadSessions(token, "completed", {
+            studentId: profile.user_id,
+            forceRefresh: true,
+          }),
+          loadCompletedAttempts(token, profile.user_id, activity!.activityType, {
+            forceRefresh: true,
+          }),
+        ]).then(() => {
+          router.push(`/activities/${activity!.slug}`);
         });
-        void loadCompletedAttempts(token, profile.user_id, activity!.activityType, {
-          forceRefresh: true,
-        });
+        return;
       }
       router.push(`/activities/${activity!.slug}`);
       return;
