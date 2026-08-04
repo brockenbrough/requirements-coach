@@ -1,13 +1,13 @@
-Anzeige für bei was für eine Art von fragen man (User Storys oder Requirements z.B.) man gut ist oder
-bei welchen man noch nachhelfen muss
+Performance Breakdown: A display showing which types of questions (e.g., User Stories or Requirements) you are good at, and where you still need improvement.
 
-Level Bar für wann man beim nächsten Level (z.B.Master) ankommt
+Level Progress Bar: A progress bar showing how close you are to reaching the next level (e.g., "Master").
 
-Flamen wie bei Snapchat das man jeden Tag was gemacht hat
+Daily Streaks: Flames (streaks) like on Snapchat to show that you've been active every day.
 
-Wie bei Rocketleague Stats anzeigen wenn man aufs Profil geht
-Wie viele sachen von jedem Level gemacht und geschafft wurde usw.
+Profile Statistics: A stats display on the user profile, similar to Rocket League.
 
-Anzeige wenn ein Student eine Frage schon zum 5 mal z.B. Falsch beantwortet hat das man es wiederholen muss
+Completion Stats: A breakdown of how many tasks/questions from each level were attempted and successfully completed, etc.
 
-Wie viel Prozent der Fragen richtig beantwortet werden im Schnitt
+Repetition Alert: A notification/prompt when a student answers a question incorrectly for the 5th time (for example), indicating that it needs to be reviewed or repeated.
+
+Average Accuracy: The average percentage of questions answered correctly.
