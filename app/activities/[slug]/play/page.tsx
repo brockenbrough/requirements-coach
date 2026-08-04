@@ -11,6 +11,7 @@ import {
   type CurrentSessionResult,
   type FeedbackResult,
   type SessionQuestion,
+  loadCompletedAttempts,
   loadCurrentSession,
   loadFeedback,
   loadSessions,
@@ -174,6 +175,9 @@ export default function PlayActivityPage({
         void loadStudentScore(token, profile.user_id, { forceRefresh: true });
         void loadSessions(token, "completed", {
           studentId: profile.user_id,
+          forceRefresh: true,
+        });
+        void loadCompletedAttempts(token, profile.user_id, activity!.activityType, {
           forceRefresh: true,
         });
       }
