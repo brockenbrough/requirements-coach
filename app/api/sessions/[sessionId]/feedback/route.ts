@@ -1,7 +1,7 @@
 import { getSupabaseClient } from '../../../../../lib/supabase';
 import { loadQuestionOptions } from '../../../../../lib/sessionQueries';
 
-type AnsweredLogRow = { answer_id: string; score: number; submitted_at: string };
+type AnsweredLogRow = { submitted_option: string; score: number; submitted_at: string };
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -66,15 +66,15 @@ export async function POST(request: Request, { params }: { params: { sessionId: 
   if (sessionError) return Response.json({ error: sessionError.message }, { status: 500 });
   if (!session) return Response.json({ error: 'Session not found.' }, { status: 404 });
 
-  // The log is the authority on what was submitted. Filtering on answer_id as well means a
-  // selection the student never made has no record, and looks like any other missing one.
+  // The log is the authority on what was submitted. Filtering on submitted_option as well means
+  // a selection the student never made has no record, and looks like any other missing one.
   const { data: log, error: logError } = await supabase
     .from('answered_question_log')
-    .select('answer_id, score, submitted_at')
+    .select('submitted_option, score, submitted_at')
     .eq('session_id', sessionId)
     .eq('user_id', user.id)
     .eq('question_id', questionId)
-    .eq('answer_id', selectedOptionId)
+    .eq('submitted_option', selectedOptionId)
     .maybeSingle();
 
   if (logError) return Response.json({ error: logError.message }, { status: 500 });

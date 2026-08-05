@@ -11,7 +11,7 @@ const UNIQUE_VIOLATION = '23505';
 
 // What a caller needs to identify the record it just created (REQ-DL-4.1). user_id is left
 // out on purpose — it is the requesting student's own id, a filter rather than payload.
-const ANSWER_LOG_COLUMNS = 'log_id, session_id, question_id, answer_id, score, submitted_at';
+const ANSWER_LOG_COLUMNS = 'log_id, session_id, question_id, submitted_option, score, submitted_at';
 
 type SessionRow = {
   session_id: string;
@@ -26,7 +26,7 @@ type AnswerLogRow = {
   log_id: string;
   session_id: string;
   question_id: string;
-  answer_id: string;
+  submitted_option: string;
   score: number;
   submitted_at: string;
 };
@@ -143,7 +143,7 @@ export async function POST(request: Request, { params }: { params: { sessionId: 
     session_id: sessionId,
     user_id: user.id,
     question_id: questionId,
-    answer_id: option.answer_id,
+    submitted_option: option.answer_id,
     score,
   };
 
@@ -217,7 +217,7 @@ function answerRecord(written: AnswerLogRow | null, sent: Omit<AnswerLogRow, 'su
     logId: row.log_id,
     sessionId: row.session_id,
     questionId: row.question_id,
-    selectedOptionId: row.answer_id,
+    selectedOptionId: row.submitted_option,
     score: row.score,
     submittedAt: written?.submitted_at ?? null,
   };

@@ -26,10 +26,10 @@ const SESSION_QUESTION_COLUMNS = `
 // submitted, which is why they live on this query and not on the one above.
 const SESSION_ANSWER_COLUMNS = `
   question_id,
-  answer_id,
+  submitted_option,
   score,
   submitted_at,
-  answer:answer_id ( is_correct, explanation )
+  answer:submitted_option ( is_correct, explanation )
 `;
 
 type QuestionRow = {
@@ -46,7 +46,7 @@ type QuestionRow = {
 
 type AnswerRow = {
   question_id: string;
-  answer_id: string;
+  submitted_option: string;
   score: number;
   submitted_at: string;
   answer: { is_correct: boolean; explanation: string | null } | null;
@@ -160,7 +160,7 @@ export async function loadSessionAnswers(supabase: SupabaseClient, sessionId: st
 
   const answers = ((data ?? []) as unknown as AnswerRow[]).map((row) => ({
     question_id: row.question_id,
-    answer_id: row.answer_id,
+    submitted_option: row.submitted_option,
     score: row.score,
     submitted_at: row.submitted_at,
     correct: row.answer?.is_correct ?? null,
