@@ -59,6 +59,16 @@ export type SessionListEntry = SessionRecord & {
   nextPosition: number | null;
 };
 
+/**
+ * The same entry as returned by the class-wide instructor endpoint, plus who it belongs to.
+ * studentName is already a display name — the server derives it from first/last name or
+ * username, so no caller has to know the profile's shape.
+ */
+export type InstructorSessionEntry = SessionListEntry & {
+  studentId: string;
+  studentName: string;
+};
+
 export type StartSessionResult = {
   session: SessionRecord;
   questions: SessionQuestion[];
@@ -342,6 +352,22 @@ export function loadActivityLog(
     }
     return result;
   });
+}
+
+/**
+ * Every student's attempts across the class (GET /api/instructor/activities, GitHub #171) —
+ * what the Instructor Dashboard renders. The route answers 403 for anyone who isn't a
+ * confirmed instructor, so there is no studentId to pass: the whole class is the scope.
+ *
+ * Deliberately **not** cached in localStorage, unlike loadStudentScore/loadSessions('completed')
+ * /loadActivityLog. Those four caches are keyed by studentId and hold the student's own data,
+ * which only that student's own actions change — so the page that causes a change can
+ * forceRefresh it. This list changes whenever *any* student in the class answers, starts or
+ * abandons something, and this tab never learns about it, so a cache here would just show
+ * an instructor stale results with no invalidation point to fix it.
+ */
+export function loadInstructorActivities(token: string) {
+  return request<{ sessions: InstructorSessionEntry[] }>('/api/instructor/activities', { method: 'GET' }, token);
 }
 
 /**

@@ -2,11 +2,16 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../../../components/AppShell';
 import { InstructorStudentCard } from '../../../components/InstructorStudentCard';
-import { summarizeStudents, type StudentAggregate } from '../../../lib/activityLogTypes';
-import { MOCK_STUDENT_ACTIVITY } from '../../../lib/mockStudentActivity';
+import {
+  summarizeStudents,
+  toStudentActivitySummary,
+  type StudentActivitySummary,
+  type StudentAggregate,
+} from '../../../lib/activityLogTypes';
+import { loadInstructorActivities } from '../../../lib/sessionClient';
 import { useRequireRole } from '../../../lib/useRequireRole';
 
 const PAGE_SIZE = 9;
@@ -26,16 +31,39 @@ function compareByScore(a: StudentAggregate, b: StudentAggregate, direction: 1 |
  * comfortable in a growing single-page grid). Same InstructorStudentCard as the dashboard, same
  * summarizeStudents aggregation, but paginated and with its own search/sort so an instructor can
  * find one specific student directly instead of scrolling.
+ *
+ * Only students who have attempted something appear — the roster is derived from attempts
+ * (GitHub #171), so an enrolled student who never started an activity has no row to aggregate.
  */
 export default function AllStudentsPage() {
   const router = useRouter();
-  const { loading, authorized } = useRequireRole('instructor');
+  const { token, loading, authorized } = useRequireRole('instructor');
+
+  const [entries, setEntries] = useState<StudentActivitySummary[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<SortOrder>('needs-attention');
   const [page, setPage] = useState(1);
 
-  const allStudents = useMemo(() => summarizeStudents(MOCK_STUDENT_ACTIVITY), []);
+  // Same class-wide fetch as the dashboard, made independently rather than shared: this list is
+  // uncached (see loadInstructorActivities), and the two pages are separate entry points.
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+
+    loadInstructorActivities(token).then((result) => {
+      if (cancelled) return;
+      if (result.ok) setEntries(result.data.sessions.map(toStudentActivitySummary));
+      else setError(result.error);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  const allStudents = useMemo(() => summarizeStudents(entries ?? []), [entries]);
 
   const filteredSorted = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -101,86 +129,98 @@ export default function AllStudentsPage() {
           Every student in the class. Search by name, sort, or click through to a student&apos;s activity log.
         </p>
 
-        <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
-          <label className="block text-xs font-extrabold uppercase tracking-wide text-gray-400">
-            Search
-            <input
-              type="text"
-              value={query}
-              onChange={(event) => handleQueryChange(event.target.value)}
-              placeholder="Search by name…"
-              className="mt-1 block w-56 rounded-brand-md border border-gray-300 bg-white px-3.5 py-2 text-sm font-bold text-gray-600 outline-none transition focus:border-brand-purple"
-            />
-          </label>
-
-          <label className="block text-xs font-extrabold uppercase tracking-wide text-gray-400">
-            Sort
-            <select
-              value={sort}
-              onChange={(event) => handleSortChange(event.target.value as SortOrder)}
-              className="mt-1 block rounded-brand-md border border-gray-300 bg-white px-3.5 py-2 text-sm font-bold text-gray-600 outline-none transition focus:border-brand-purple"
-            >
-              <option value="needs-attention">Needs attention first</option>
-              <option value="score-asc">Average score: Low to high</option>
-              <option value="score-desc">Average score: High to low</option>
-              <option value="attempts-desc">Most attempts</option>
-              <option value="name">Name (A–Z)</option>
-            </select>
-          </label>
-        </div>
-
-        {pageStudents.length === 0 ? (
-          <p className="rounded-brand-lg border border-gray-100 bg-gray-50 p-6 text-center text-sm font-semibold text-gray-500">
-            No students match &quot;{query}&quot;.
+        {error ? (
+          <p className="mb-6 rounded-brand-lg border border-brand-danger/40 bg-brand-danger/10 p-4 text-sm font-semibold text-brand-danger-light">
+            {error}
           </p>
+        ) : entries === null ? (
+          <p className="mb-6 text-sm font-semibold text-gray-500">Loading…</p>
         ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {pageStudents.map((student) => (
-              <InstructorStudentCard key={student.studentId} student={student} onClick={() => goToStudent(student.studentId)} />
-            ))}
-          </div>
+          <>
+            <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
+              <label className="block text-xs font-extrabold uppercase tracking-wide text-gray-400">
+                Search
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(event) => handleQueryChange(event.target.value)}
+                  placeholder="Search by name…"
+                  className="mt-1 block w-56 rounded-brand-md border border-gray-300 bg-white px-3.5 py-2 text-sm font-bold text-gray-600 outline-none transition focus:border-brand-purple"
+                />
+              </label>
+
+              <label className="block text-xs font-extrabold uppercase tracking-wide text-gray-400">
+                Sort
+                <select
+                  value={sort}
+                  onChange={(event) => handleSortChange(event.target.value as SortOrder)}
+                  className="mt-1 block rounded-brand-md border border-gray-300 bg-white px-3.5 py-2 text-sm font-bold text-gray-600 outline-none transition focus:border-brand-purple"
+                >
+                  <option value="needs-attention">Needs attention first</option>
+                  <option value="score-asc">Average score: Low to high</option>
+                  <option value="score-desc">Average score: High to low</option>
+                  <option value="attempts-desc">Most attempts</option>
+                  <option value="name">Name (A–Z)</option>
+                </select>
+              </label>
+            </div>
+
+            {pageStudents.length === 0 ? (
+              <p className="rounded-brand-lg border border-gray-100 bg-gray-50 p-6 text-center text-sm font-semibold text-gray-500">
+                {/* An empty class and a search that matched nothing are different states now that
+                    the roster is real — only students with at least one attempt appear here. */}
+                {query ? `No students match "${query}".` : 'No student has attempted an activity yet.'}
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {pageStudents.map((student) => (
+                  <InstructorStudentCard key={student.studentId} student={student} onClick={() => goToStudent(student.studentId)} />
+                ))}
+              </div>
+            )}
+
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <span className="text-xs font-semibold text-gray-500">
+                {filteredSorted.length === 0
+                  ? '0 students'
+                  : `Showing ${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, filteredSorted.length)} of ${filteredSorted.length} students`}
+              </span>
+
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="min-w-9 rounded-brand-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-bold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-gray-300 disabled:hover:text-gray-600"
+                >
+                  Prev
+                </button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setPage(p)}
+                    className={`min-w-9 rounded-brand-md border px-2.5 py-1.5 text-xs font-bold transition ${
+                      p === currentPage
+                        ? 'border-brand-purple bg-brand-purple text-white'
+                        : 'border-gray-300 bg-white text-gray-600 hover:border-brand-purple hover:text-brand-purple'
+                    }`}
+                  >
+                    {p}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className="min-w-9 rounded-brand-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-bold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-gray-300 disabled:hover:text-gray-600"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          </>
         )}
-
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-          <span className="text-xs font-semibold text-gray-500">
-            {filteredSorted.length === 0
-              ? '0 students'
-              : `Showing ${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, filteredSorted.length)} of ${filteredSorted.length} students`}
-          </span>
-
-          <div className="flex gap-1.5">
-            <button
-              type="button"
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={currentPage === 1}
-              className="min-w-9 rounded-brand-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-bold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-gray-300 disabled:hover:text-gray-600"
-            >
-              Prev
-            </button>
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-              <button
-                key={p}
-                type="button"
-                onClick={() => setPage(p)}
-                className={`min-w-9 rounded-brand-md border px-2.5 py-1.5 text-xs font-bold transition ${
-                  p === currentPage
-                    ? 'border-brand-purple bg-brand-purple text-white'
-                    : 'border-gray-300 bg-white text-gray-600 hover:border-brand-purple hover:text-brand-purple'
-                }`}
-              >
-                {p}
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={currentPage === totalPages}
-              className="min-w-9 rounded-brand-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-bold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-gray-300 disabled:hover:text-gray-600"
-            >
-              Next
-            </button>
-          </div>
-        </div>
       </div>
     </AppShell>
   );

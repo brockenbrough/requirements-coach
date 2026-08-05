@@ -17,55 +17,99 @@ There is no lint or typecheck script; `npm run build` is the type check.
 
 ## Environment setup
 
-Copy `.env.example` to `.env.local` and fill in your Supabase credentials. Then, in the Supabase SQL editor, run `supabase/schema.sql` followed by `supabase/seed.sql` (the question bank — without it every session start returns 400), and create a **public** Storage bucket named `avatars` for profile images.
+Copy `.env.example` to `.env.local` and fill in your Supabase credentials. Then, in the Supabase SQL editor, run `supabase/schema.sql` followed by `supabase/seed.sql` (the question bank — without it every session start returns 400), and create a **public** Storage bucket named `avatars` for profile images. (README.md's mention of a `myapp_profile` table is stale — the profile table is `"user"`.)
 
 `lib/supabase.ts` accepts either `SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_URL` and exposes three factories, each returning `null` when its key is missing so routes can answer 500 instead of a confusing Supabase error:
 
 - `getSupabaseClient()` — service-role key preferred, anon fallback. Used by every data route; it bypasses RLS, which is why those routes must derive `user_id` from the token themselves.
-- `getSupabaseAuthClient()` — anon key preferred. Only `login`, so Supabase issues a real user session.
+- `getSupabaseAuthClient()` — anon key preferred. Only `login` and `refresh`, so Supabase issues/renews a real user session.
 - `getSupabaseAdminClient()` — service role, no fallback. Only `register` (`auth.admin.createUser`, which bypasses email confirmation).
 
 Clients are created per call with `persistSession: false` — no singleton, no shared state.
 
 ## Architecture
 
-Next.js 14 App Router, Tailwind, Supabase. The product is a requirements-practice app for students; `docs/requirements/requirements.md` is the spec, and its identifiers (`REQ-DL-3.1`, `REQ-PL-2.1`, `REQ-GAM-BL-1`, …) are cited in code comments — read the referenced requirement before changing behavior that a comment ties to one.
+Next.js 14 App Router, Tailwind, Supabase. The product is a requirements-practice app for students; `docs/requirements/requirements.md` is the spec, and its identifiers (`REQ-DL-3.1`, `REQ-PL-2.1`, `REQ-GAM-BL-1`, …) are cited in code comments — read the referenced requirement before changing behavior that a comment ties to one. Code comments also cite GitHub issue numbers (`GitHub #82`, `#120`, `#169`) for feature-level context.
 
-### Two half-connected worlds — read this first
+### Three half-connected worlds — read this first
 
-The backend and the UI started against different data sources, and the wiring-over is in progress, not finished:
+Parts of the app were built against real API routes, parts against localStorage mocks, and parts against in-file mock arrays. The wiring-over is in progress, not finished. **Before trusting any data source, grep for who actually reads it.**
 
-- **API routes + `lib/*Queries.ts` + `supabase/schema.sql`** are the real implementation (sessions, answers, feedback, score, titles), fully covered by tests. `lib/sessionClient.ts` is the UI's one gateway to these routes — same role as `lib/authClient.ts` for auth — and is now used by `app/activities/[slug]/page.tsx`, `app/activities/[slug]/play/page.tsx`, `components/AppShell.tsx` (score), and `app/dashboard/page.tsx` (completed-sessions list). The slug↔`activity_type` mapping that used to be missing now exists: `ActivityDefinition.activityType` in `lib/activityContent.ts` is the one place it's declared.
-- **`lib/activityStore.ts`** is still a **localStorage mock** (`rc_activity_progress_v1`) of the leveling/history side of the domain — current difficulty level, best score, earned title, and the "N of M answered" progress bar shown on the activity detail page while a session is in-progress. Those same pages now also read the real session/score/history from the API, so a page can end up trusting two disagreeing sources at once (e.g. the mock's `state.inProgress` bar vs. the API-backed `hasServerSession` that actually decides the Start/Resume/Continue label). Don't assume the mock is authoritative for anything progress-related — check whether the page also called `sessionClient` before trusting `activityStore`.
-- **`lib/activityContent.ts`'s `questionBank`** (and its `getQuestion`/`questionsForLevel` helpers) is dead weight for actual gameplay — the play page gets question prompts, options, and scoring from the server (`SessionQuestion`/`submitAnswer`/`loadFeedback`), not from this file. `activityContent.ts` is still live for display-only fields (`name`, `summary`, `instructions`, `category`, `titles`) and the slug↔activityType mapping.
-- Two GET routes (`/api/activities/:activityType/questions`, `/api/questions/:questionId/options`) were added for the DL requirements and are test-covered, but nothing in the UI calls them yet — grep before assuming they're wired to a page.
-- Only `app/profile/page.tsx`, login/register, and now the session/score/history reads above talk to real routes; the leveling mock in `activityStore.ts` is what's left to migrate.
+**1. Real, tested backend.** API routes + `lib/*Queries.ts` + `supabase/schema.sql` are the real implementation (sessions, answers, feedback, score, titles, activity log), fully covered by tests. `lib/sessionClient.ts` is the UI's one gateway to these routes — same role as `lib/authClient.ts` for auth. The student quiz flow is fully migrated: `app/activities/[slug]/page.tsx`, `app/activities/[slug]/play/page.tsx`, `app/dashboard/log/page.tsx`, and the session lists on `app/dashboard/page.tsx` / `app/activities/page.tsx` all go through `sessionClient`. The slug↔`activity_type` mapping is declared in exactly one place: `ActivityDefinition.activityType` in `lib/activityContent.ts`.
 
-`lib/scoreStore.ts` and `lib/completedSessionsStore.ts` are a *different* kind of localStorage use — not a mock, but a cache in front of real API calls (`GET .../score`, `GET /api/sessions?status=completed`), keyed by `studentId`, read by `AppShell`/dashboard on every mount and invalidated with `forceRefresh` once a session completes (see `handleContinue` in the play page). Same shape both places: versioned key, SSR-guarded read/write, only typed getters/setters exported.
+**2. The leveling mock.** `lib/activityStore.ts` is still a localStorage mock (`rc_activity_progress_v1`) of the leveling/history side of the domain — current difficulty level, best score, earned title. It is now read by only three places: `app/activities/page.tsx` (`getActivityState`/`getBestScore`/`getTitle`), `app/dashboard/page.tsx` (`getActivityState`), and `components/AppShell.tsx` (`getHighestTitleOverall`). Those same pages also fetch the real session list, so a page can trust two disagreeing sources at once — the mock's `state.inProgress` versus the API's actual in-progress sessions. `app/activities/[slug]/page.tsx` no longer touches it at all: "is something running?" there comes only from `loadCurrentSession`. This module is the main thing left to migrate.
+
+**3. UI-only mock arrays.** What's left of the front-end-first instructor work: `lib/mockQuestions.ts` (`MOCK_QUESTIONS`) feeds `app/instructor/questions/page.tsx`, including its add/edit flow — saving a question mutates React state and nothing else. Its header comment describes exactly what replacing it with a real fetch involves; it's written so the components around it don't have to change. (`lib/mockStudentActivity.ts` was the other one and is gone — the instructor dashboard and roster now read `GET /api/instructor/activities`.)
+
+Also dead or unwired, so grep before assuming:
+- `lib/activityContent.ts`'s `questionBank` (and `getQuestion`/`questionsForLevel`) is **not** used for gameplay — the play page gets prompts, options, and scoring from the server. `activityContent.ts` is still live for display-only fields (`name`, `summary`, `instructions`, `category`, `titles`) and the slug↔activityType mapping.
+- `GET /api/activities/:activityType/questions` and `GET /api/questions/:questionId/options` are test-covered but no page calls them.
+- `requireInstructor` in `lib/instructorAuth.ts` guards `GET /api/instructor/activities`, currently its only caller. Its docblock contains the exact usage snippet any further instructor route should copy — in particular the 403-with-no-body branch.
+- `user_story` and `submission` tables exist in `supabase/schema.sql` but nothing in `app/` or `lib/` reads them yet.
 
 ### Auth flow
 
-`lib/authClient.ts` is the only place the UI talks to auth routes; it stores the Supabase `access_token` in localStorage under `access_token` (register additionally signs in, since the admin API returns a user but no session). `components/UserProvider.tsx`'s `useUser()` is the single source of truth for that token plus the signed-in profile, mounted once in `app/layout.tsx`. Pages gate on it via `lib/useRequireRole.ts` (`useRequireRole('student' | 'instructor')`, GitHub #82), which redirects to `/login` when logged out and to the other role's home when `profile.role` doesn't match — treat a page's required role as load-bearing, not a formality, since it's what keeps a student off `/instructor/*` and an instructor off the quiz-taking flow under `/activities/*`. Every protected API route then repeats its own preamble: read `Authorization: Bearer …`, `supabase.auth.getUser(token)`, and derive `user_id` from the result — **never** from the body, query string, or path. The `/api/students/{studentId}/*` routes compare the path param against the token's user and 403 on mismatch.
+`lib/authClient.ts` is the only place the UI talks to auth routes. It stores both the Supabase `access_token` and `refresh_token` in localStorage (register additionally signs in, since the admin API returns a user but no session). `components/UserProvider.tsx`'s `useUser()` is the single source of truth for the token plus the signed-in profile, mounted once in `app/layout.tsx`.
+
+Session renewal is deliberately two-pronged and there is **no guest/placeholder state**: `UserProvider` refreshes proactively on a 45-minute interval, and reactively when `/api/profile` answers 401 — only if `refreshAccessToken()` also fails is the session cleared and `token` dropped to null. A transient fetch error is explicitly *not* treated as an invalid session; keep that distinction if you touch `refresh()`.
+
+Pages gate on role via `lib/useRequireRole.ts` (`useRequireRole('student' | 'instructor')`, GitHub #82). Callers must return `null` while `!authorized` — the redirect happens in an effect, so rendering early flashes the wrong page. The two roles are asymmetric about a missing profile row (normal right after registration): `'student'` lets it through, `'instructor'` does not and redirects to `/profile`. Treat a page's required role as load-bearing — it's what keeps a student off `/instructor/*` and an instructor out of the quiz-taking flow under `/activities/*`.
+
+Instructor role assignment happens in `app/api/auth/register/route.ts`: a hardcoded `INSTRUCTOR_SIGNUP_CODE` compared **server-side only**, written into the auth user's metadata (the `"user"` profile row doesn't exist until the profile form is submitted, where `app/api/profile/route.ts` reads the role back out).
+
+Every protected API route then repeats its own preamble: read `Authorization: Bearer …`, `supabase.auth.getUser(token)`, and derive `user_id` from the result — **never** from the body, query string, or path. The `/api/students/{studentId}/*` routes compare the path param against the token's user and 403 on mismatch (no instructor exception on any of them today).
 
 ### Session model (the core domain)
 
 - **One in-progress session per (user, activity_type)**, enforced by the partial unique index `uq_session_log_one_active`. `POST /api/sessions` is therefore idempotent: it returns the existing session with `resumed: true` (200) instead of creating a second one, and treats a `23505` race as "someone else started it". "Start" and "resume" are the same call.
-- **The current question is derived, never stored.** It is the lowest `position` in `session_to_question` without a row in `answered_question_log` (`nextUnansweredPosition` in `lib/sessionQueries.ts`). Do not add a `current_question_index` column — the absence of a mutable pointer is what makes multi-device resume conflict-free.
+- **The current question is derived, never stored.** It is the lowest `position` in `session_to_question` without a row in `answered_question_log` (`nextUnansweredPosition` in `lib/sessionQueries.ts`). Do not add a `current_question_index` column — the absence of a mutable pointer is what makes multi-device resume conflict-free, and it's why `GET /api/sessions/current` is a pure read with nothing to merge.
 - **Write before disclose.** `POST /api/sessions/{id}/answers` commits the answer first and reveals `correct`/`explanation` second; `POST .../feedback` only serves a solution for an option already present in `answered_question_log`. Otherwise the endpoints become an oracle for trying options until one is right.
 - **Scores roll up in the database.** The `trg_answered_question_log_score` trigger adds to `session_log.cumulative_score` inside the insert's transaction; routes re-read the row afterwards rather than computing the total locally.
 - **Column visibility is a query-level concern.** `SESSION_QUESTION_COLUMNS` in `lib/sessionQueries.ts` deliberately omits `is_correct` and `explanation`; only `loadQuestionOptions` (feedback path) selects them. Keep new queries on that split.
-- `lib/sessionRules.ts` holds the shared constants (`QUESTIONS_PER_SESSION = 4`, `START_DIFFICULTY_LEVEL = 1`, `PASS_RATIO = 0.8`, `SESSION_COLUMNS`) so routes cannot drift apart. Partial credit is a known gap: `scoreForAnswer` is all-or-nothing until `answer` gains a score column.
+- **Option order is shuffled server-side** with `lib/shuffleArray.ts` (Fisher-Yates, not a `sort()` comparator — the biased-comparator version was a real bug, see `__tests__/lib/shuffleArray.test.ts`).
+- `lib/sessionRules.ts` holds the shared constants (`QUESTIONS_PER_SESSION = 4`, `START_DIFFICULTY_LEVEL = 1`, `PASS_RATIO = 0.8`, `SESSION_COLUMNS`, `SESSION_STATUSES`) so routes cannot drift apart. Partial credit is a known gap: `scoreForAnswer` is all-or-nothing until `answer` gains a score column.
 - Gamification is derived, not stored: `lib/scoreQueries.ts` sums the best *passing* score per (activity_type, difficulty_level); `lib/titleQueries.ts` looks up `title_definition` by the highest passed level per activity type. Nothing about score or title lives on the student row.
+
+### Reading sessions: which route answers which question
+
+Five read endpoints look similar and are not interchangeable — pick by the question being asked, and keep new ones on the same split:
+
+| Route | Question it answers | Empty result |
+|---|---|---|
+| `GET /api/sessions?status=…` | "What did I do lately", one status, all activity types | `200` `[]` |
+| `GET /api/sessions/current?activityType=` | "Resume this activity" — session + questions + answers so far | `200` with `session: null` |
+| `GET /api/sessions/in-progress[?activityType=]` | "Is something running?" — no questions/prompts | `404` *with* activityType, `200` `[]` without |
+| `GET /api/sessions/completed?activityType=` | "How did I do at this activity" — attempt history | `200` `[]` |
+| `GET /api/students/{id}/activities` | Full timeline: every status, every activity type, merged | `200` `[]` |
+| `GET /api/instructor/activities` | Same timeline, but class-wide, `+ studentId`/`studentName` | `200` `[]` |
+
+(`GET /api/students/{id}/history` is the completed-only, cross-activity variant of the second-to-last one, per REQ-PL-3.1.)
+
+The instructor route is the one read that deliberately returns rows the caller doesn't own, which is why `requireInstructor` runs before any query and why its `loadAllStudentActivity` filters the joined `"user"` row on `role = 'student'` with an **inner** join — a non-inner join would null the embed instead of dropping the row, and instructors would appear in their own report. Only students who have attempted something appear at all; the roster is derived from attempts, so an enrolled student with zero sessions is invisible (known gap, separate story).
+
+### Client-side caching
+
+`lib/scoreStore.ts`, `lib/completedSessionsStore.ts`, `lib/completedAttemptsStore.ts`, and `lib/activityLogStore.ts` are a *different* kind of localStorage use from `activityStore.ts` — not mocks, but caches in front of real API calls. All four share one shape: a versioned key, SSR-guarded read/write, only typed getters/setters exported, keyed by `studentId` (`completedAttemptsStore` additionally by `activityType`). `sessionClient`'s loaders take an optional `studentId` to opt into the cache and a `forceRefresh` flag to bypass and re-cache it. Copy this shape for any new cache.
+
+The invalidation rule differs: score and completed-sessions only change when a session *completes* (the play page's `handleContinue` refreshes them there), but `activityLogStore` also contains in-progress and abandoned sessions — anything that starts, answers, or abandons must `forceRefresh` it too.
+
+`loadInstructorActivities` is deliberately **not** cached, and shouldn't be retrofitted: all four stores hold the student's own data, changed only by that student's own actions, so the page causing the change can refresh it. The class-wide list changes whenever *any* student answers something, which the instructor's tab never learns about — there is no invalidation point, only staleness.
 
 ### Database
 
-`supabase/schema.sql` is the single migration (plain DDL, no `IF NOT EXISTS` — its footer documents the drop/rename paths for re-running). Notable: the profile table is `"user"` (a reserved word — quoted in SQL, plain `.from('user')` in supabase-js) and FKs to `auth.users`; the question-bank tables have **RLS enabled with no policies at all**, so they are unreachable except through a service-role route. Adding a table that the client must not read directly should follow the same pattern.
+`supabase/schema.sql` is the single migration (plain DDL, no `IF NOT EXISTS` — its footer documents the drop/rename paths for re-running). Notable: the profile table is `"user"` (a reserved word — quoted in SQL, plain `.from('user')` in supabase-js) and FKs to `auth.users`; the question-bank tables have **RLS enabled with no policies at all**, so they are unreachable except through a service-role route. Adding a table the client must not read directly should follow the same pattern. `session_log`/`answered_question_log`/`submission` do have own-row policies, but every data route uses the service-role client and bypasses them — the route, not the database, is what enforces scoping.
 
-Valid `activity_type` values live in `lib/activityTypes.ts` and must match `question.activity_type` in `supabase/seed.sql`; the DB does not enforce the set yet.
+Valid `activity_type` values live in `lib/activityTypes.ts` and must match `question.activity_type` in `supabase/seed.sql`; the DB does not enforce the set yet (only `title_definition` has a CHECK for it).
 
 ### Tests
 
-Vitest, `environment: 'node'`, glob `__tests__/**/*.test.ts`, no React/DOM tests. Each file mocks `lib/supabase` with a `vi.hoisted` fake whose `from(table)` returns a chainable builder — `select/eq/in/order` are no-ops, and the builder is *thenable* so queries without `.single()` resolve too. Results are **queued per table** (`queue('session_log', { data, error })`) and shifted in call order, and the mock records `inserts`/`deletes`/`tables` for asserting what the route did. Route handlers are imported directly and invoked as `POST(new Request(...), { params })`. When adding a route, copy this harness from the nearest existing test rather than inventing a new mocking style.
+Vitest, `environment: 'node'`, glob `__tests__/**/*.test.ts`, no React/DOM tests — the mock-backed instructor UI and the localStorage stores are untested by design.
+
+Route tests (`__tests__/api/`) mock `lib/supabase` with a `vi.hoisted` fake whose `from(table)` returns a chainable builder — `select/eq/in/order` are no-ops, and the builder is *thenable* so queries without `.single()` resolve too. Results are **queued per table** (`queue('session_log', { data, error })`) and shifted in call order, and the mock records `inserts`/`deletes`/`tables` for asserting what the route did. Route handlers are imported directly and invoked as `POST(new Request(...), { params })`.
+
+Pure-helper tests (`__tests__/lib/`) skip `vi.mock` entirely — `requireInstructor` takes its Supabase client as an argument precisely so its test can pass in a locally built fake. Prefer that shape for new helpers.
+
+When adding a route, copy the harness from the nearest existing test rather than inventing a new mocking style.
 
 ## Styling Guidelines
 
@@ -82,7 +126,7 @@ Tailwind CSS is the single, project-wide approach to styling — no CSS Modules,
 **Rules for new pages/components:**
 - No inline `style={{ ... }}` for anything expressible as a Tailwind class. Inline styles are only for genuinely dynamic, per-instance values (e.g. per-sparkle animation offsets in `components/PasswordField.tsx`).
 - No new raw hex colors in `className`. If a needed color isn't in the `brand` palette yet, add it as a `--rc-*` variable in `app/globals.css` and a matching token in `tailwind.config.js` first, then use the token.
-- Reuse existing shared components before writing new markup: `components/AppShell.tsx` (page shell/nav for authenticated pages), `components/ActivityCard.tsx`, `components/QuestionCard.tsx`, `components/FeedbackCard.tsx`, `components/PasswordField.tsx`. Prefer extending one of these over duplicating its markup.
+- Reuse existing shared components before writing new markup: `components/AppShell.tsx` (page shell/nav for authenticated pages; it branches its nav on `profile?.role`), `components/ActivityCard.tsx`, `components/QuestionCard.tsx`, `components/FeedbackCard.tsx`, `components/PasswordField.tsx`, and on the instructor side `components/ActivityLogTable.tsx` / `ActivityLogRow.tsx` (shared with the student activity log), `InstructorStudentCard.tsx`, `QuestionFormModal.tsx`. Prefer extending one of these over duplicating its markup.
 - Custom CSS animations that Tailwind utilities can't express (`@keyframes`, gradient-text glow, etc.) use `<style jsx>` (styled-jsx, built into Next.js) scoped to the component — see `app/dashboard/page.tsx` and `components/PasswordField.tsx`. Reference the `--rc-*` variables inside these blocks instead of hardcoding new hex values, so raw CSS and Tailwind classes never drift apart.
 
 **Known gap:** existing pages/components still contain literal arbitrary-value classes (e.g. `bg-[#7C4DFF]`) that predate this token system. New code should use the `brand-*` tokens above; migrating existing files onto the tokens is a separate follow-up, not required for this to take effect going forward.
