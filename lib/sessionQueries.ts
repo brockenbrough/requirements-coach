@@ -3,6 +3,7 @@
 
 import { getSupabaseClient } from './supabase';
 import { DEFAULT_QUESTION_MAX_SCORE, SESSION_COLUMNS } from './sessionRules';
+import type { InstructorActivityEntry, SessionListEntry } from './sessionTypes';
 import { shuffleArray } from './shuffleArray';
 
 export type SupabaseClient = NonNullable<ReturnType<typeof getSupabaseClient>>;
@@ -241,28 +242,16 @@ export type SessionProgress = {
 };
 
 /**
- * A session plus its progress, exactly the shape lib/sessionClient.ts's SessionListEntry
- * describes for the UI — this is the server-side counterpart, kept as its own type rather than
- * imported from that 'use client' module. Not to be confused with lib/activityLogTypes.ts's
- * ActivityLogEntry, the display shape the profile/dashboard log UI (GitHub #48) actually renders
- * — that one is derived from this one client-side (see toActivityLogEntry in app/dashboard/page.tsx).
+ * A session plus its progress — the server-side name for lib/sessionTypes.ts's SessionListEntry,
+ * which is the one declaration of this shape (GitHub #173). It used to be a hand-kept copy so
+ * that nothing here imported from the 'use client' lib/sessionClient.ts; sessionTypes.ts imports
+ * nothing at all, so both sides can now share it without that risk.
+ *
+ * Not to be confused with lib/activityLogTypes.ts's ActivityLogEntry, the display shape the
+ * profile/dashboard log UI (GitHub #48) actually renders — that one is derived from this one
+ * client-side (see toActivityLogEntry in lib/activityLogTypes.ts).
  */
-export type ActivityLogRow = {
-  session_id: string;
-  user_id: string;
-  activity_type: string;
-  difficulty_level: number;
-  started_at: string;
-  ended_at: string | null;
-  status: string;
-  cumulative_score: number;
-  max_score: number;
-  passed: boolean;
-  badge_id: string | null;
-  questionCount: number;
-  answeredCount: number;
-  nextPosition: number | null;
-};
+export type ActivityLogRow = SessionListEntry;
 
 /**
  * Every session the student has ever started, across every activity type and status — the full
@@ -310,12 +299,6 @@ export async function loadActivityLog(supabase: SupabaseClient, userId: string) 
 
   return { activities, error: null };
 }
-
-/** One attempt as the Instructor Dashboard needs it: the session plus who it belongs to. */
-export type StudentActivityRow = ActivityLogRow & {
-  studentId: string;
-  studentName: string;
-};
 
 /**
  * The "user" row joined onto a session, only for deriving a display name and for filtering
@@ -387,7 +370,7 @@ export async function loadAllStudentActivity(supabase: SupabaseClient) {
 
   // The embed is destructured off rather than spread along: it carries role and username,
   // which are inputs to this query, not part of what the endpoint discloses.
-  const activities: StudentActivityRow[] = rows.map(({ student, ...session }) => {
+  const activities: InstructorActivityEntry[] = rows.map(({ student, ...session }) => {
     const sessionProgress = progress!.get(session.session_id);
 
     return {
