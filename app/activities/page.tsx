@@ -2,20 +2,35 @@
 
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
-import { ActivityCard } from '../../components/ActivityCard';
+import { ActivityCard, type ActivityCardData } from '../../components/ActivityCard';
 import { ActivityCardSkeleton } from '../../components/ActivityCardSkeleton';
-import { ACTIVITIES, ActivityDefinition, Difficulty } from '../../lib/activityContent';
+import { ACTIVITIES, Difficulty } from '../../lib/activityContent';
 import { getActivityState, getBestScore, getTitle } from '../../lib/activityStore';
 import { loadSessions } from '../../lib/sessionClient';
 import { useRequireRole } from '../../lib/useRequireRole';
 
 type CardData = {
-  activity: ActivityDefinition;
+  activity: ActivityCardData;
   level: Difficulty;
   title: string;
   bestScore: { score: number; maxScore: number } | null;
   hasInProgress: boolean;
 };
+
+/**
+ * The Type B "Write Acceptance Criteria" activity (GitHub #149, REQ-FU-2) — not in ACTIVITIES
+ * because it has no question bank/activity_type/session_log row, but rendered by the exact same
+ * ActivityCard below and run through the exact same getActivityState/getTitle/getBestScore calls
+ * as the two Type A cards, so there is no per-activity special case in this page's render logic.
+ */
+const WRITE_ACCEPTANCE_CRITERIA_CARD: ActivityCardData = {
+  slug: 'write-acceptance-criteria',
+  name: 'Write Acceptance Criteria',
+  category: 'Write Acceptance Criteria',
+};
+
+/** Every card's slug, in display order — used for the loading skeleton's placeholder count. */
+const CARD_SLUGS: ActivityCardData[] = [...ACTIVITIES, WRITE_ACCEPTANCE_CRITERIA_CARD];
 
 export default function ActivitiesPage() {
   const { token, loading, authorized } = useRequireRole('student');
@@ -48,18 +63,27 @@ export default function ActivitiesPage() {
 
       const inProgressTypes = new Set(result.data.sessions.map((session) => session.activity_type));
 
-      setCards(
-        ACTIVITIES.map((activity) => {
-          const state = getActivityState(activity.slug);
-          return {
-            activity,
-            level: state.level,
-            title: getTitle(activity.slug),
-            bestScore: getBestScore(activity.slug),
-            hasInProgress: inProgressTypes.has(activity.activityType),
-          };
-        }),
-      );
+      const typeACards: CardData[] = ACTIVITIES.map((activity) => ({
+        activity,
+        level: getActivityState(activity.slug).level,
+        title: getTitle(activity.slug),
+        bestScore: getBestScore(activity.slug),
+        hasInProgress: inProgressTypes.has(activity.activityType),
+      }));
+
+      // Type B (GitHub #149, REQ-FU-2): no session_log row is ever created for this activity —
+      // see app/activities/write-acceptance-criteria/page.tsx — so it can never appear in
+      // inProgressTypes above; hasInProgress is honestly false rather than a fetch special-case.
+      // Same getActivityState/getTitle/getBestScore calls and the same CardData shape as above.
+      const writeAcCard: CardData = {
+        activity: WRITE_ACCEPTANCE_CRITERIA_CARD,
+        level: getActivityState(WRITE_ACCEPTANCE_CRITERIA_CARD.slug).level,
+        title: getTitle(WRITE_ACCEPTANCE_CRITERIA_CARD.slug),
+        bestScore: getBestScore(WRITE_ACCEPTANCE_CRITERIA_CARD.slug),
+        hasInProgress: false,
+      };
+
+      setCards([...typeACards, writeAcCard]);
       setIsLoading(false);
     });
 
@@ -76,7 +100,7 @@ export default function ActivitiesPage() {
 
       {isLoading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2" role="status" aria-label="Loading activities">
-          {ACTIVITIES.map((activity) => (
+          {CARD_SLUGS.map((activity) => (
             <ActivityCardSkeleton key={activity.slug} />
           ))}
         </div>

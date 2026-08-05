@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import type { ActivityDefinition, Difficulty } from '../lib/activityContent';
+import type { ActivitySlug, Difficulty } from '../lib/activityContent';
 
 const DIFFICULTY_LABEL: Record<Difficulty, string> = { 1: 'Easy', 2: 'Medium', 3: 'Hard' };
 const DIFFICULTY_CLASSES: Record<Difficulty, string> = {
@@ -10,12 +10,34 @@ const DIFFICULTY_CLASSES: Record<Difficulty, string> = {
   3: 'bg-[#FFD666]/25 text-[#8a6100]',
 };
 
+/**
+ * Everything ActivityCard actually reads off an activity — deliberately narrower than the full
+ * ActivityDefinition (which also carries questionBank/activityType/titles/instructions, none of
+ * which this component touches). Any ActivityDefinition already satisfies this structurally, so
+ * the two Type A activities pass through unchanged; the Type B "Write Acceptance Criteria" card
+ * (app/activities/page.tsx) builds one of these directly instead of needing a fake
+ * ActivityDefinition with an empty question bank and a made-up activity_type.
+ */
+export type ActivityCardData = {
+  slug: ActivitySlug;
+  name: string;
+  category: string;
+};
+
 export function CategoryIcon({ category }: { category: string }) {
   if (category === 'Acceptance Criteria') {
     return (
       <svg viewBox="0 0 24 24" className="h-[22px] w-[22px]" fill="none" stroke="#2DD4BF" strokeWidth={2}>
         <path d="M6 3v18" />
         <path d="M6 4c4-2 5 2 9 0v8c-4 2-5-2-9 0" />
+      </svg>
+    );
+  }
+  if (category === 'Write Acceptance Criteria') {
+    return (
+      <svg viewBox="0 0 24 24" className="h-[22px] w-[22px]" fill="none" stroke="#2DD4BF" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 20h9" />
+        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
       </svg>
     );
   }
@@ -33,13 +55,13 @@ export function ActivityCard({
   bestScore,
   hasInProgress,
 }: {
-  activity: ActivityDefinition;
+  activity: ActivityCardData;
   level: Difficulty;
   title: string;
   bestScore: { score: number; maxScore: number } | null;
   hasInProgress: boolean;
 }) {
-  const badgeBg = activity.category === 'Acceptance Criteria' ? 'bg-[#2DD4BF]/15' : 'bg-[#7C4DFF]/15';
+  const badgeBg = activity.category === 'Acceptance Criteria' || activity.category === 'Write Acceptance Criteria' ? 'bg-[#2DD4BF]/15' : 'bg-[#7C4DFF]/15';
 
   return (
     <Link
