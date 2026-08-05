@@ -108,6 +108,24 @@ CREATE TABLE submission (
     PRIMARY KEY (submission_id));
 
 -- ---------------------------------------------------------------------
+-- Instructor LLM Config
+--
+-- Stores the LLM provider + API key an instructor has configured for
+-- grading free-text submissions (submission.llm_provider). RLS-enabled
+-- with no client policies, same as question/answer/user_story — only a
+-- service-role route can read or write api_key, and that route is
+-- responsible for masking it before it reaches the client.
+-- ---------------------------------------------------------------------
+CREATE TABLE instructor_llm_config (
+    instructor_llm_config_id uuid      NOT NULL,
+    user_id                  uuid      NOT NULL,
+    provider                 text      NOT NULL,
+    api_key                  text      NOT NULL,
+    is_active                bool      NOT NULL DEFAULT false,
+    updated_at               timestamp NOT NULL DEFAULT now(),
+    PRIMARY KEY (instructor_llm_config_id));
+
+-- ---------------------------------------------------------------------
 -- REQ-GAM-DL-2: Title Definition Storage
 --
 -- Maps (activity_type, difficulty_level) to a title name (e.g. "Story
@@ -207,6 +225,8 @@ ALTER TABLE user_story ADD CONSTRAINT fk_user_story_user FOREIGN KEY (creator_id
 ALTER TABLE submission ADD CONSTRAINT fk_submission_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
 ALTER TABLE submission ADD CONSTRAINT fk_submission_user_story FOREIGN KEY (user_story_id) REFERENCES user_story (user_story_id);
 
+ALTER TABLE instructor_llm_config ADD CONSTRAINT fk_instructor_llm_config_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
+
 ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
 ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_question FOREIGN KEY (question_id) REFERENCES question (question_id);
 ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_answer FOREIGN KEY (submitted_option) REFERENCES answer (answer_id);
@@ -253,6 +273,15 @@ CREATE INDEX ix_question_activity_type_difficulty ON question (activity_type, di
 CREATE UNIQUE INDEX uq_session_log_one_active
   ON session_log (user_id, activity_type)
   WHERE status = 'in-progress';
+
+-- At most one active LLM config across all instructors (global, unlike
+-- uq_session_log_one_active which partitions by user_id/activity_type).
+-- Activating a new config deactivates the previous one in the same
+-- transaction; a 23505 race on this index is handled the same way
+-- POST /api/sessions handles uq_session_log_one_active's race.
+CREATE UNIQUE INDEX uq_instructor_llm_config_one_active
+  ON instructor_llm_config (is_active)
+  WHERE is_active = true;
 
 -- No duplicate position and no duplicate question within one session.
 ALTER TABLE session_to_question ADD CONSTRAINT uq_session_to_question_position UNIQUE (session_id, position);
@@ -305,6 +334,7 @@ ALTER TABLE answer ENABLE ROW LEVEL SECURITY;
 ALTER TABLE question_to_answer ENABLE ROW LEVEL SECURITY;
 ALTER TABLE session_to_question ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_story ENABLE ROW LEVEL SECURITY;
+ALTER TABLE instructor_llm_config ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE session_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE answered_question_log ENABLE ROW LEVEL SECURITY;
@@ -351,7 +381,7 @@ CREATE POLICY own_submissions_insert ON submission
 --   DROP TABLE IF EXISTS session_to_question, answered_question_log,
 --                        session_log, question_to_answer, answer,
 --                        question, user_badge, badge, title_definition,
---                        user_story, submission CASCADE;
+--                        user_story, submission, instructor_llm_config CASCADE;
 --   DROP FUNCTION IF EXISTS bump_session_score() CASCADE;
 --
 -- Leaving "user" out of that list keeps the profiles.
@@ -391,3 +421,8 @@ CREATE POLICY own_submissions_insert ON submission
 -- with no rename path. Its two FKs (fk_submission_user, fk_submission_user_story) require
 -- "user" and user_story to already exist, so run user_story's statements first if adding
 -- both to an existing database.
+
+-- Instructor LLM Config table: also new, no rename path. Its FK (fk_instructor_llm_config_user)
+-- requires "user" to already exist. uq_instructor_llm_config_one_active is a global partial
+-- unique index (not scoped by user_id) — at most one row across the whole table can have
+-- is_active = true at a time.
