@@ -40,3 +40,13 @@ export type InstructorActivityEntry = SessionListEntry & {
   studentId: string;
   studentName: string;
 };
+
+/**
+ * One session_log record plus who it belongs to, without progress (GitHub #115) — the leaner
+ * counterpart to InstructorActivityEntry, for the route that only needs the record itself
+ * (student, activity, level, start date, score, result), not how far in it the student got.
+ */
+export type InstructorSessionEntry = SessionRecord & {
+  studentId: string;
+  studentName: string;
+};

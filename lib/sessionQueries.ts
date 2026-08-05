@@ -3,7 +3,7 @@
 
 import { getSupabaseClient } from './supabase';
 import { DEFAULT_QUESTION_MAX_SCORE, SESSION_COLUMNS } from './sessionRules';
-import type { InstructorActivityEntry, SessionListEntry } from './sessionTypes';
+import type { InstructorActivityEntry, InstructorSessionEntry, SessionListEntry, SessionRecord } from './sessionTypes';
 import { shuffleArray } from './shuffleArray';
 
 export type SupabaseClient = NonNullable<ReturnType<typeof getSupabaseClient>>;
@@ -384,6 +384,44 @@ export async function loadAllStudentActivity(supabase: SupabaseClient) {
   });
 
   return { activities, error: null };
+}
+
+/**
+ * Every session_log record belonging to a student, class-wide (GitHub #115) — the leaner
+ * counterpart to loadAllStudentActivity (#171): same STUDENT_EMBED join and role = 'student'
+ * scope, but no loadProgressForSessions call, since this endpoint's AC (student, activity,
+ * level, start date, score, result) never asks how far into the session the student got.
+ *
+ * "Students of the current prof" is, today, every account with role 'student' — there is no
+ * professor-to-student assignment (class/section) anywhere in the schema, so this is the same
+ * scope #171 already uses. A real per-professor scope would need that relationship to exist
+ * first.
+ *
+ * Newest first by started_at — the AC does not specify an order, but every other listing in
+ * this codebase defaults to newest-first, and "Start date" is the one date this endpoint has.
+ */
+export async function loadAllStudentSessions(supabase: SupabaseClient) {
+  const { data, error } = await supabase
+    .from('session_log')
+    .select(`${SESSION_COLUMNS}, ${STUDENT_EMBED}`)
+    .eq('student.role', 'student')
+    .order('started_at', { ascending: false });
+
+  if (error) return { sessions: null, error };
+
+  type SessionRow = SessionRecord & { student: EmbeddedStudent };
+
+  // The embed is destructured off rather than spread along: it carries role and username,
+  // which are inputs to this query, not part of what the endpoint discloses.
+  const sessions: InstructorSessionEntry[] = ((data ?? []) as unknown as SessionRow[]).map(
+    ({ student, ...session }) => ({
+      ...session,
+      studentId: session.user_id,
+      studentName: studentDisplayName(student),
+    }),
+  );
+
+  return { sessions, error: null };
 }
 
 /**
