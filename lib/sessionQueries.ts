@@ -311,6 +311,98 @@ export async function loadActivityLog(supabase: SupabaseClient, userId: string) 
   return { activities, error: null };
 }
 
+/** One attempt as the Instructor Dashboard needs it: the session plus who it belongs to. */
+export type StudentActivityRow = ActivityLogRow & {
+  studentId: string;
+  studentName: string;
+};
+
+/**
+ * The "user" row joined onto a session, only for deriving a display name and for filtering
+ * instructors out. Aliased to `student` in the select because the table is called "user" (a
+ * reserved word) and an unaliased embed would sit next to the row's own user_id column.
+ *
+ * !inner matters: without it, .eq('student.role', 'student') would null the embed rather than
+ * drop the row, and an instructor's own sessions would still appear in their report.
+ */
+const STUDENT_EMBED = 'student:user!inner(first_name, last_name, username, role)';
+
+type EmbeddedStudent = {
+  first_name: string | null;
+  last_name: string | null;
+  username: string | null;
+  role: string;
+};
+
+/**
+ * There is no name column — first/last name are the display name when set, username the
+ * fallback for an account that filled in neither.
+ */
+function studentDisplayName(student: EmbeddedStudent): string {
+  const fullName = [student.first_name, student.last_name].filter(Boolean).join(' ').trim();
+  return fullName || student.username || 'Unknown student';
+}
+
+/**
+ * Every student's attempts across the whole class, newest first (GitHub #171) — the real data
+ * behind the Instructor Dashboard.
+ *
+ * The class-wide counterpart to loadActivityLog: same merged timeline of in-progress,
+ * completed and abandoned sessions, but without that one's .eq('user_id', …) scope. Nothing in
+ * the database restricts this — every data route uses the service-role client, which bypasses
+ * the own_sessions_select policy — so the caller MUST run requireInstructor first. Reading
+ * another student's rows is exactly what this query is for, and exactly what the guard exists
+ * to gate.
+ *
+ * Ordered in the query rather than in JS the way loadActivityLog does it. started_at is the
+ * secondary key for the same reason as in loadCompletedAttempts: Postgres orders DESC as NULLS
+ * FIRST, so running sessions (ended_at IS NULL) group at the top and need a stable order among
+ * themselves.
+ *
+ * Carries no question prompts, options, is_correct or explanation — this answers "who did what
+ * and how did it go", so SESSION_COLUMNS is the whole payload.
+ */
+export async function loadAllStudentActivity(supabase: SupabaseClient) {
+  const { data, error } = await supabase
+    .from('session_log')
+    .select(`${SESSION_COLUMNS}, ${STUDENT_EMBED}`)
+    .eq('student.role', 'student')
+    .order('ended_at', { ascending: false })
+    .order('started_at', { ascending: false });
+
+  if (error) return { activities: null, error };
+
+  type SessionRow = Omit<ActivityLogRow, 'questionCount' | 'answeredCount' | 'nextPosition'> & {
+    student: EmbeddedStudent;
+  };
+
+  const rows = (data ?? []) as unknown as SessionRow[];
+
+  const { progress, error: progressError } = await loadProgressForSessions(
+    supabase,
+    rows.map((row) => row.session_id),
+  );
+
+  if (progressError) return { activities: null, error: progressError };
+
+  // The embed is destructured off rather than spread along: it carries role and username,
+  // which are inputs to this query, not part of what the endpoint discloses.
+  const activities: StudentActivityRow[] = rows.map(({ student, ...session }) => {
+    const sessionProgress = progress!.get(session.session_id);
+
+    return {
+      ...session,
+      questionCount: sessionProgress?.questionCount ?? 0,
+      answeredCount: sessionProgress?.answeredCount ?? 0,
+      nextPosition: sessionProgress?.nextPosition ?? null,
+      studentId: session.user_id,
+      studentName: studentDisplayName(student),
+    };
+  });
+
+  return { activities, error: null };
+}
+
 /**
  * Progress for several sessions at once, keyed by session id.
  *
