@@ -45,7 +45,7 @@ export type SessionQuestion = {
 
 export type SessionAnswer = {
   question_id: string;
-  answer_id: string;
+  submitted_option: string;
   score: number;
   submitted_at: string;
   correct: boolean | null;
@@ -79,7 +79,7 @@ export type SubmittedAnswerRecord = {
   logId: string;
   sessionId: string;
   questionId: string;
-  /** The answer_id that was recorded — named after the request field that carried it. */
+  /** The submitted_option that was recorded — named after the request field that carried it. */
   selectedOptionId: string;
   score: number;
   /** Set by the database, so null only in the pathological case where the write did not echo it back. */

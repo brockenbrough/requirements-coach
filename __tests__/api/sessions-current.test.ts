@@ -84,14 +84,14 @@ const drawnQuestions = Array.from({ length: 4 }, (_, i) => ({
 const submittedAnswers = [
   {
     question_id: 'q-1',
-    answer_id: 'a-1-1',
+    submitted_option: 'a-1-1',
     score: 25,
     submitted_at: '2026-07-29T10:05:00.000Z',
     answer: { is_correct: true, explanation: 'Correct: the role is missing.' },
   },
   {
     question_id: 'q-2',
-    answer_id: 'a-2-2',
+    submitted_option: 'a-2-2',
     score: 0,
     submitted_at: '2026-07-29T10:07:00.000Z',
     answer: { is_correct: false, explanation: 'Incorrect: no technical detail.' },
@@ -191,7 +191,7 @@ describe('GET /api/sessions/current', () => {
     expect(body.answers).toHaveLength(2);
     expect(body.answers[0]).toEqual({
       question_id: 'q-1',
-      answer_id: 'a-1-1',
+      submitted_option: 'a-1-1',
       score: 25,
       submitted_at: '2026-07-29T10:05:00.000Z',
       correct: true,
@@ -219,7 +219,7 @@ describe('GET /api/sessions/current', () => {
     queue('answered_question_log', {
       data: drawnQuestions.map((row, i) => ({
         question_id: row.question.question_id,
-        answer_id: `a-${i + 1}-1`,
+        submitted_option: `a-${i + 1}-1`,
         score: 25,
         submitted_at: '2026-07-29T10:10:00.000Z',
         answer: { is_correct: true, explanation: 'Correct.' },

@@ -77,7 +77,7 @@ const questionOptions = [{ answer: wrongAnswer }, { answer: correctAnswer }];
 
 function logRow(overrides: Record<string, unknown> = {}) {
   return {
-    answer_id: 'a-1-correct',
+    submitted_option: 'a-1-correct',
     score: 25,
     submitted_at: '2026-07-29T10:05:00.000Z',
     ...overrides,
@@ -164,7 +164,7 @@ describe('POST /api/sessions/{sessionId}/feedback', () => {
     expect((await response.json()).error).toMatch(/answered question log/i);
   });
 
-  // Without the answer_id filter this endpoint would grade any option on demand.
+  // Without the submitted_option filter this endpoint would grade any option on demand.
   it('returns 404 for an option the student did not submit', async () => {
     queueLookup({ log: null });
 
@@ -204,7 +204,7 @@ describe('POST /api/sessions/{sessionId}/feedback', () => {
   });
 
   it('returns the correct option and its explanation for a wrong answer', async () => {
-    queueLookup({ log: logRow({ answer_id: 'a-1-wrong', score: 0 }) });
+    queueLookup({ log: logRow({ submitted_option: 'a-1-wrong', score: 0 }) });
 
     const response = await POST(req({ questionId: 'q-1', selectedOptionId: 'a-1-wrong' }), ctx);
     const body = await response.json();
@@ -227,7 +227,7 @@ describe('POST /api/sessions/{sessionId}/feedback', () => {
   // The other options stay hidden — feedback is about the pick and the solution, nothing else.
   it('does not disclose the remaining options', async () => {
     queueLookup({
-      log: logRow({ answer_id: 'a-1-wrong', score: 0 }),
+      log: logRow({ submitted_option: 'a-1-wrong', score: 0 }),
       options: [
         { answer: wrongAnswer },
         { answer: correctAnswer },
@@ -243,7 +243,7 @@ describe('POST /api/sessions/{sessionId}/feedback', () => {
 
   it('returns 500 when the question bank has no correct option', async () => {
     queueLookup({
-      log: logRow({ answer_id: 'a-1-wrong', score: 0 }),
+      log: logRow({ submitted_option: 'a-1-wrong', score: 0 }),
       options: [{ answer: wrongAnswer }],
     });
 

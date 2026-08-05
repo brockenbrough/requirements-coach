@@ -95,7 +95,7 @@ function answerLogRow(overrides: Record<string, unknown> = {}) {
     log_id: 'log-1',
     session_id: SESSION_ID,
     question_id: 'q-1',
-    answer_id: 'a-1-correct',
+    submitted_option: 'a-1-correct',
     score: 25,
     submitted_at: '2026-07-29T10:05:00.000Z',
     ...overrides,
@@ -130,7 +130,7 @@ function queueSubmission({
 } = {}) {
   // The insert echoes back the row it wrote, so by default it mirrors what was submitted.
   const echoed: Result = insertResult ?? {
-    data: answerLogRow({ question_id: submitted, answer_id: option.answer.answer_id }),
+    data: answerLogRow({ question_id: submitted, submitted_option: option.answer.answer_id }),
     error: null,
   };
 
@@ -254,7 +254,7 @@ describe('POST /api/sessions/{sessionId}/answers', () => {
       session_id: SESSION_ID,
       user_id: 'user-123',
       question_id: 'q-1',
-      answer_id: 'a-1-correct',
+      submitted_option: 'a-1-correct',
       score: 25,
     });
     expect(log.log_id).toEqual(expect.any(String));

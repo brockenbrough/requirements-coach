@@ -146,7 +146,7 @@ CREATE TABLE answered_question_log (
     session_id uuid NOT NULL,
     user_id uuid NOT NULL,
     question_id uuid NOT NULL,
-    answer_id uuid NOT NULL,
+    submitted_option uuid NOT NULL,
     PRIMARY KEY (log_id));
 
 
@@ -167,7 +167,7 @@ ALTER TABLE user_badge ADD CONSTRAINT fk_user_badge_badge FOREIGN KEY (badge_id)
 
 ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
 ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_question FOREIGN KEY (question_id) REFERENCES question (question_id);
-ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_answer FOREIGN KEY (answer_id) REFERENCES answer (answer_id);
+ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_answer FOREIGN KEY (submitted_option) REFERENCES answer (answer_id);
 ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_session FOREIGN KEY (session_id) REFERENCES session_log (session_id) ON DELETE CASCADE;
 
 ALTER TABLE session_log ADD CONSTRAINT fk_session_log_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
@@ -315,3 +315,10 @@ CREATE POLICY own_answers_insert ON answered_question_log
 --
 --   ALTER TABLE "user" ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'student';
 --   ALTER TABLE "user" ADD CONSTRAINT ck_user_role CHECK (role IN ('student', 'instructor'));
+
+-- GitHub #96 (answered_question_log.answer_id renamed to submitted_option, so the column name
+-- says what it holds — the option the student picked, not a row in the answer table). RENAME
+-- COLUMN carries the existing FK and its constraint name along automatically, so nothing else
+-- needs to change:
+--
+--   ALTER TABLE answered_question_log RENAME COLUMN answer_id TO submitted_option;
