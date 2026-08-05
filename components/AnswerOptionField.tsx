@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * One answer-option row inside AddQuestionModal (GitHub #120): a letter marker, a native radio
+ * One answer-option row inside QuestionFormModal (GitHub #120/#158): a letter marker, a native radio
  * button to mark this option as the correct one (single-choice, per REQ-PL-6.4 — native input
  * rather than a custom-styled control, so keyboard nav and screen readers work for free), and
  * the option's text field.

@@ -16,8 +16,8 @@ function options(
  * Placeholder for the real question bank endpoint the Instructor's Question Bank + "Add
  * Question" flow (GitHub #120) is designed against — nothing behind this reads the database.
  * Whoever wires up the real backend replaces this export (and the local-state seeding in
- * app/instructor/questions/page.tsx) with a fetch returning QuizQuestion[]; AddQuestionModal,
- * AnswerOptionField, and the page's rendering don't change.
+ * app/instructor/questions/page.tsx) with a fetch (and its edit path with a real update call);
+ * QuestionFormModal, AnswerOptionField, and the page's rendering don't change.
  */
 export const MOCK_QUESTIONS: QuizQuestion[] = [
   {

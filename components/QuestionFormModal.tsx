@@ -29,29 +29,43 @@ type FormErrors = {
 const FOCUSABLE_SELECTOR = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
 /**
- * Popup form for adding a question to an existing quiz (GitHub #120). Mounted/unmounted by the
- * parent (`{showAddModal ? <AddQuestionModal .../> : null}`, the same pattern ImageCropModal
- * already uses) rather than taking its own `isOpen` prop — existence on the page *is* "open".
+ * Popup form for both adding a question (GitHub #120) and editing an existing one
+ * (GitHub #158) — one component instead of two near-identical ones, since the fields, layout,
+ * and validation are exactly the same; only what's pre-filled and the copy on the save button
+ * differ by `mode`. Mounted/unmounted by the parent (the same pattern ImageCropModal already
+ * uses) rather than taking its own `isOpen` prop — existence on the page *is* "open", and a
+ * remount is what re-seeds the form fields when a different question is opened for editing.
  *
  * Accessibility: focus moves into the form on mount and returns to whatever had focus before
- * (the "New Question" button) on close; Escape closes; Tab is trapped inside the panel while
- * it's open, since this is a true modal — nothing behind it should be reachable by keyboard.
+ * (the triggering Edit/New Question button) on close; Escape closes; Tab is trapped inside the
+ * panel while it's open, since this is a true modal — nothing behind it should be reachable by
+ * keyboard.
  */
-export function AddQuestionModal({
+export function QuestionFormModal({
+  mode,
+  initialData,
   defaultQuizType,
   onClose,
   onSave,
 }: {
+  mode: 'add' | 'edit';
+  /** Required (and used to pre-fill every field) when mode is 'edit'; ignored otherwise. */
+  initialData?: QuizQuestion;
+  /** Which quiz's tab/filter the page currently has active — the starting value in 'add' mode. */
   defaultQuizType: ActivityType;
   onClose: () => void;
   onSave: (question: QuizQuestion) => void;
 }) {
-  const [quizType, setQuizType] = useState<ActivityType>(defaultQuizType);
-  const [level, setLevel] = useState<1 | 2 | 3>(1);
-  const [questionText, setQuestionText] = useState('');
-  const [optionTexts, setOptionTexts] = useState<string[]>(EMPTY_OPTIONS);
-  const [correctIndex, setCorrectIndex] = useState<number | null>(null);
-  const [explanation, setExplanation] = useState('');
+  const [quizType, setQuizType] = useState<ActivityType>(initialData?.quizType ?? defaultQuizType);
+  const [level, setLevel] = useState<1 | 2 | 3>(initialData?.level ?? 1);
+  const [questionText, setQuestionText] = useState(initialData?.questionText ?? '');
+  const [optionTexts, setOptionTexts] = useState<string[]>(
+    initialData ? initialData.answerOptions.map((option) => option.text) : EMPTY_OPTIONS,
+  );
+  const [correctIndex, setCorrectIndex] = useState<number | null>(
+    initialData ? initialData.answerOptions.findIndex((option) => option.isCorrect) : null,
+  );
+  const [explanation, setExplanation] = useState(initialData?.explanation ?? '');
   const [errors, setErrors] = useState<FormErrors>({});
 
   const panelRef = useRef<HTMLDivElement>(null);
@@ -114,13 +128,17 @@ export function AddQuestionModal({
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
 
+    // Editing keeps the question's id, and each option's id at its position, so a real backend
+    // could update existing rows instead of treating every edit as a delete-and-recreate.
+    const questionId = mode === 'edit' && initialData ? initialData.id : `q-${Date.now()}`;
+
     onSave({
-      id: `q-${Date.now()}`,
+      id: questionId,
       quizType,
       level,
       questionText: questionText.trim(),
       answerOptions: optionTexts.map((text, index) => ({
-        id: `q-${Date.now()}-opt-${index}`,
+        id: mode === 'edit' && initialData?.answerOptions[index] ? initialData.answerOptions[index].id : `${questionId}-opt-${index}`,
         text: text.trim(),
         isCorrect: index === correctIndex,
       })),
@@ -129,6 +147,8 @@ export function AddQuestionModal({
 
     close();
   }
+
+  const isEdit = mode === 'edit';
 
   return (
     <div
@@ -141,14 +161,14 @@ export function AddQuestionModal({
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="add-question-title"
+        aria-labelledby="question-form-title"
         className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-brand-lg border border-brand-navy-border bg-brand-navy p-7"
       >
         <div className="mb-1 flex items-start justify-between gap-3">
           <div>
             <p className="text-xs font-extrabold uppercase tracking-wide text-brand-gold">Question Bank</p>
-            <h2 id="add-question-title" className="mt-1 text-xl font-extrabold text-white">
-              Add a New Question
+            <h2 id="question-form-title" className="mt-1 text-xl font-extrabold text-white">
+              {isEdit ? 'Edit Question' : 'Add a New Question'}
             </h2>
           </div>
           <button
@@ -252,7 +272,7 @@ export function AddQuestionModal({
               type="submit"
               className="rounded-brand-md bg-brand-purple px-5 py-2 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark"
             >
-              Save Question
+              {isEdit ? 'Save Changes' : 'Save Question'}
             </button>
           </div>
         </form>

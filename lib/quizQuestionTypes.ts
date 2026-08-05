@@ -12,7 +12,7 @@ export type QuizAnswerOption = {
  * legacy student-facing mock, with a fixed 25-point maxScore and a per-option explanation baked
  * in) — this one is designed to be what a real "create a question" endpoint would accept and
  * return, so lib/mockQuestions.ts is the only thing that needs replacing once that endpoint
- * exists; AddQuestionModal, AnswerOptionField and app/instructor/questions/page.tsx don't change.
+ * exists; QuestionFormModal, AnswerOptionField and app/instructor/questions/page.tsx don't change.
  */
 export type QuizQuestion = {
   id: string;
