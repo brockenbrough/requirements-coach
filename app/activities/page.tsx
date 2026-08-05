@@ -5,8 +5,8 @@ import { AppShell } from '../../components/AppShell';
 import { ActivityCard } from '../../components/ActivityCard';
 import { ActivityCardSkeleton } from '../../components/ActivityCardSkeleton';
 import { ACTIVITIES, ActivityDefinition, Difficulty } from '../../lib/activityContent';
-import { getActivityState, getBestScore, getTitle } from '../../lib/activityStore';
-import { loadSessions } from '../../lib/sessionClient';
+import { getActivityState, getTitle } from '../../lib/activityStore';
+import { loadCompletedAttempts, loadSessions } from '../../lib/sessionClient';
 import { useRequireRole } from '../../lib/useRequireRole';
 
 type CardData = {
@@ -18,7 +18,7 @@ type CardData = {
 };
 
 export default function ActivitiesPage() {
-  const { token, loading, authorized } = useRequireRole('student');
+  const { token, profile, loading, authorized } = useRequireRole('student');
   const [cards, setCards] = useState<CardData[] | null>(null);
   // GitHub #108: explicit loading state rather than inferring it from cards === null — the
   // retry button needs to distinguish "haven't loaded yet" from "loaded, then failed".
@@ -26,10 +26,9 @@ export default function ActivitiesPage() {
   const [loadFailed, setLoadFailed] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
 
-  // hasInProgress comes from the real session API (REQ-PL-6.3 must hold for every activity,
-  // not just whichever one the mock happened to remember) — one list covers every card, rather
-  // than a per-activity round trip. level/title/bestScore are still mock-derived; see CLAUDE.md's
-  // migration notes for what's left to wire up there.
+  // Both hasInProgress and bestScore come from real API calls — loadSessions for the in-progress
+  // set and loadCompletedAttempts (once per activity, in parallel) for the best score.
+  // level/title are still derived from the localStorage mock (activityStore).
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
@@ -37,36 +36,50 @@ export default function ActivitiesPage() {
     setIsLoading(true);
     setLoadFailed(false);
 
-    loadSessions(token, 'in-progress').then((result) => {
-      if (cancelled) return;
+    const attemptsPromises = profile
+      ? ACTIVITIES.map((activity) =>
+          loadCompletedAttempts(token, profile.user_id, activity.activityType),
+        )
+      : ACTIVITIES.map(() => Promise.resolve({ ok: true as const, data: { attempts: [] } }));
 
-      if (!result.ok) {
-        setLoadFailed(true);
+    Promise.all([loadSessions(token, 'in-progress'), ...attemptsPromises]).then(
+      ([sessionsResult, ...attemptResults]) => {
+        if (cancelled) return;
+
+        if (!sessionsResult.ok) {
+          setLoadFailed(true);
+          setIsLoading(false);
+          return;
+        }
+
+        const inProgressTypes = new Set(sessionsResult.data.sessions.map((session) => session.activity_type));
+
+        setCards(
+          ACTIVITIES.map((activity, i) => {
+            const state = getActivityState(activity.slug);
+            const attemptsResult = attemptResults[i];
+            const attempts = attemptsResult.ok ? attemptsResult.data.attempts : [];
+            const best =
+              attempts.length === 0
+                ? null
+                : attempts.reduce((b, a) => (a.score > b.score ? a : b), attempts[0]);
+            return {
+              activity,
+              level: state.level,
+              title: getTitle(activity.slug),
+              bestScore: best ? { score: best.score, maxScore: best.maxScore } : null,
+              hasInProgress: inProgressTypes.has(activity.activityType),
+            };
+          }),
+        );
         setIsLoading(false);
-        return;
-      }
-
-      const inProgressTypes = new Set(result.data.sessions.map((session) => session.activity_type));
-
-      setCards(
-        ACTIVITIES.map((activity) => {
-          const state = getActivityState(activity.slug);
-          return {
-            activity,
-            level: state.level,
-            title: getTitle(activity.slug),
-            bestScore: getBestScore(activity.slug),
-            hasInProgress: inProgressTypes.has(activity.activityType),
-          };
-        }),
-      );
-      setIsLoading(false);
-    });
+      },
+    );
 
     return () => {
       cancelled = true;
     };
-  }, [token, retryCount]);
+  }, [token, profile, retryCount]);
 
   if (loading || !authorized) return null;
 
