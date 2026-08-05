@@ -147,10 +147,12 @@ export async function POST(request: Request) {
   if (existing.session) return respondWithSession(supabase, existing.session, { created: false });
 
   // AC 1: draw QUESTIONS_PER_SESSION questions matching activity type and difficulty level 1.
+  // GitHub #124: filtered through an inner join against the activity_type table (#122/#123)
+  // instead of a plain equality check on the free-text column.
   const { data: pool, error: poolError } = await supabase
     .from('question')
-    .select('question_id, max_score')
-    .eq('activity_type', activityType)
+    .select('question_id, max_score, activity:activity_type!inner ( activity_type )')
+    .eq('activity.activity_type', activityType)
     .eq('difficulty_level', START_DIFFICULTY_LEVEL);
 
   if (poolError) return Response.json({ error: poolError.message }, { status: 500 });

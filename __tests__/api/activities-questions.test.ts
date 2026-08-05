@@ -106,7 +106,8 @@ describe('GET /api/activities/:activityType/questions', () => {
   it('filters by activity type and difficulty level', async () => {
     queue('question', { data: [], error: null });
     await GET(makeRequest('IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', '2'), PARAMS('IDENTIFY_WEAK_ACCEPTANCE_CRITERIA'));
-    expect(h.state.filters).toContainEqual({ column: 'activity_type', value: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA' });
+    // GitHub #124: filtered via the inner join alias, not the plain column.
+    expect(h.state.filters).toContainEqual({ column: 'activity.activity_type', value: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA' });
     expect(h.state.filters).toContainEqual({ column: 'difficulty_level', value: 2 });
   });
 
