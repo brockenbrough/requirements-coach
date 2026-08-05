@@ -207,7 +207,15 @@ describe('POST /api/sessions', () => {
     const body = await response.json();
 
     expect(JSON.stringify(body)).not.toContain('is_correct');
-    expect(body.questions[0].options[0]).toEqual({ answer_id: 'a-0-1', option_text: 'Option 1' });
+    // Order isn't asserted here — GitHub #129 has loadSessionQuestions shuffle options, so only
+    // the set (and the shape: no is_correct/explanation) is guaranteed, not a fixed position.
+    expect(body.questions[0].options).toHaveLength(2);
+    expect(body.questions[0].options).toEqual(
+      expect.arrayContaining([
+        { answer_id: 'a-0-1', option_text: 'Option 1' },
+        { answer_id: 'a-0-2', option_text: 'Option 2' },
+      ]),
+    );
   });
 
   // AC 6

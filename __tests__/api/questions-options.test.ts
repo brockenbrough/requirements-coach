@@ -71,8 +71,15 @@ describe('GET /api/questions/:questionId/options', () => {
     const res = await GET(makeRequest('q-1'), PARAMS('q-1'));
     expect(res.status).toBe(200);
     const body = await res.json();
+    // Order isn't asserted here — GitHub #129 has this route shuffle options, so only the set
+    // (and the shape: no is_correct/explanation) is guaranteed, not a fixed position.
     expect(body.options).toHaveLength(2);
-    expect(body.options[0]).toEqual({ answer_id: 'a-1', option_text: 'Option A' });
+    expect(body.options).toEqual(
+      expect.arrayContaining([
+        { answer_id: 'a-1', option_text: 'Option A' },
+        { answer_id: 'a-2', option_text: 'Option B' },
+      ]),
+    );
     expect(body.options[0]).not.toHaveProperty('is_correct');
     expect(body.options[0]).not.toHaveProperty('explanation');
   });
