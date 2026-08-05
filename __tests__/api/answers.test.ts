@@ -252,11 +252,11 @@ describe('POST /api/sessions/{sessionId}/answers', () => {
 
     expect(log).toMatchObject({
       session_id: SESSION_ID,
-      user_id: 'user-123',
       question_id: 'q-1',
       submitted_option: 'a-1-correct',
       score: 25,
     });
+    expect(log).not.toHaveProperty('user_id');
     expect(log.log_id).toEqual(expect.any(String));
   });
 
