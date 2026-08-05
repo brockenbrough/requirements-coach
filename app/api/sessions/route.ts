@@ -147,10 +147,12 @@ export async function POST(request: Request) {
   if (existing.session) return respondWithSession(supabase, existing.session, { created: false });
 
   // AC 1: draw QUESTIONS_PER_SESSION questions matching activity type and difficulty level 1.
+  // GitHub #124: filtered through an inner join against the activity_type table (#122/#123)
+  // instead of a plain equality check on the free-text column.
   const { data: pool, error: poolError } = await supabase
     .from('question')
-    .select('question_id, max_score')
-    .eq('activity_type', activityType)
+    .select('question_id, max_score, activity:activity_type!inner ( activity_type )')
+    .eq('activity.activity_type', activityType)
     .eq('difficulty_level', START_DIFFICULTY_LEVEL);
 
   if (poolError) return Response.json({ error: poolError.message }, { status: 500 });
@@ -196,7 +198,14 @@ export async function POST(request: Request) {
     }
     // session_log.user_id references "user"(user_id): the student is authenticated but has
     // no profile row yet, so there is nothing to hang the session on.
-    if (insertError?.code === FOREIGN_KEY_VIOLATION) {
+    //
+    // GitHub #124: session_log also has fk_session_log_activity_type and fk_session_log_badge
+    // (#123), which raise the same 23503 code. activityType is already validated against
+    // lib/activityTypes.ts above, so that FK should never actually fire here — but if the
+    // activity_type table and that list ever drift, it must not be misreported as a missing
+    // profile. Only the user FK gets the friendly 409; anything else falls through to the
+    // generic 500 below with the real error message.
+    if (insertError?.code === FOREIGN_KEY_VIOLATION && insertError.message.includes('fk_session_log_user')) {
       return Response.json(
         { error: 'Create a profile before starting an activity.' },
         { status: 409 },

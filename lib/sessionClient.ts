@@ -9,24 +9,16 @@
 // from the feedback route, and only after the answer has been committed.
 
 import type { ActivityType } from './activityTypes';
+import type { InstructorActivityEntry, SessionListEntry, SessionRecord } from './sessionTypes';
 import { getCachedCompletedAttempts, setCachedCompletedAttempts } from './completedAttemptsStore';
 import { getCachedActivityLog, setCachedActivityLog } from './activityLogStore';
 import { getCachedCompletedSessions, setCachedCompletedSessions } from './completedSessionsStore';
 import { getCachedScore, setCachedScore } from './scoreStore';
 
-export type SessionRecord = {
-  session_id: string;
-  user_id: string;
-  activity_type: string;
-  difficulty_level: number;
-  started_at: string;
-  ended_at: string | null;
-  status: string;
-  cumulative_score: number;
-  max_score: number;
-  passed: boolean;
-  badge_id: string | null;
-};
+// The row shapes themselves live in lib/sessionTypes.ts, which imports nothing, so the routes
+// can share them without importing this 'use client' module. Re-exported here so this file
+// stays the one import the UI needs for anything session-related.
+export type { InstructorActivityEntry, SessionListEntry, SessionRecord } from './sessionTypes';
 
 export type SessionQuestionOption = {
   answer_id: string;
@@ -50,13 +42,6 @@ export type SessionAnswer = {
   submitted_at: string;
   correct: boolean | null;
   explanation: string | null;
-};
-
-/** A session as the list endpoint returns it: the record plus how far it got. */
-export type SessionListEntry = SessionRecord & {
-  questionCount: number;
-  answeredCount: number;
-  nextPosition: number | null;
 };
 
 export type StartSessionResult = {
@@ -342,6 +327,22 @@ export function loadActivityLog(
     }
     return result;
   });
+}
+
+/**
+ * Every student's attempts across the class (GET /api/instructor/activities, GitHub #171) —
+ * what the Instructor Dashboard renders. The route answers 403 for anyone who isn't a
+ * confirmed instructor, so there is no studentId to pass: the whole class is the scope.
+ *
+ * Deliberately **not** cached in localStorage, unlike loadStudentScore/loadSessions('completed')
+ * /loadActivityLog. Those four caches are keyed by studentId and hold the student's own data,
+ * which only that student's own actions change — so the page that causes a change can
+ * forceRefresh it. This list changes whenever *any* student in the class answers, starts or
+ * abandons something, and this tab never learns about it, so a cache here would just show
+ * an instructor stale results with no invalidation point to fix it.
+ */
+export function loadInstructorActivities(token: string) {
+  return request<{ sessions: InstructorActivityEntry[] }>('/api/instructor/activities', { method: 'GET' }, token);
 }
 
 /**

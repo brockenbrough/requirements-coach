@@ -1,6 +1,6 @@
 import { getActivityByType } from './activityContent';
 import type { ActivityType } from './activityTypes';
-import type { SessionListEntry } from './sessionClient';
+import type { InstructorActivityEntry, SessionListEntry } from './sessionClient';
 
 export type ActivityLogStatus = 'completed' | 'in-progress' | 'abandoned';
 
@@ -108,6 +108,19 @@ export function summarizeStudents(entries: StudentActivitySummary[]): StudentAgg
  * (GitHub #48) can share one row component without either page knowing about the other's data
  * source.
  */
+/**
+ * The instructor-side counterpart (GitHub #171): the same adaptation, plus the two fields that
+ * say whose attempt it was. Built on toActivityLogEntry rather than beside it, so the student
+ * log and the class-wide table cannot drift apart in how they read a session.
+ */
+export function toStudentActivitySummary(session: InstructorActivityEntry): StudentActivitySummary {
+  return {
+    ...toActivityLogEntry(session),
+    studentId: session.studentId,
+    studentName: session.studentName,
+  };
+}
+
 export function toActivityLogEntry(session: SessionListEntry): ActivityLogEntry {
   return {
     id: session.session_id,

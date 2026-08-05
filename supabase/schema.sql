@@ -38,6 +38,21 @@ CREATE TABLE "user" (
     PRIMARY KEY (user_id));
 
 -- ---------------------------------------------------------------------
+-- GitHub #122: Activity Type
+--
+-- A lookup table for the activity_type values every other table already
+-- stores as free text (question, session_log, title_definition — see the
+-- "Open point" comment in lib/activityTypes.ts). The natural key (the
+-- string itself) is the primary key, not a surrogate id, so turning an
+-- existing activity_type column into a foreign key later needs no data
+-- migration — just an ALTER TABLE ADD CONSTRAINT. That wiring, and
+-- enforcing it on question/session_log/title_definition, is GitHub #123.
+-- ---------------------------------------------------------------------
+CREATE TABLE activity_type (
+    activity_type varchar(50) NOT NULL,
+    PRIMARY KEY (activity_type));
+
+-- ---------------------------------------------------------------------
 -- REQ-DL-1: Question Bank
 -- ---------------------------------------------------------------------
 CREATE TABLE question (
@@ -188,17 +203,18 @@ CREATE TABLE session_to_question (
 -- ---------------------------------------------------------------------
 -- REQ-DL-4: Answered Question Log
 --
--- Tracks which user answered (user_id), the score achieved for that
--- specific submission (score), and the session it belongs to
--- (session_id) so a resumed activity can tell which of the 4 questions
--- are already done.
+-- Tracks the score achieved for a specific submission (score), and the
+-- session it belongs to (session_id) so a resumed activity can tell
+-- which of the 4 questions are already done.
+-- user_id was removed (GitHub #93) — it is redundant because it can be
+-- retrieved via a join on session_log, and keeping it in sync risked
+-- inconsistency.
 -- ---------------------------------------------------------------------
 CREATE TABLE answered_question_log (
     log_id uuid NOT NULL,
     submitted_at timestamp NOT NULL DEFAULT now(),
     score int4 NOT NULL,
     session_id uuid NOT NULL,
-    user_id uuid NOT NULL,
     question_id uuid NOT NULL,
     submitted_option uuid NOT NULL,
     PRIMARY KEY (log_id));
@@ -213,12 +229,18 @@ CREATE TABLE answered_question_log (
 -- auth.uid() and deleting the account cleans up everything behind it.
 ALTER TABLE "user" ADD CONSTRAINT fk_user_auth_users FOREIGN KEY (user_id) REFERENCES auth.users (id) ON DELETE CASCADE;
 
+-- GitHub #123: every activity_type column now points at the activity_type lookup table
+-- from #122, instead of being free text (question, session_log) or a hardcoded CHECK
+-- (title_definition, see the constraint removed below).
+ALTER TABLE question ADD CONSTRAINT fk_question_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
+
 ALTER TABLE question_to_answer ADD CONSTRAINT fk_question_to_answer_question FOREIGN KEY (question_id) REFERENCES question (question_id);
 ALTER TABLE question_to_answer ADD CONSTRAINT fk_question_to_answer_answer FOREIGN KEY (answer_id) REFERENCES answer (answer_id);
 
 ALTER TABLE user_badge ADD CONSTRAINT fk_user_badge_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
 ALTER TABLE user_badge ADD CONSTRAINT fk_user_badge_badge FOREIGN KEY (badge_id) REFERENCES badge (badge_id);
 
+ALTER TABLE title_definition ADD CONSTRAINT fk_title_definition_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
 -- Who authored the story, for attribution/moderation.
 ALTER TABLE user_story ADD CONSTRAINT fk_user_story_user FOREIGN KEY (creator_id) REFERENCES "user" (user_id);
 
@@ -227,13 +249,13 @@ ALTER TABLE submission ADD CONSTRAINT fk_submission_user_story FOREIGN KEY (user
 
 ALTER TABLE instructor_llm_config ADD CONSTRAINT fk_instructor_llm_config_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
 
-ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
 ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_question FOREIGN KEY (question_id) REFERENCES question (question_id);
 ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_answer FOREIGN KEY (submitted_option) REFERENCES answer (answer_id);
 ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_session FOREIGN KEY (session_id) REFERENCES session_log (session_id) ON DELETE CASCADE;
 
 ALTER TABLE session_log ADD CONSTRAINT fk_session_log_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
 ALTER TABLE session_log ADD CONSTRAINT fk_session_log_badge FOREIGN KEY (badge_id) REFERENCES badge (badge_id);
+ALTER TABLE session_log ADD CONSTRAINT fk_session_log_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
 
 ALTER TABLE session_to_question ADD CONSTRAINT fk_session_to_question_session FOREIGN KEY (session_id) REFERENCES session_log (session_id) ON DELETE CASCADE;
 ALTER TABLE session_to_question ADD CONSTRAINT fk_session_to_question_question FOREIGN KEY (question_id) REFERENCES question (question_id);
@@ -245,6 +267,9 @@ ALTER TABLE session_to_question ADD CONSTRAINT fk_session_to_question_question F
 
 ALTER TABLE question ADD CONSTRAINT ck_question_difficulty_level CHECK (difficulty_level BETWEEN 1 AND 3);
 
+-- REQ-GAM-DL-2.1: one title per (activity_type, difficulty_level) pair so the BL-1 lookup is
+-- unambiguous. activity_type itself is restricted to the known set via fk_title_definition_activity_type
+-- above, not a CHECK here — a hardcoded list of literals would drift from the activity_type table.
 ALTER TABLE user_story ADD CONSTRAINT ck_user_story_difficulty_level CHECK (difficulty_level BETWEEN 1 AND 3);
 
 -- Mirrors ix_question_activity_type_difficulty: the draw for a random
@@ -254,7 +279,6 @@ CREATE INDEX ix_user_story_activity_type_difficulty ON user_story (activity_type
 -- REQ-GAM-DL-2.1: activity type restricted to the known set, one title per
 -- (activity_type, difficulty_level) pair so the BL-1 lookup is unambiguous.
 ALTER TABLE title_definition ADD CONSTRAINT ck_title_definition_difficulty_level CHECK (difficulty_level BETWEEN 1 AND 3);
-ALTER TABLE title_definition ADD CONSTRAINT ck_title_definition_activity_type CHECK (activity_type IN ('IDENTIFY_WEAK_USER_STORIES', 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA'));
 ALTER TABLE title_definition ADD CONSTRAINT uq_title_definition_activity_level UNIQUE (activity_type, difficulty_level);
 
 ALTER TABLE session_log ADD CONSTRAINT ck_session_log_status CHECK (status IN ('in-progress', 'completed', 'abandoned'));
@@ -345,10 +369,16 @@ CREATE POLICY own_sessions_select ON session_log
 CREATE POLICY own_sessions_insert ON session_log
   FOR INSERT WITH CHECK (auth.uid() = user_id);
 
+-- GitHub #93: user_id removed from answered_question_log — ownership is now
+-- derived via the session_log join instead of a direct column check.
 CREATE POLICY own_answers_select ON answered_question_log
-  FOR SELECT USING (auth.uid() = user_id);
+  FOR SELECT USING (
+    auth.uid() = (SELECT user_id FROM session_log WHERE session_id = answered_question_log.session_id)
+  );
 CREATE POLICY own_answers_insert ON answered_question_log
-  FOR INSERT WITH CHECK (auth.uid() = user_id);
+  FOR INSERT WITH CHECK (
+    auth.uid() = (SELECT user_id FROM session_log WHERE session_id = answered_question_log.session_id)
+  );
 
 -- No UPDATE policy: grading (llm_score/llm_feedback/graded_at) is only ever
 -- written by a service-role route, never directly by the student.
@@ -381,6 +411,7 @@ CREATE POLICY own_submissions_insert ON submission
 --   DROP TABLE IF EXISTS session_to_question, answered_question_log,
 --                        session_log, question_to_answer, answer,
 --                        question, user_badge, badge, title_definition,
+--                        activity_type CASCADE;
 --                        user_story, submission, instructor_llm_config CASCADE;
 --   DROP FUNCTION IF EXISTS bump_session_score() CASCADE;
 --
@@ -411,6 +442,16 @@ CREATE POLICY own_submissions_insert ON submission
 --
 --   ALTER TABLE answered_question_log RENAME COLUMN answer_id TO submitted_option;
 
+-- GitHub #123 (activity_type columns turned into foreign keys against the activity_type table
+-- added in #122): if your database already has that table but not these constraints yet —
+--
+--   ALTER TABLE question ADD CONSTRAINT fk_question_activity_type
+--     FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
+--   ALTER TABLE session_log ADD CONSTRAINT fk_session_log_activity_type
+--     FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
+--   ALTER TABLE title_definition DROP CONSTRAINT IF EXISTS ck_title_definition_activity_type;
+--   ALTER TABLE title_definition ADD CONSTRAINT fk_title_definition_activity_type
+--     FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
 -- User Story bank (new table, no rename path — it has no starter-template or prior-schema
 -- predecessor): if your database already has everything above and you only need this table,
 -- run just its CREATE TABLE, CHECK constraint, index, fk_user_story_user, and RLS statements

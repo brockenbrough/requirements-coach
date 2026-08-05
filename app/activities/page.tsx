@@ -5,8 +5,8 @@ import { AppShell } from '../../components/AppShell';
 import { ActivityCard, type ActivityCardData } from '../../components/ActivityCard';
 import { ActivityCardSkeleton } from '../../components/ActivityCardSkeleton';
 import { ACTIVITIES, Difficulty } from '../../lib/activityContent';
-import { getActivityState, getBestScore, getTitle } from '../../lib/activityStore';
-import { loadSessions } from '../../lib/sessionClient';
+import { getActivityState, getTitle } from '../../lib/activityStore';
+import { loadCompletedAttempts, loadSessions } from '../../lib/sessionClient';
 import { useRequireRole } from '../../lib/useRequireRole';
 
 type CardData = {
@@ -20,8 +20,11 @@ type CardData = {
 /**
  * The Type B "Write Acceptance Criteria" activity (GitHub #149, REQ-FU-2) — not in ACTIVITIES
  * because it has no question bank/activity_type/session_log row, but rendered by the exact same
- * ActivityCard below and run through the exact same getActivityState/getTitle/getBestScore calls
- * as the two Type A cards, so there is no per-activity special case in this page's render logic.
+ * ActivityCard below and run through the same getActivityState/getTitle calls as the two Type A
+ * cards, so there is no per-activity special case in this page's render logic. Unlike the Type A
+ * cards, its bestScore/hasInProgress can't come from loadCompletedAttempts/loadSessions — there
+ * is no real activity_type or session_log row for it to query — so both stay honestly fixed
+ * (null / false) until a real backend for this activity exists.
  */
 const WRITE_ACCEPTANCE_CRITERIA_CARD: ActivityCardData = {
   slug: 'write-acceptance-criteria',
@@ -33,7 +36,7 @@ const WRITE_ACCEPTANCE_CRITERIA_CARD: ActivityCardData = {
 const CARD_SLUGS: ActivityCardData[] = [...ACTIVITIES, WRITE_ACCEPTANCE_CRITERIA_CARD];
 
 export default function ActivitiesPage() {
-  const { token, loading, authorized } = useRequireRole('student');
+  const { token, profile, loading, authorized } = useRequireRole('student');
   const [cards, setCards] = useState<CardData[] | null>(null);
   // GitHub #108: explicit loading state rather than inferring it from cards === null — the
   // retry button needs to distinguish "haven't loaded yet" from "loaded, then failed".
@@ -41,10 +44,9 @@ export default function ActivitiesPage() {
   const [loadFailed, setLoadFailed] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
 
-  // hasInProgress comes from the real session API (REQ-PL-6.3 must hold for every activity,
-  // not just whichever one the mock happened to remember) — one list covers every card, rather
-  // than a per-activity round trip. level/title/bestScore are still mock-derived; see CLAUDE.md's
-  // migration notes for what's left to wire up there.
+  // hasInProgress comes from loadSessions('in-progress'); bestScore for each Type A activity
+  // comes from loadCompletedAttempts, fetched in parallel, once per activity. level/title are
+  // still derived from the localStorage mock (activityStore) — see CLAUDE.md's migration notes.
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
@@ -52,34 +54,43 @@ export default function ActivitiesPage() {
     setIsLoading(true);
     setLoadFailed(false);
 
-    loadSessions(token, 'in-progress').then((result) => {
+    const attemptsPromises = profile
+      ? ACTIVITIES.map((activity) => loadCompletedAttempts(token, profile.user_id, activity.activityType))
+      : ACTIVITIES.map(() => Promise.resolve({ ok: true as const, data: { attempts: [] } }));
+
+    Promise.all([loadSessions(token, 'in-progress'), ...attemptsPromises]).then(([sessionsResult, ...attemptResults]) => {
       if (cancelled) return;
 
-      if (!result.ok) {
+      if (!sessionsResult.ok) {
         setLoadFailed(true);
         setIsLoading(false);
         return;
       }
 
-      const inProgressTypes = new Set(result.data.sessions.map((session) => session.activity_type));
+      const inProgressTypes = new Set(sessionsResult.data.sessions.map((session) => session.activity_type));
 
-      const typeACards: CardData[] = ACTIVITIES.map((activity) => ({
-        activity,
-        level: getActivityState(activity.slug).level,
-        title: getTitle(activity.slug),
-        bestScore: getBestScore(activity.slug),
-        hasInProgress: inProgressTypes.has(activity.activityType),
-      }));
+      const typeACards: CardData[] = ACTIVITIES.map((activity, i) => {
+        const attemptsResult = attemptResults[i];
+        const attempts = attemptsResult.ok ? attemptsResult.data.attempts : [];
+        const best = attempts.length === 0 ? null : attempts.reduce((b, a) => (a.score > b.score ? a : b), attempts[0]);
+        return {
+          activity,
+          level: getActivityState(activity.slug).level,
+          title: getTitle(activity.slug),
+          bestScore: best ? { score: best.score, maxScore: best.maxScore } : null,
+          hasInProgress: inProgressTypes.has(activity.activityType),
+        };
+      });
 
       // Type B (GitHub #149, REQ-FU-2): no session_log row is ever created for this activity —
-      // see app/activities/write-acceptance-criteria/page.tsx — so it can never appear in
-      // inProgressTypes above; hasInProgress is honestly false rather than a fetch special-case.
-      // Same getActivityState/getTitle/getBestScore calls and the same CardData shape as above.
+      // see app/activities/write-acceptance-criteria/page.tsx — so it can't be included in the
+      // loadCompletedAttempts/inProgressTypes calls above; bestScore/hasInProgress are honestly
+      // fixed rather than special-cased into those fetches. Same CardData shape as the Type A cards.
       const writeAcCard: CardData = {
         activity: WRITE_ACCEPTANCE_CRITERIA_CARD,
         level: getActivityState(WRITE_ACCEPTANCE_CRITERIA_CARD.slug).level,
         title: getTitle(WRITE_ACCEPTANCE_CRITERIA_CARD.slug),
-        bestScore: getBestScore(WRITE_ACCEPTANCE_CRITERIA_CARD.slug),
+        bestScore: null,
         hasInProgress: false,
       };
 
@@ -90,7 +101,7 @@ export default function ActivitiesPage() {
     return () => {
       cancelled = true;
     };
-  }, [token, retryCount]);
+  }, [token, profile, retryCount]);
 
   if (loading || !authorized) return null;
 
