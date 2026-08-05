@@ -87,6 +87,60 @@ CREATE TABLE badge (
     PRIMARY KEY (badge_id));
 
 -- ---------------------------------------------------------------------
+-- User Story Bank
+--
+-- Dedicated table for the User Story bank, so a random story can be
+-- served to students without overloading the MCQ-shaped question/
+-- answer tables above.
+-- ---------------------------------------------------------------------
+CREATE TABLE user_story (
+    user_story_id    uuid        NOT NULL,
+    story_text       text        NOT NULL,
+    difficulty_level int2        NOT NULL,
+    activity_type    varchar(50) NOT NULL,
+    creator_id       uuid        NOT NULL,
+    PRIMARY KEY (user_story_id));
+
+-- ---------------------------------------------------------------------
+-- Submission Bank
+--
+-- A student's free-text answer to a user_story prompt (REQ-FU-1 /
+-- REQ-FU-2), plus its LLM grading result. Nullable llm_* / graded_at:
+-- the row is inserted at submit time before grading runs, then a
+-- service-role grading step fills them in afterward ("write before
+-- disclose", same as answered_question_log).
+-- ---------------------------------------------------------------------
+CREATE TABLE submission (
+    submission_id  uuid        NOT NULL,
+    user_id        uuid        NOT NULL,
+    user_story_id  uuid        NOT NULL,
+    submitted_text text        NOT NULL,
+    llm_score      int4,
+    llm_feedback   text,
+    llm_provider   text,
+    submitted_at   timestamp   NOT NULL DEFAULT now(),
+    graded_at      timestamp,
+    PRIMARY KEY (submission_id));
+
+-- ---------------------------------------------------------------------
+-- Instructor LLM Config
+--
+-- Stores the LLM provider + API key an instructor has configured for
+-- grading free-text submissions (submission.llm_provider). RLS-enabled
+-- with no client policies, same as question/answer/user_story — only a
+-- service-role route can read or write api_key, and that route is
+-- responsible for masking it before it reaches the client.
+-- ---------------------------------------------------------------------
+CREATE TABLE instructor_llm_config (
+    instructor_llm_config_id uuid      NOT NULL,
+    user_id                  uuid      NOT NULL,
+    provider                 text      NOT NULL,
+    api_key                  text      NOT NULL,
+    is_active                bool      NOT NULL DEFAULT false,
+    updated_at               timestamp NOT NULL DEFAULT now(),
+    PRIMARY KEY (instructor_llm_config_id));
+
+-- ---------------------------------------------------------------------
 -- REQ-GAM-DL-2: Title Definition Storage
 --
 -- Maps (activity_type, difficulty_level) to a title name (e.g. "Story
@@ -186,6 +240,13 @@ ALTER TABLE user_badge ADD CONSTRAINT fk_user_badge_user FOREIGN KEY (user_id) R
 ALTER TABLE user_badge ADD CONSTRAINT fk_user_badge_badge FOREIGN KEY (badge_id) REFERENCES badge (badge_id);
 
 ALTER TABLE title_definition ADD CONSTRAINT fk_title_definition_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
+-- Who authored the story, for attribution/moderation.
+ALTER TABLE user_story ADD CONSTRAINT fk_user_story_user FOREIGN KEY (creator_id) REFERENCES "user" (user_id);
+
+ALTER TABLE submission ADD CONSTRAINT fk_submission_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
+ALTER TABLE submission ADD CONSTRAINT fk_submission_user_story FOREIGN KEY (user_story_id) REFERENCES user_story (user_story_id);
+
+ALTER TABLE instructor_llm_config ADD CONSTRAINT fk_instructor_llm_config_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
 
 ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
 ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_question FOREIGN KEY (question_id) REFERENCES question (question_id);
@@ -209,6 +270,14 @@ ALTER TABLE question ADD CONSTRAINT ck_question_difficulty_level CHECK (difficul
 -- REQ-GAM-DL-2.1: one title per (activity_type, difficulty_level) pair so the BL-1 lookup is
 -- unambiguous. activity_type itself is restricted to the known set via fk_title_definition_activity_type
 -- above, not a CHECK here — a hardcoded list of literals would drift from the activity_type table.
+ALTER TABLE user_story ADD CONSTRAINT ck_user_story_difficulty_level CHECK (difficulty_level BETWEEN 1 AND 3);
+
+-- Mirrors ix_question_activity_type_difficulty: the draw for a random
+-- story filters on exactly this pair.
+CREATE INDEX ix_user_story_activity_type_difficulty ON user_story (activity_type, difficulty_level);
+
+-- REQ-GAM-DL-2.1: activity type restricted to the known set, one title per
+-- (activity_type, difficulty_level) pair so the BL-1 lookup is unambiguous.
 ALTER TABLE title_definition ADD CONSTRAINT ck_title_definition_difficulty_level CHECK (difficulty_level BETWEEN 1 AND 3);
 ALTER TABLE title_definition ADD CONSTRAINT uq_title_definition_activity_level UNIQUE (activity_type, difficulty_level);
 
@@ -228,6 +297,15 @@ CREATE INDEX ix_question_activity_type_difficulty ON question (activity_type, di
 CREATE UNIQUE INDEX uq_session_log_one_active
   ON session_log (user_id, activity_type)
   WHERE status = 'in-progress';
+
+-- At most one active LLM config across all instructors (global, unlike
+-- uq_session_log_one_active which partitions by user_id/activity_type).
+-- Activating a new config deactivates the previous one in the same
+-- transaction; a 23505 race on this index is handled the same way
+-- POST /api/sessions handles uq_session_log_one_active's race.
+CREATE UNIQUE INDEX uq_instructor_llm_config_one_active
+  ON instructor_llm_config (is_active)
+  WHERE is_active = true;
 
 -- No duplicate position and no duplicate question within one session.
 ALTER TABLE session_to_question ADD CONSTRAINT uq_session_to_question_position UNIQUE (session_id, position);
@@ -279,9 +357,12 @@ ALTER TABLE question ENABLE ROW LEVEL SECURITY;
 ALTER TABLE answer ENABLE ROW LEVEL SECURITY;
 ALTER TABLE question_to_answer ENABLE ROW LEVEL SECURITY;
 ALTER TABLE session_to_question ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_story ENABLE ROW LEVEL SECURITY;
+ALTER TABLE instructor_llm_config ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE session_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE answered_question_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE submission ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY own_sessions_select ON session_log
   FOR SELECT USING (auth.uid() = user_id);
@@ -291,6 +372,13 @@ CREATE POLICY own_sessions_insert ON session_log
 CREATE POLICY own_answers_select ON answered_question_log
   FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY own_answers_insert ON answered_question_log
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+-- No UPDATE policy: grading (llm_score/llm_feedback/graded_at) is only ever
+-- written by a service-role route, never directly by the student.
+CREATE POLICY own_submissions_select ON submission
+  FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY own_submissions_insert ON submission
   FOR INSERT WITH CHECK (auth.uid() = user_id);
 
 
@@ -318,6 +406,7 @@ CREATE POLICY own_answers_insert ON answered_question_log
 --                        session_log, question_to_answer, answer,
 --                        question, user_badge, badge, title_definition,
 --                        activity_type CASCADE;
+--                        user_story, submission, instructor_llm_config CASCADE;
 --   DROP FUNCTION IF EXISTS bump_session_score() CASCADE;
 --
 -- Leaving "user" out of that list keeps the profiles.
@@ -357,3 +446,18 @@ CREATE POLICY own_answers_insert ON answered_question_log
 --   ALTER TABLE title_definition DROP CONSTRAINT IF EXISTS ck_title_definition_activity_type;
 --   ALTER TABLE title_definition ADD CONSTRAINT fk_title_definition_activity_type
 --     FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
+-- User Story bank (new table, no rename path — it has no starter-template or prior-schema
+-- predecessor): if your database already has everything above and you only need this table,
+-- run just its CREATE TABLE, CHECK constraint, index, fk_user_story_user, and RLS statements
+-- from this script instead of re-running the whole thing. fk_user_story_user requires the
+-- "user" table to already exist.
+
+-- Submission table (free-text answers + LLM grading, REQ-FU-1/REQ-FU-2): also a new table
+-- with no rename path. Its two FKs (fk_submission_user, fk_submission_user_story) require
+-- "user" and user_story to already exist, so run user_story's statements first if adding
+-- both to an existing database.
+
+-- Instructor LLM Config table: also new, no rename path. Its FK (fk_instructor_llm_config_user)
+-- requires "user" to already exist. uq_instructor_llm_config_one_active is a global partial
+-- unique index (not scoped by user_id) — at most one row across the whole table can have
+-- is_active = true at a time.
