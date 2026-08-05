@@ -176,18 +176,23 @@ export default function PlayActivityPage({
     });
   }
 
-  function handleContinue() {
+  async function handleContinue() {
     if (!outcome) return;
     if (outcome.completed) {
       if (token && profile?.user_id) {
-        void loadStudentScore(token, profile.user_id, { forceRefresh: true });
-        void loadSessions(token, "completed", {
-          studentId: profile.user_id,
-          forceRefresh: true,
-        });
-        void loadCompletedAttempts(token, profile.user_id, activity!.activityType, {
-          forceRefresh: true,
-        });
+        // Await the completed-attempts refresh before navigating so the activity
+        // page's cache is already up to date when it mounts — without this the
+        // "previous attempts" table still shows the stale list (GitHub #130).
+        await Promise.all([
+          loadStudentScore(token, profile.user_id, { forceRefresh: true }),
+          loadSessions(token, "completed", {
+            studentId: profile.user_id,
+            forceRefresh: true,
+          }),
+          loadCompletedAttempts(token, profile.user_id, activity!.activityType, {
+            forceRefresh: true,
+          }),
+        ]);
       }
       router.push(`/activities/${activity!.slug}`);
       return;
