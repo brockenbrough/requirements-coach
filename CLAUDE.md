@@ -45,7 +45,7 @@ Also dead or unwired, so grep before assuming:
 - `lib/activityContent.ts`'s `questionBank` (and `getQuestion`/`questionsForLevel`) is **not** used for gameplay — the play page gets prompts, options, and scoring from the server. `activityContent.ts` is still live for display-only fields (`name`, `summary`, `instructions`, `category`, `titles`) and the slug↔activityType mapping.
 - `GET /api/activities/:activityType/questions` and `GET /api/questions/:questionId/options` are test-covered but no page calls them.
 - `requireInstructor` in `lib/instructorAuth.ts` guards `GET /api/instructor/activities`, currently its only caller. Its docblock contains the exact usage snippet any further instructor route should copy — in particular the 403-with-no-body branch.
-- `user_story` and `submission` tables exist in `supabase/schema.sql` but nothing in `app/` or `lib/` reads them yet.
+- `user_story`, `submission`, and `instructor_llm_config` tables (REQ-FU-2, "Write Acceptance Criteria") exist in `supabase/schema.sql`, and `lib/llm/` (`getLLMProvider` in `factory.ts`, the `LLMProvider` interface in `provider.ts`, `ClaudeProvider`/`ChatGptProvider`/`GeminiProvider`, prompt building in `promptUtils.ts`) implements the grading side against them — but no API route calls `getLLMProvider` or touches these tables yet, so there's nothing to resume from a partial submission. `submission.llm_score`/`llm_feedback`/`llm_provider` are nullable for the same "write before disclose" reason as `answered_question_log`: a route would insert the row at submit time, then a service-role step fills in the grading result. `instructor_llm_config.api_key` needs masking before it ever reaches the client, same caution as any other service-role-only secret.
 
 ### Auth flow
 
