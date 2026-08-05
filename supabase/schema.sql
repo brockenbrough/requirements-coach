@@ -83,6 +83,7 @@ CREATE TABLE user_story (
     story_text       text        NOT NULL,
     difficulty_level int2        NOT NULL,
     activity_type    varchar(50) NOT NULL,
+    creator_id       uuid        NOT NULL,
     PRIMARY KEY (user_story_id));
 
 -- ---------------------------------------------------------------------
@@ -178,6 +179,9 @@ ALTER TABLE question_to_answer ADD CONSTRAINT fk_question_to_answer_answer FOREI
 
 ALTER TABLE user_badge ADD CONSTRAINT fk_user_badge_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
 ALTER TABLE user_badge ADD CONSTRAINT fk_user_badge_badge FOREIGN KEY (badge_id) REFERENCES badge (badge_id);
+
+-- Who authored the story, for attribution/moderation.
+ALTER TABLE user_story ADD CONSTRAINT fk_user_story_user FOREIGN KEY (creator_id) REFERENCES "user" (user_id);
 
 ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
 ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_question FOREIGN KEY (question_id) REFERENCES question (question_id);
@@ -347,5 +351,6 @@ CREATE POLICY own_answers_insert ON answered_question_log
 
 -- User Story bank (new table, no rename path — it has no starter-template or prior-schema
 -- predecessor): if your database already has everything above and you only need this table,
--- run just its CREATE TABLE, CHECK constraint, index, and RLS statements from this script
--- instead of re-running the whole thing.
+-- run just its CREATE TABLE, CHECK constraint, index, fk_user_story_user, and RLS statements
+-- from this script instead of re-running the whole thing. fk_user_story_user requires the
+-- "user" table to already exist.
