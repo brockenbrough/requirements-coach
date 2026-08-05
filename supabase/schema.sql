@@ -38,6 +38,21 @@ CREATE TABLE "user" (
     PRIMARY KEY (user_id));
 
 -- ---------------------------------------------------------------------
+-- GitHub #122: Activity Type
+--
+-- A lookup table for the activity_type values every other table already
+-- stores as free text (question, session_log, title_definition — see the
+-- "Open point" comment in lib/activityTypes.ts). The natural key (the
+-- string itself) is the primary key, not a surrogate id, so turning an
+-- existing activity_type column into a foreign key later needs no data
+-- migration — just an ALTER TABLE ADD CONSTRAINT. That wiring, and
+-- enforcing it on question/session_log/title_definition, is GitHub #123.
+-- ---------------------------------------------------------------------
+CREATE TABLE activity_type (
+    activity_type varchar(50) NOT NULL,
+    PRIMARY KEY (activity_type));
+
+-- ---------------------------------------------------------------------
 -- REQ-DL-1: Question Bank
 -- ---------------------------------------------------------------------
 CREATE TABLE question (
@@ -293,7 +308,8 @@ CREATE POLICY own_answers_insert ON answered_question_log
 --
 --   DROP TABLE IF EXISTS session_to_question, answered_question_log,
 --                        session_log, question_to_answer, answer,
---                        question, user_badge, badge, title_definition CASCADE;
+--                        question, user_badge, badge, title_definition,
+--                        activity_type CASCADE;
 --   DROP FUNCTION IF EXISTS bump_session_score() CASCADE;
 --
 -- Leaving "user" out of that list keeps the profiles.

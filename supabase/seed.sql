@@ -28,6 +28,21 @@
 
 
 -- #####################################################################
+-- GitHub #122: Activity Types
+--
+-- Rows for the activity_type lookup table added in schema.sql. Inserted
+-- first since #123 will turn question.activity_type, session_log's, and
+-- title_definition's into foreign keys against these rows.
+--
+-- To re-run: DELETE FROM activity_type;
+-- #####################################################################
+
+INSERT INTO activity_type (activity_type) VALUES
+('IDENTIFY_WEAK_USER_STORIES'),
+('IDENTIFY_WEAK_ACCEPTANCE_CRITERIA');
+
+
+-- #####################################################################
 -- Activity: Identify Weak User Stories
 -- #####################################################################
 
