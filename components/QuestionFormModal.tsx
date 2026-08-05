@@ -227,7 +227,7 @@ export function QuestionFormModal({
               value={questionText}
               onChange={(event) => setQuestionText(event.target.value)}
               rows={3}
-              placeholder="e.g. Which of these user stories is the weakest?"
+              placeholder="e.g. Which of these options is the weakest?"
               className="mt-1.5 block w-full resize-y rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none transition focus:border-brand-purple"
             />
           </label>
