@@ -72,6 +72,42 @@ CREATE TABLE badge (
     PRIMARY KEY (badge_id));
 
 -- ---------------------------------------------------------------------
+-- User Story Bank
+--
+-- Dedicated table for the User Story bank, so a random story can be
+-- served to students without overloading the MCQ-shaped question/
+-- answer tables above.
+-- ---------------------------------------------------------------------
+CREATE TABLE user_story (
+    user_story_id    uuid        NOT NULL,
+    story_text       text        NOT NULL,
+    difficulty_level int2        NOT NULL,
+    activity_type    varchar(50) NOT NULL,
+    creator_id       uuid        NOT NULL,
+    PRIMARY KEY (user_story_id));
+
+-- ---------------------------------------------------------------------
+-- Submission Bank
+--
+-- A student's free-text answer to a user_story prompt (REQ-FU-1 /
+-- REQ-FU-2), plus its LLM grading result. Nullable llm_* / graded_at:
+-- the row is inserted at submit time before grading runs, then a
+-- service-role grading step fills them in afterward ("write before
+-- disclose", same as answered_question_log).
+-- ---------------------------------------------------------------------
+CREATE TABLE submission (
+    submission_id  uuid        NOT NULL,
+    user_id        uuid        NOT NULL,
+    user_story_id  uuid        NOT NULL,
+    submitted_text text        NOT NULL,
+    llm_score      int4,
+    llm_feedback   text,
+    llm_provider   text,
+    submitted_at   timestamp   NOT NULL DEFAULT now(),
+    graded_at      timestamp,
+    PRIMARY KEY (submission_id));
+
+-- ---------------------------------------------------------------------
 -- REQ-GAM-DL-2: Title Definition Storage
 --
 -- Maps (activity_type, difficulty_level) to a title name (e.g. "Story
@@ -165,6 +201,12 @@ ALTER TABLE question_to_answer ADD CONSTRAINT fk_question_to_answer_answer FOREI
 ALTER TABLE user_badge ADD CONSTRAINT fk_user_badge_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
 ALTER TABLE user_badge ADD CONSTRAINT fk_user_badge_badge FOREIGN KEY (badge_id) REFERENCES badge (badge_id);
 
+-- Who authored the story, for attribution/moderation.
+ALTER TABLE user_story ADD CONSTRAINT fk_user_story_user FOREIGN KEY (creator_id) REFERENCES "user" (user_id);
+
+ALTER TABLE submission ADD CONSTRAINT fk_submission_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
+ALTER TABLE submission ADD CONSTRAINT fk_submission_user_story FOREIGN KEY (user_story_id) REFERENCES user_story (user_story_id);
+
 ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
 ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_question FOREIGN KEY (question_id) REFERENCES question (question_id);
 ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_answer FOREIGN KEY (submitted_option) REFERENCES answer (answer_id);
@@ -182,6 +224,12 @@ ALTER TABLE session_to_question ADD CONSTRAINT fk_session_to_question_question F
 -- =====================================================================
 
 ALTER TABLE question ADD CONSTRAINT ck_question_difficulty_level CHECK (difficulty_level BETWEEN 1 AND 3);
+
+ALTER TABLE user_story ADD CONSTRAINT ck_user_story_difficulty_level CHECK (difficulty_level BETWEEN 1 AND 3);
+
+-- Mirrors ix_question_activity_type_difficulty: the draw for a random
+-- story filters on exactly this pair.
+CREATE INDEX ix_user_story_activity_type_difficulty ON user_story (activity_type, difficulty_level);
 
 -- REQ-GAM-DL-2.1: activity type restricted to the known set, one title per
 -- (activity_type, difficulty_level) pair so the BL-1 lookup is unambiguous.
@@ -256,9 +304,11 @@ ALTER TABLE question ENABLE ROW LEVEL SECURITY;
 ALTER TABLE answer ENABLE ROW LEVEL SECURITY;
 ALTER TABLE question_to_answer ENABLE ROW LEVEL SECURITY;
 ALTER TABLE session_to_question ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_story ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE session_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE answered_question_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE submission ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY own_sessions_select ON session_log
   FOR SELECT USING (auth.uid() = user_id);
@@ -268,6 +318,13 @@ CREATE POLICY own_sessions_insert ON session_log
 CREATE POLICY own_answers_select ON answered_question_log
   FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY own_answers_insert ON answered_question_log
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+-- No UPDATE policy: grading (llm_score/llm_feedback/graded_at) is only ever
+-- written by a service-role route, never directly by the student.
+CREATE POLICY own_submissions_select ON submission
+  FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY own_submissions_insert ON submission
   FOR INSERT WITH CHECK (auth.uid() = user_id);
 
 
@@ -293,7 +350,8 @@ CREATE POLICY own_answers_insert ON answered_question_log
 --
 --   DROP TABLE IF EXISTS session_to_question, answered_question_log,
 --                        session_log, question_to_answer, answer,
---                        question, user_badge, badge, title_definition CASCADE;
+--                        question, user_badge, badge, title_definition,
+--                        user_story, submission CASCADE;
 --   DROP FUNCTION IF EXISTS bump_session_score() CASCADE;
 --
 -- Leaving "user" out of that list keeps the profiles.
@@ -322,3 +380,14 @@ CREATE POLICY own_answers_insert ON answered_question_log
 -- needs to change:
 --
 --   ALTER TABLE answered_question_log RENAME COLUMN answer_id TO submitted_option;
+
+-- User Story bank (new table, no rename path — it has no starter-template or prior-schema
+-- predecessor): if your database already has everything above and you only need this table,
+-- run just its CREATE TABLE, CHECK constraint, index, fk_user_story_user, and RLS statements
+-- from this script instead of re-running the whole thing. fk_user_story_user requires the
+-- "user" table to already exist.
+
+-- Submission table (free-text answers + LLM grading, REQ-FU-1/REQ-FU-2): also a new table
+-- with no rename path. Its two FKs (fk_submission_user, fk_submission_user_story) require
+-- "user" and user_story to already exist, so run user_story's statements first if adding
+-- both to an existing database.
