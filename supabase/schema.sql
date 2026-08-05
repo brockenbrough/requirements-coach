@@ -72,6 +72,20 @@ CREATE TABLE badge (
     PRIMARY KEY (badge_id));
 
 -- ---------------------------------------------------------------------
+-- User Story Bank
+--
+-- Dedicated table for the User Story bank, so a random story can be
+-- served to students without overloading the MCQ-shaped question/
+-- answer tables above.
+-- ---------------------------------------------------------------------
+CREATE TABLE user_story (
+    user_story_id    uuid        NOT NULL,
+    story_text       text        NOT NULL,
+    difficulty_level int2        NOT NULL,
+    activity_type    varchar(50) NOT NULL,
+    PRIMARY KEY (user_story_id));
+
+-- ---------------------------------------------------------------------
 -- REQ-GAM-DL-2: Title Definition Storage
 --
 -- Maps (activity_type, difficulty_level) to a title name (e.g. "Story
@@ -183,6 +197,12 @@ ALTER TABLE session_to_question ADD CONSTRAINT fk_session_to_question_question F
 
 ALTER TABLE question ADD CONSTRAINT ck_question_difficulty_level CHECK (difficulty_level BETWEEN 1 AND 3);
 
+ALTER TABLE user_story ADD CONSTRAINT ck_user_story_difficulty_level CHECK (difficulty_level BETWEEN 1 AND 3);
+
+-- Mirrors ix_question_activity_type_difficulty: the draw for a random
+-- story filters on exactly this pair.
+CREATE INDEX ix_user_story_activity_type_difficulty ON user_story (activity_type, difficulty_level);
+
 -- REQ-GAM-DL-2.1: activity type restricted to the known set, one title per
 -- (activity_type, difficulty_level) pair so the BL-1 lookup is unambiguous.
 ALTER TABLE title_definition ADD CONSTRAINT ck_title_definition_difficulty_level CHECK (difficulty_level BETWEEN 1 AND 3);
@@ -256,6 +276,7 @@ ALTER TABLE question ENABLE ROW LEVEL SECURITY;
 ALTER TABLE answer ENABLE ROW LEVEL SECURITY;
 ALTER TABLE question_to_answer ENABLE ROW LEVEL SECURITY;
 ALTER TABLE session_to_question ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_story ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE session_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE answered_question_log ENABLE ROW LEVEL SECURITY;
@@ -293,7 +314,8 @@ CREATE POLICY own_answers_insert ON answered_question_log
 --
 --   DROP TABLE IF EXISTS session_to_question, answered_question_log,
 --                        session_log, question_to_answer, answer,
---                        question, user_badge, badge, title_definition CASCADE;
+--                        question, user_badge, badge, title_definition,
+--                        user_story CASCADE;
 --   DROP FUNCTION IF EXISTS bump_session_score() CASCADE;
 --
 -- Leaving "user" out of that list keeps the profiles.
@@ -322,3 +344,8 @@ CREATE POLICY own_answers_insert ON answered_question_log
 -- needs to change:
 --
 --   ALTER TABLE answered_question_log RENAME COLUMN answer_id TO submitted_option;
+
+-- User Story bank (new table, no rename path — it has no starter-template or prior-schema
+-- predecessor): if your database already has everything above and you only need this table,
+-- run just its CREATE TABLE, CHECK constraint, index, and RLS statements from this script
+-- instead of re-running the whole thing.
