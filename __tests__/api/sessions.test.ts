@@ -275,6 +275,24 @@ describe('POST /api/sessions', () => {
     expect((await response.json()).error).toMatch(/profile/i);
   });
 
+  // GitHub #124: session_log's other foreign keys (activity_type from #123, badge) must not be
+  // misreported as the profile case just because they share the 23503 code.
+  it('returns 500, not the profile message, for an unrelated foreign key violation', async () => {
+    queue('session_log', { data: null, error: null });
+    queue('question', { data: pool, error: null });
+    queue('session_log', {
+      data: null,
+      error: { code: '23503', message: 'violates foreign key constraint fk_session_log_activity_type' },
+    });
+
+    const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body.error).toMatch(/activity_type/i);
+    expect(body.error).not.toMatch(/profile/i);
+  });
+
   it('removes the session when its questions could not be stored', async () => {
     queue('session_log', { data: null, error: null });
     queue('question', { data: pool, error: null });

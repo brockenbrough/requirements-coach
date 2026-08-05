@@ -49,19 +49,29 @@ export async function GET(request: Request) {
   const { data: { user }, error: authError } = await supabase.auth.getUser(token);
   if (authError || !user) return Response.json({ error: 'Invalid or expired token.' }, { status: 401 });
 
+  // GitHub #124: when narrowing to one activity type, the filter goes through an inner join
+  // against the activity_type table (#122/#123) instead of a plain equality check on the
+  // free-text column. `activity` only exists to drive that join — stripped below so
+  // SESSION_COLUMNS' shape (flat activity_type) reaches the client unchanged.
+  const selectColumns = activityType !== null
+    ? `${SESSION_COLUMNS}, activity:activity_type!inner ( activity_type )`
+    : SESSION_COLUMNS;
+
   let query = supabase
     .from('session_log')
-    .select(SESSION_COLUMNS)
+    .select(selectColumns)
     .eq('user_id', user.id)
     .eq('status', 'in-progress');
 
-  if (activityType !== null) query = query.eq('activity_type', activityType);
+  if (activityType !== null) query = query.eq('activity.activity_type', activityType);
 
   const { data: rows, error } = await query.order('started_at', { ascending: false });
 
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
-  const sessions = (rows ?? []) as { session_id: string }[];
+  const sessions = ((rows ?? []) as Record<string, unknown>[]).map(
+    ({ activity, ...rest }) => rest,
+  ) as { session_id: string }[];
 
   // A session belonging to somebody else was already filtered out above, so it is
   // indistinguishable from one that does not exist.

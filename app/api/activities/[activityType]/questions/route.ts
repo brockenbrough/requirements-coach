@@ -43,13 +43,19 @@ export async function GET(
     );
   }
 
+  // GitHub #124: the activity type filter now goes through an inner join against the
+  // activity_type table added in #122/#123, instead of a plain equality check on the free-text
+  // column. `activity` is only there to drive the join — stripped below so the response shape
+  // (id, prompt, difficulty_level, max_score) stays unchanged.
   const { data: questions, error } = await supabase
     .from('question')
-    .select('question_id, question_prompt, difficulty_level, max_score')
-    .eq('activity_type', activityType)
+    .select('question_id, question_prompt, difficulty_level, max_score, activity:activity_type!inner ( activity_type )')
+    .eq('activity.activity_type', activityType)
     .eq('difficulty_level', difficulty);
 
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
-  return Response.json({ questions: questions ?? [] }, { status: 200 });
+  const cleaned = ((questions ?? []) as Record<string, unknown>[]).map(({ activity, ...rest }) => rest);
+
+  return Response.json({ questions: cleaned }, { status: 200 });
 }

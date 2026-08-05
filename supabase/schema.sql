@@ -228,12 +228,18 @@ CREATE TABLE answered_question_log (
 -- auth.uid() and deleting the account cleans up everything behind it.
 ALTER TABLE "user" ADD CONSTRAINT fk_user_auth_users FOREIGN KEY (user_id) REFERENCES auth.users (id) ON DELETE CASCADE;
 
+-- GitHub #123: every activity_type column now points at the activity_type lookup table
+-- from #122, instead of being free text (question, session_log) or a hardcoded CHECK
+-- (title_definition, see the constraint removed below).
+ALTER TABLE question ADD CONSTRAINT fk_question_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
+
 ALTER TABLE question_to_answer ADD CONSTRAINT fk_question_to_answer_question FOREIGN KEY (question_id) REFERENCES question (question_id);
 ALTER TABLE question_to_answer ADD CONSTRAINT fk_question_to_answer_answer FOREIGN KEY (answer_id) REFERENCES answer (answer_id);
 
 ALTER TABLE user_badge ADD CONSTRAINT fk_user_badge_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
 ALTER TABLE user_badge ADD CONSTRAINT fk_user_badge_badge FOREIGN KEY (badge_id) REFERENCES badge (badge_id);
 
+ALTER TABLE title_definition ADD CONSTRAINT fk_title_definition_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
 -- Who authored the story, for attribution/moderation.
 ALTER TABLE user_story ADD CONSTRAINT fk_user_story_user FOREIGN KEY (creator_id) REFERENCES "user" (user_id);
 
@@ -249,6 +255,7 @@ ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_sessio
 
 ALTER TABLE session_log ADD CONSTRAINT fk_session_log_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
 ALTER TABLE session_log ADD CONSTRAINT fk_session_log_badge FOREIGN KEY (badge_id) REFERENCES badge (badge_id);
+ALTER TABLE session_log ADD CONSTRAINT fk_session_log_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
 
 ALTER TABLE session_to_question ADD CONSTRAINT fk_session_to_question_session FOREIGN KEY (session_id) REFERENCES session_log (session_id) ON DELETE CASCADE;
 ALTER TABLE session_to_question ADD CONSTRAINT fk_session_to_question_question FOREIGN KEY (question_id) REFERENCES question (question_id);
@@ -260,6 +267,9 @@ ALTER TABLE session_to_question ADD CONSTRAINT fk_session_to_question_question F
 
 ALTER TABLE question ADD CONSTRAINT ck_question_difficulty_level CHECK (difficulty_level BETWEEN 1 AND 3);
 
+-- REQ-GAM-DL-2.1: one title per (activity_type, difficulty_level) pair so the BL-1 lookup is
+-- unambiguous. activity_type itself is restricted to the known set via fk_title_definition_activity_type
+-- above, not a CHECK here — a hardcoded list of literals would drift from the activity_type table.
 ALTER TABLE user_story ADD CONSTRAINT ck_user_story_difficulty_level CHECK (difficulty_level BETWEEN 1 AND 3);
 
 -- Mirrors ix_question_activity_type_difficulty: the draw for a random
@@ -269,7 +279,6 @@ CREATE INDEX ix_user_story_activity_type_difficulty ON user_story (activity_type
 -- REQ-GAM-DL-2.1: activity type restricted to the known set, one title per
 -- (activity_type, difficulty_level) pair so the BL-1 lookup is unambiguous.
 ALTER TABLE title_definition ADD CONSTRAINT ck_title_definition_difficulty_level CHECK (difficulty_level BETWEEN 1 AND 3);
-ALTER TABLE title_definition ADD CONSTRAINT ck_title_definition_activity_type CHECK (activity_type IN ('IDENTIFY_WEAK_USER_STORIES', 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA'));
 ALTER TABLE title_definition ADD CONSTRAINT uq_title_definition_activity_level UNIQUE (activity_type, difficulty_level);
 
 ALTER TABLE session_log ADD CONSTRAINT ck_session_log_status CHECK (status IN ('in-progress', 'completed', 'abandoned'));
@@ -427,6 +436,16 @@ CREATE POLICY own_submissions_insert ON submission
 --
 --   ALTER TABLE answered_question_log RENAME COLUMN answer_id TO submitted_option;
 
+-- GitHub #123 (activity_type columns turned into foreign keys against the activity_type table
+-- added in #122): if your database already has that table but not these constraints yet —
+--
+--   ALTER TABLE question ADD CONSTRAINT fk_question_activity_type
+--     FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
+--   ALTER TABLE session_log ADD CONSTRAINT fk_session_log_activity_type
+--     FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
+--   ALTER TABLE title_definition DROP CONSTRAINT IF EXISTS ck_title_definition_activity_type;
+--   ALTER TABLE title_definition ADD CONSTRAINT fk_title_definition_activity_type
+--     FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
 -- User Story bank (new table, no rename path — it has no starter-template or prior-schema
 -- predecessor): if your database already has everything above and you only need this table,
 -- run just its CREATE TABLE, CHECK constraint, index, fk_user_story_user, and RLS statements
