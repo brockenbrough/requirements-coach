@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { AppShell } from '../../../components/AppShell';
-import { AddQuestionModal } from '../../../components/AddQuestionModal';
+import { QuestionFormModal } from '../../../components/QuestionFormModal';
 import { ACTIVITIES, getActivityByType } from '../../../lib/activityContent';
 import type { ActivityType } from '../../../lib/activityTypes';
 import { MOCK_QUESTIONS } from '../../../lib/mockQuestions';
@@ -14,10 +14,21 @@ const LEVEL_OPTIONS = ['all', 1, 2, 3] as const;
 const HIGHLIGHT_MS = 4000;
 const TOAST_MS = 3200;
 
+function EditIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
+
+type ModalState = { mode: 'add' } | { mode: 'edit'; question: QuizQuestion };
+
 /**
- * Read-only browse of the question bank, plus adding a question (GitHub #120) — a popup form,
- * not a separate page, per the issue. Everything here runs on MOCK_QUESTIONS in local state;
- * see lib/mockQuestions.ts for what replacing it with a real fetch/mutation involves.
+ * Read-only browse of the question bank, plus adding (GitHub #120) and editing (GitHub #158) a
+ * question — both through the same popup form. Everything here runs on MOCK_QUESTIONS in local
+ * state; see lib/mockQuestions.ts for what replacing it with a real fetch/mutation involves.
  */
 export default function InstructorQuestionsPage() {
   const { loading, authorized } = useRequireRole('instructor');
@@ -25,8 +36,8 @@ export default function InstructorQuestionsPage() {
   const [questions, setQuestions] = useState<QuizQuestion[]>(MOCK_QUESTIONS);
   const [activityType, setActivityType] = useState<ActivityType>(ACTIVITIES[0].activityType);
   const [level, setLevel] = useState<1 | 2 | 3 | 'all'>('all');
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const [modalState, setModalState] = useState<ModalState | null>(null);
+  const [highlight, setHighlight] = useState<{ id: string; label: string } | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   if (loading || !authorized) return null;
@@ -38,16 +49,25 @@ export default function InstructorQuestionsPage() {
   });
 
   function handleSaveQuestion(question: QuizQuestion) {
-    setQuestions((current) => [question, ...current]);
-    // Jump the view to wherever the new question landed — otherwise "added" but not visible
-    // (wrong tab/level still selected) would look like saving silently failed.
+    // The id already existing in state is what tells an edit and a new question apart — the
+    // form itself doesn't need to report which one it was.
+    const isEdit = questions.some((existing) => existing.id === question.id);
+
+    setQuestions((current) =>
+      isEdit ? current.map((existing) => (existing.id === question.id ? question : existing)) : [question, ...current],
+    );
+
+    // Jump the view to wherever the question landed — otherwise a save that also moved the
+    // question to a different quiz/level would look like it silently failed.
     setActivityType(question.quizType);
     setLevel(question.level);
-    setHighlightedId(question.id);
-    setToastMessage(`Question added to ${getActivityByType(question.quizType)?.name ?? question.quizType}.`);
+    setHighlight({ id: question.id, label: isEdit ? '✓ Updated' : '✓ Just added' });
+
+    const quizName = getActivityByType(question.quizType)?.name ?? question.quizType;
+    setToastMessage(isEdit ? `Changes saved to ${quizName}.` : `Question added to ${quizName}.`);
 
     window.setTimeout(() => setToastMessage(null), TOAST_MS);
-    window.setTimeout(() => setHighlightedId(null), HIGHLIGHT_MS);
+    window.setTimeout(() => setHighlight(null), HIGHLIGHT_MS);
   }
 
   return (
@@ -57,12 +77,12 @@ export default function InstructorQuestionsPage() {
           <div>
             <h1 className="mb-1.5 text-2xl font-extrabold text-brand-navy">Question Bank</h1>
             <p className="max-w-2xl text-sm font-semibold text-gray-500">
-              Every question across every activity and difficulty level. Add a new question to any quiz at any level.
+              Every question across every activity and difficulty level. Add a new question, or edit an existing one, at any level.
             </p>
           </div>
           <button
             type="button"
-            onClick={() => setShowAddModal(true)}
+            onClick={() => setModalState({ mode: 'add' })}
             className="flex flex-none items-center gap-2 rounded-full bg-brand-purple px-5 py-2.5 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark"
           >
             <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round">
@@ -131,18 +151,29 @@ export default function InstructorQuestionsPage() {
               <div
                 key={question.id}
                 className={`rounded-brand-lg border bg-gray-50 p-5 transition ${
-                  question.id === highlightedId ? 'border-brand-teal/50 ring-2 ring-brand-teal/30' : 'border-gray-100'
+                  question.id === highlight?.id ? 'border-brand-teal/50 ring-2 ring-brand-teal/30' : 'border-gray-100'
                 }`}
               >
-                <div className="mb-3 flex flex-wrap items-center gap-2">
-                  <span className="inline-block rounded-full bg-white px-2.5 py-1 text-xs font-extrabold text-gray-500">
-                    {LEVEL_LABEL[question.level]} · Level {question.level}
-                  </span>
-                  {question.id === highlightedId ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-brand-teal/20 px-2.5 py-1 text-[11px] font-extrabold text-brand-teal-dark">
-                      ✓ Just added
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-block rounded-full bg-white px-2.5 py-1 text-xs font-extrabold text-gray-500">
+                      {LEVEL_LABEL[question.level]} · Level {question.level}
                     </span>
-                  ) : null}
+                    {question.id === highlight?.id ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-brand-teal/20 px-2.5 py-1 text-[11px] font-extrabold text-brand-teal-dark">
+                        {highlight.label}
+                      </span>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setModalState({ mode: 'edit', question })}
+                    aria-label="Edit this question"
+                    title="Edit this question"
+                    className="flex h-8 w-8 flex-none items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 transition hover:border-brand-purple hover:text-brand-purple"
+                  >
+                    <EditIcon />
+                  </button>
                 </div>
                 <p className="mb-4 text-sm font-bold text-brand-navy">{question.questionText}</p>
                 <div className="space-y-2">
@@ -176,8 +207,14 @@ export default function InstructorQuestionsPage() {
         </div>
       </div>
 
-      {showAddModal ? (
-        <AddQuestionModal defaultQuizType={activityType} onClose={() => setShowAddModal(false)} onSave={handleSaveQuestion} />
+      {modalState ? (
+        <QuestionFormModal
+          mode={modalState.mode}
+          initialData={modalState.mode === 'edit' ? modalState.question : undefined}
+          defaultQuizType={activityType}
+          onClose={() => setModalState(null)}
+          onSave={handleSaveQuestion}
+        />
       ) : null}
     </AppShell>
   );
