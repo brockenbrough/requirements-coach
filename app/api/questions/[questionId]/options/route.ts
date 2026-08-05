@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '../../../../../lib/supabase';
+import { shuffleArray } from '../../../../../lib/shuffleArray';
 
 /**
  * GET /api/questions/:questionId/options
@@ -48,9 +49,13 @@ export async function GET(
 
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
-  const options = ((data ?? []) as unknown as { answer: { answer_id: string; option_text: string } | null }[])
-    .map((row) => row.answer)
-    .filter((answer): answer is { answer_id: string; option_text: string } => answer !== null);
+  // GitHub #129: question_to_answer has no ordering of its own, and seed data always inserts
+  // the correct answer first — shuffle so the UI doesn't display it in a predictable position.
+  const options = shuffleArray(
+    ((data ?? []) as unknown as { answer: { answer_id: string; option_text: string } | null }[])
+      .map((row) => row.answer)
+      .filter((answer): answer is { answer_id: string; option_text: string } => answer !== null),
+  );
 
   return Response.json({ options }, { status: 200 });
 }

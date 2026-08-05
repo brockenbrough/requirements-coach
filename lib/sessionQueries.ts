@@ -3,6 +3,7 @@
 
 import { getSupabaseClient } from './supabase';
 import { DEFAULT_QUESTION_MAX_SCORE, SESSION_COLUMNS } from './sessionRules';
+import { shuffleArray } from './shuffleArray';
 
 export type SupabaseClient = NonNullable<ReturnType<typeof getSupabaseClient>>;
 
@@ -77,7 +78,17 @@ export async function findInProgressSession(
   return { session: error ? null : data, error };
 }
 
-/** The drawn questions in presentation order, with options but without the solution. */
+/**
+ * The drawn questions in presentation order, with options but without the solution.
+ *
+ * GitHub #129: question_to_answer carries no ordering of its own, and supabase/seed.sql always
+ * inserts (and maps) the correct answer first — so without shuffling, options[0] is the correct
+ * one for every question, every time. Shuffled here, once per fetch, rather than client-side:
+ * this is the only place a question's options get assembled before going out over the wire, so
+ * every caller (POST /api/sessions on start/resume, GET /api/sessions/current) gets a freshly
+ * randomized order on every call — including resuming or restarting the same activity — while
+ * the client just renders whatever order it received and never re-shuffles on its own re-renders.
+ */
 export async function loadSessionQuestions(supabase: SupabaseClient, sessionId: string) {
   const { data, error } = await supabase
     .from('session_to_question')
@@ -96,9 +107,11 @@ export async function loadSessionQuestions(supabase: SupabaseClient, sessionId: 
       difficulty_level: row.question!.difficulty_level,
       activity_type: row.question!.activity_type,
       max_score: row.question!.max_score ?? DEFAULT_QUESTION_MAX_SCORE,
-      options: (row.question!.question_to_answer ?? [])
-        .map((link) => link.answer)
-        .filter((answer): answer is { answer_id: string; option_text: string } => answer !== null),
+      options: shuffleArray(
+        (row.question!.question_to_answer ?? [])
+          .map((link) => link.answer)
+          .filter((answer): answer is { answer_id: string; option_text: string } => answer !== null),
+      ),
     }));
 
   return { questions, error: null };
