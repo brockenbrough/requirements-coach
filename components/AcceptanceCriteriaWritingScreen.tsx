@@ -3,8 +3,6 @@
 import { useState } from 'react';
 import type { UserStoryPrompt } from '../lib/acceptanceCriteriaTypes';
 
-const DIFFICULTY_LABEL: Record<1 | 2 | 3, string> = { 1: 'Easy', 2: 'Medium', 3: 'Hard' };
-
 /**
  * GitHub #149: the input phase of the "Write Acceptance Criteria" activity (REQ-FU-2) — the
  * free-text counterpart to QuestionCard. Submit is disabled while the textarea is blank (after
@@ -31,10 +29,7 @@ export function AcceptanceCriteriaWritingScreen({
 
   return (
     <form onSubmit={handleSubmit} className="rounded-brand-lg border border-brand-navy-border bg-brand-navy p-6">
-      <span className="mb-2 inline-block rounded-full bg-white/10 px-2.5 py-1 text-xs font-extrabold text-brand-teal">
-        {DIFFICULTY_LABEL[userStory.difficulty_level]} · Level {userStory.difficulty_level}
-      </span>
-      <p className="mb-5 text-base font-extrabold leading-snug text-white">{userStory.story_text}</p>
+      <p className="mb-5 text-base font-extrabold leading-snug text-white">{userStory.description}</p>
 
       <label className="mb-1.5 block text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted" htmlFor="acceptance-criteria-input">
         Your acceptance criteria
