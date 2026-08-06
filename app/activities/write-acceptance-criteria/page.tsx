@@ -45,7 +45,7 @@ export default function WriteAcceptanceCriteriaPage() {
         return;
       }
 
-      setUserStory(result.data.userStory);
+      setUserStory(result.data);
       setIsLoading(false);
     });
 
@@ -63,7 +63,7 @@ export default function WriteAcceptanceCriteriaPage() {
     setSubmitError(null);
     setLastAttemptedText(text);
 
-    const result = await submitAcceptanceCriteria(token, userStory.user_story_id, text);
+    const result = await submitAcceptanceCriteria(token, userStory.userStoryId, text);
     setSubmitting(false);
 
     if (!result.ok) {
@@ -71,7 +71,7 @@ export default function WriteAcceptanceCriteriaPage() {
       return;
     }
 
-    setOutcome(result.data.result);
+    setOutcome(result.data);
   }
 
   function handleRetrySubmit() {
@@ -120,7 +120,7 @@ export default function WriteAcceptanceCriteriaPage() {
             </>
           ) : (
             <>
-              <AcceptanceCriteriaWritingScreen key={userStory.user_story_id} userStory={userStory} submitting={submitting} onSubmit={handleSubmit} />
+              <AcceptanceCriteriaWritingScreen key={userStory.userStoryId} userStory={userStory} submitting={submitting} onSubmit={handleSubmit} />
               {submitError ? (
                 <div className="mt-4 rounded-brand-md border border-brand-danger/40 bg-brand-danger/10 p-4 text-sm font-semibold text-brand-danger">
                   {submitError}

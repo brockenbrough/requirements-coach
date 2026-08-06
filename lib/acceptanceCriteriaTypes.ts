@@ -3,24 +3,22 @@
  * LLM-graded activity, structurally distinct from the Type A question-bank activities in
  * lib/activityContent.ts (no fixed answer options, no session_log/session_to_question).
  *
- * Field names mirror supabase/schema.sql's user_story and submission tables (snake_case,
- * same convention SessionQuestion/SessionRecord use in lib/sessionClient.ts) so that once a
- * real GET .../user-story and POST submission route exist, only lib/acceptanceCriteriaClient.ts
- * needs to change — these types and every component built against them stay the same.
+ * Field names match what the real routes return, not the user_story/submission column names:
+ * GET .../user-story (app/api/activities/write-acceptance-criteria/user-story/route.ts) and
+ * POST .../submissions (app/api/activities/write-acceptance-criteria/submissions/route.ts).
  */
 export type UserStoryPrompt = {
-  user_story_id: string;
-  story_text: string;
-  difficulty_level: 1 | 2 | 3;
+  userStoryId: string;
+  /** user_story.story_text, as the GET route renames it — there is no title column yet. */
+  description: string;
 };
 
-/** What POST .../submissions returns once the LLM has graded the submission (submission table). */
+/** What POST .../submissions returns once the LLM has graded the submission. */
 export type AcceptanceCriteriaResult = {
-  submission_id: string;
-  user_story_id: string;
-  submitted_text: string;
-  /** submission.llm_score — out of 100, matching every other activity's full-score convention. */
-  llm_score: number;
-  /** submission.llm_feedback — free-text coaching on clarity/testability/connection to the story. */
-  llm_feedback: string;
+  submissionId: string;
+  /** Not echoed back by the route — the client carries forward what the student typed. */
+  submittedText: string;
+  /** 1-10, this activity's own scale — see lib/llm/promptUtils.ts, separate from the Type A quiz's 100-point session score. */
+  score: number;
+  feedback: string;
 };
