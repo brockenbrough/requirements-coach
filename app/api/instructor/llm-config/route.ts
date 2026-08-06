@@ -1,0 +1,114 @@
+import { getSupabaseClient } from '../../../../lib/supabase';
+import { requireInstructor } from '../../../../lib/instructorAuth';
+import { isLLMProviderName } from '../../../../lib/llm/provider';
+
+const UNIQUE_VIOLATION = '23505';
+
+// api_key is deliberately excluded — write-only from the client's perspective, matching the
+// schema comment on instructor_llm_config ("only a service-role route can read or write
+// api_key, and that route is responsible for masking it before it reaches the client").
+const CONFIG_COLUMNS = 'instructor_llm_config_id, provider, model, is_active, updated_at';
+
+function getToken(request: Request): string | null {
+  const auth = request.headers.get('Authorization');
+  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+}
+
+/**
+ * POST /api/instructor/llm-config — an instructor saves an LLM provider + model + API key used
+ * to grade free-text submissions (instructor_llm_config).
+ *
+ * Instructor-only: requireInstructor runs before any row is touched, the same guard every other
+ * /api/instructor/* route uses.
+ *
+ * uq_instructor_llm_config_one_active is a *global* partial unique index (supabase/schema.sql) —
+ * at most one row across every instructor, not just this caller, can have is_active = true.
+ * setActive: true therefore deactivates whichever row currently holds that flag before the new
+ * row is inserted. supabase-js has no multi-statement transaction here, so the deactivate and
+ * the insert aren't atomic — a concurrent activation can still land in between and trip the
+ * unique index; on that 23505 the pair is retried once, the same bounded-retry idea POST
+ * /api/sessions uses for uq_session_log_one_active.
+ *
+ * AC summary:
+ *  - 401 if the bearer token is missing or invalid
+ *  - 403 if the caller isn't an instructor (no body, matching requireInstructor's convention)
+ *  - 400 if provider isn't one of CLAUDE/CHATGPT/GEMINI, or apiKey is empty
+ *  - 200 with the saved row — api_key never included
+ *  - 500 if Supabase isn't configured or a query fails
+ */
+export async function POST(request: Request) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
+
+  const guard = await requireInstructor(supabase, getToken(request));
+  if (!guard.ok) {
+    return guard.status === 403
+      ? new Response(null, { status: 403 })
+      : Response.json(
+          { error: guard.status === 401 ? 'Unauthorized' : 'Supabase credentials are not configured.' },
+          { status: guard.status },
+        );
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return Response.json({ error: 'Invalid JSON body.' }, { status: 400 });
+  }
+
+  const { provider, apiKey, model, setActive } = (body ?? {}) as {
+    provider?: unknown;
+    apiKey?: unknown;
+    model?: unknown;
+    setActive?: unknown;
+  };
+
+  if (!isLLMProviderName(provider)) {
+    return Response.json({ error: 'provider must be one of CLAUDE, CHATGPT, GEMINI.' }, { status: 400 });
+  }
+
+  if (typeof apiKey !== 'string' || apiKey.trim() === '') {
+    return Response.json({ error: 'apiKey is required.' }, { status: 400 });
+  }
+
+  const isActive = Boolean(setActive);
+
+  const deactivateExisting = () =>
+    supabase.from('instructor_llm_config').update({ is_active: false }).eq('is_active', true);
+
+  const insertRow = () =>
+    supabase
+      .from('instructor_llm_config')
+      .insert({
+        instructor_llm_config_id: crypto.randomUUID(),
+        user_id: guard.user_id,
+        provider,
+        model,
+        api_key: apiKey,
+        is_active: isActive,
+      })
+      .select(CONFIG_COLUMNS)
+      .single();
+
+  if (isActive) {
+    const { error: deactivateError } = await deactivateExisting();
+    if (deactivateError) return Response.json({ error: deactivateError.message }, { status: 500 });
+  }
+
+  let { data: config, error: insertError } = await insertRow();
+
+  // Narrow race window between the deactivate above and this insert — retry the pair once
+  // rather than failing a legitimate save.
+  if (insertError?.code === UNIQUE_VIOLATION && isActive) {
+    const { error: retryDeactivateError } = await deactivateExisting();
+    if (retryDeactivateError) return Response.json({ error: retryDeactivateError.message }, { status: 500 });
+    ({ data: config, error: insertError } = await insertRow());
+  }
+
+  if (insertError || !config) {
+    return Response.json({ error: insertError?.message ?? 'Could not save LLM config.' }, { status: 500 });
+  }
+
+  return Response.json({ config }, { status: 200 });
+}
