@@ -125,7 +125,7 @@ CREATE TABLE submission (
 -- ---------------------------------------------------------------------
 -- Instructor LLM Config
 --
--- Stores the LLM provider + API key an instructor has configured for
+-- Stores the LLM provider + model + API key an instructor has configured for
 -- grading free-text submissions (submission.llm_provider). RLS-enabled
 -- with no client policies, same as question/answer/user_story — only a
 -- service-role route can read or write api_key, and that route is
@@ -135,6 +135,7 @@ CREATE TABLE instructor_llm_config (
     instructor_llm_config_id uuid      NOT NULL,
     user_id                  uuid      NOT NULL,
     provider                 text      NOT NULL,
+    model                    text      NOT NULL,
     api_key                  text      NOT NULL,
     is_active                bool      NOT NULL DEFAULT false,
     updated_at               timestamp NOT NULL DEFAULT now(),
@@ -467,3 +468,11 @@ CREATE POLICY own_submissions_insert ON submission
 -- requires "user" to already exist. uq_instructor_llm_config_one_active is a global partial
 -- unique index (not scoped by user_id) — at most one row across the whole table can have
 -- is_active = true at a time.
+
+-- LLM model selection: if your instructor_llm_config table already exists from an earlier run
+-- of this script, add the new column instead of recreating the table. model is NOT NULL with no
+-- DEFAULT (no single model is a sensible fallback across CLAUDE/CHATGPT/GEMINI) — safe today
+-- because nothing writes to this table yet, so it has no rows in any real deployment; if that
+-- stops being true before this runs, backfill a value before adding the constraint:
+--
+--   ALTER TABLE instructor_llm_config ADD COLUMN IF NOT EXISTS model text NOT NULL;
