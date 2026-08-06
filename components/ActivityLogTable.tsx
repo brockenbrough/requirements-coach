@@ -7,13 +7,18 @@ const COLUMNS = ['Activity', 'Level', 'Date & time', 'Score', 'Result'];
  * getStudentName is how the Instructor Dashboard (GitHub #82) reuses this same table for
  * StudentActivitySummary[] — a plain ActivityLogEntry[] just omits it and gets the original
  * student-less table back.
+ *
+ * Generic in the row type so that callback sees the caller's row, not the narrowed base type:
+ * the instructor dashboard looks a student up by entry.studentId (GitHub #174), which only
+ * exists on StudentActivitySummary. Callers that omit getStudentName infer T = ActivityLogEntry
+ * and are unaffected (app/dashboard/log/page.tsx).
  */
-export function ActivityLogTable({
+export function ActivityLogTable<T extends ActivityLogEntry>({
   entries,
   getStudentName,
 }: {
-  entries: ActivityLogEntry[];
-  getStudentName?: (entry: ActivityLogEntry) => string;
+  entries: T[];
+  getStudentName?: (entry: T) => string;
 }) {
   const columns = getStudentName ? ['Student', ...COLUMNS] : COLUMNS;
 
