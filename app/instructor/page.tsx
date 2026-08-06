@@ -12,6 +12,7 @@ import {
   type LevelFilterValue,
   type StudentFilterValue,
 } from '../../components/InstructorFilters';
+import { InstructorDashboardSkeleton } from '../../components/InstructorDashboardSkeleton';
 import { InstructorRoster } from '../../components/InstructorRoster';
 import { summarizeStudents, toStudentActivitySummary, type StudentActivitySummary } from '../../lib/activityLogTypes';
 import { loadInstructorActivities, type InstructorActivityEntry } from '../../lib/sessionClient';
@@ -68,14 +69,19 @@ function InstructorDashboardContent() {
 
   const roster = useMemo(() => summarizeStudents(entries ?? []), [entries]);
 
-  const students = useMemo(() => {
-    const byId = new Map((entries ?? []).map((entry) => [entry.studentId, entry.studentName]));
-    return [...byId.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
-  }, [entries]);
-
+  // Keyed by studentId, not by the attempt's own id (GitHub #174): a returning student owns many
+  // rows, and every one of them has to resolve to the same name from a single entry.
   const studentNameById = useMemo(
-    () => new Map((entries ?? []).map((entry) => [entry.id, entry.studentName])),
+    () => new Map((entries ?? []).map((entry) => [entry.studentId, entry.studentName])),
     [entries],
+  );
+
+  const students = useMemo(
+    () =>
+      [...studentNameById.entries()]
+        .map(([id, name]) => ({ id, name }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [studentNameById],
   );
 
   // Lets app/instructor/students/page.tsx link straight into a filtered table
@@ -130,7 +136,18 @@ function InstructorDashboardContent() {
             {error}
           </p>
         ) : entries === null ? (
-          <p className="mb-6 text-sm font-semibold text-gray-500">Loading…</p>
+          <InstructorDashboardSkeleton />
+        ) : entries.length === 0 ? (
+          // GET /api/instructor/activities answers 200 [] for a class that has not started
+          // anything (by design — see its docstring). Rendering the full dashboard here would
+          // show empty stat tiles and the table's "No attempts match these filters." message,
+          // which blames filters the instructor never set (GitHub #174).
+          <div className="rounded-brand-lg border border-gray-100 bg-gray-50 p-10 text-center">
+            <p className="text-sm font-extrabold text-brand-navy">No activity yet</p>
+            <p className="mx-auto mt-1.5 max-w-md text-sm font-semibold text-gray-500">
+              Once students start an activity, their attempts show up here.
+            </p>
+          </div>
         ) : (
           <>
             <InstructorActivityStats entries={entries} />
@@ -153,7 +170,7 @@ function InstructorDashboardContent() {
               onSortChange={setSort}
             />
 
-            <ActivityLogTable entries={pageEntries} getStudentName={(entry) => studentNameById.get(entry.id) ?? ''} />
+            <ActivityLogTable entries={pageEntries} getStudentName={(entry) => studentNameById.get(entry.studentId) ?? ''} />
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
               <span className="text-xs font-semibold text-gray-500">
