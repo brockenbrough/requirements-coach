@@ -6,9 +6,10 @@ import { useEffect, useState } from 'react';
 import { getHighestTitleOverall } from '../lib/activityStore';
 import { getInitials } from '../lib/initials';
 import { loadStudentScore } from '../lib/sessionClient';
+import { LLMProviderSettingsModal } from './LLMProviderSettingsModal';
 import { useUser } from './UserProvider';
 
-type NavKey = 'dashboard' | 'activities' | 'profile' | 'instructor' | 'instructor-questions';
+type NavKey = 'dashboard' | 'activities' | 'profile' | 'instructor' | 'instructor-questions' | 'instructor-settings';
 
 const STUDENT_NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
   { key: 'dashboard', label: 'Dashboard', href: '/dashboard' },
@@ -18,10 +19,17 @@ const STUDENT_NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
 
 // GitHub #82: instructors get a different set of destinations — no Dashboard/Activities, since
 // those are the "take a quiz" flow instructors must not access, only Profile is shared.
+//
+// GitHub #150: 'instructor-settings' (LLM provider settings) is deliberately listed here too —
+// one place owns its label/href, e.g. for the app/instructor/settings/page.tsx deep link — but
+// it's filtered out of the rendered <nav> below (see visibleNavItems). The sidebar's gear icon
+// opens LLMProviderSettingsModal directly instead of navigating there, per the issue's explicit
+// ask not to add a fourth, separately-visible nav entry for it.
 const INSTRUCTOR_NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
   { key: 'instructor', label: 'Instructor Dashboard', href: '/instructor' },
   { key: 'instructor-questions', label: 'Question Bank', href: '/instructor/questions' },
   { key: 'profile', label: 'Profile', href: '/profile' },
+  { key: 'instructor-settings', label: 'LLM Provider Settings', href: '/instructor/settings' },
 ];
 
 function GridIcon() {
@@ -113,6 +121,7 @@ const NAV_ICONS: Record<NavKey, () => JSX.Element> = {
   profile: UserIcon,
   instructor: UsersIcon,
   'instructor-questions': BookIcon,
+  'instructor-settings': GearIcon,
 };
 
 export function AppShell({
@@ -129,8 +138,13 @@ export function AppShell({
   const [score, setScore] = useState<number | null>(null);
   const [levelLine, setLevelLine] = useState('Getting started');
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // GitHub #150: the gear icon opens this instead of navigating for instructors.
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const isInstructor = profile?.role === 'instructor';
   const navItems = isInstructor ? INSTRUCTOR_NAV_ITEMS : STUDENT_NAV_ITEMS;
+  // GitHub #150: 'instructor-settings' lives in INSTRUCTOR_NAV_ITEMS for its label/href, but is
+  // reached via the gear icon below, not as a fifth item in the list itself.
+  const visibleNavItems = navItems.filter((item) => item.key !== 'instructor-settings');
 
   // Score and mastery titles are a student concept — an instructor has neither, so there is
   // nothing to fetch or show under their avatar.
@@ -236,7 +250,7 @@ export function AppShell({
         )}
 
         <nav className="mb-5 flex flex-col gap-1">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const Icon = NAV_ICONS[item.key];
             const isActive = active === item.key;
             return (
@@ -256,12 +270,30 @@ export function AppShell({
         </nav>
 
         <div className="flex gap-2">
-          <span
-            className="flex h-11 w-11 cursor-default items-center justify-center rounded-[9px] border border-[#332b6b] bg-[#241f52] text-[#A79FC9]"
-            title="Settings"
-          >
-            <GearIcon />
-          </span>
+          {/* GitHub #150: role-dependent behavior — instructors open the LLM provider settings
+              modal; students have no settings surface yet, so this stays inert exactly as it
+              already was, rather than opening something that doesn't exist. */}
+          {isInstructor ? (
+            <button
+              type="button"
+              onClick={() => {
+                setSettingsModalOpen(true);
+                closeDrawer();
+              }}
+              title="Settings"
+              aria-label="Settings"
+              className="flex h-11 w-11 items-center justify-center rounded-[9px] border border-[#332b6b] bg-[#241f52] text-[#A79FC9] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#2DD4BF]"
+            >
+              <GearIcon />
+            </button>
+          ) : (
+            <span
+              className="flex h-11 w-11 cursor-default items-center justify-center rounded-[9px] border border-[#332b6b] bg-[#241f52] text-[#A79FC9]"
+              title="Settings"
+            >
+              <GearIcon />
+            </span>
+          )}
           <button
             onClick={handleLogout}
             title="Log out"
@@ -278,6 +310,12 @@ export function AppShell({
         <aside className="border-t border-[#332b6b] bg-[#1b1642] p-5 lg:w-60 lg:flex-none lg:border-l lg:border-t-0">
           {rightbar}
         </aside>
+      ) : null}
+
+      {/* GitHub #150: still gated on isInstructor here, not just on the gear button that opens
+          it — the modal must not be openable for a student even in principle. */}
+      {settingsModalOpen && isInstructor && token ? (
+        <LLMProviderSettingsModal token={token} onClose={() => setSettingsModalOpen(false)} />
       ) : null}
     </div>
   );
