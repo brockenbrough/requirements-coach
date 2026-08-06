@@ -11,7 +11,7 @@ import {
   type StudentActivitySummary,
   type StudentAggregate,
 } from '../../../lib/activityLogTypes';
-import { loadInstructorActivities } from '../../../lib/sessionClient';
+import { loadInstructorActivities, type InstructorActivityEntry } from '../../../lib/sessionClient';
 import { useRequireRole } from '../../../lib/useRequireRole';
 
 const PAGE_SIZE = 9;
@@ -54,8 +54,11 @@ export default function AllStudentsPage() {
 
     loadInstructorActivities(token).then((result) => {
       if (cancelled) return;
-      if (result.ok) setEntries(result.data.sessions.map(toStudentActivitySummary));
-      else setError(result.error);
+      if (result.ok) {
+        setEntries(result.data.sessions.map((session: InstructorActivityEntry) => toStudentActivitySummary(session)));
+      } else {
+        setError(result.error);
+      }
     });
 
     return () => {

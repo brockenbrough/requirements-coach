@@ -141,7 +141,6 @@ export async function POST(request: Request, { params }: { params: { sessionId: 
   const logRow = {
     log_id: crypto.randomUUID(),
     session_id: sessionId,
-    user_id: user.id,
     question_id: questionId,
     submitted_option: option.answer_id,
     score,

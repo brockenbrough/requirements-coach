@@ -1,6 +1,6 @@
 import { getActivityByType } from './activityContent';
 import type { ActivityType } from './activityTypes';
-import type { InstructorSessionEntry, SessionListEntry } from './sessionClient';
+import type { InstructorActivityEntry, SessionListEntry } from './sessionClient';
 
 export type ActivityLogStatus = 'completed' | 'in-progress' | 'abandoned';
 
@@ -113,7 +113,7 @@ export function summarizeStudents(entries: StudentActivitySummary[]): StudentAgg
  * say whose attempt it was. Built on toActivityLogEntry rather than beside it, so the student
  * log and the class-wide table cannot drift apart in how they read a session.
  */
-export function toStudentActivitySummary(session: InstructorSessionEntry): StudentActivitySummary {
+export function toStudentActivitySummary(session: InstructorActivityEntry): StudentActivitySummary {
   return {
     ...toActivityLogEntry(session),
     studentId: session.studentId,

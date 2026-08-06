@@ -54,8 +54,8 @@ export async function POST(request: Request, { params }: { params: { sessionId: 
 
   const { sessionId } = params;
 
-  // Scoping by user_id is what keeps one student out of another's feedback: a foreign
-  // session id is indistinguishable from a non-existent one.
+  // Scoping by user_id on session_log keeps one student out of another's feedback:
+  // a foreign session id is indistinguishable from a non-existent one.
   const { data: session, error: sessionError } = await supabase
     .from('session_log')
     .select('session_id')
@@ -72,7 +72,6 @@ export async function POST(request: Request, { params }: { params: { sessionId: 
     .from('answered_question_log')
     .select('submitted_option, score, submitted_at')
     .eq('session_id', sessionId)
-    .eq('user_id', user.id)
     .eq('question_id', questionId)
     .eq('submitted_option', selectedOptionId)
     .maybeSingle();

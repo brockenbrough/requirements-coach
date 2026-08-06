@@ -1,6 +1,7 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { requireInstructor } from '../../../../lib/instructorAuth';
 import { loadAllStudentActivity } from '../../../../lib/sessionQueries';
+import type { InstructorActivityEntry } from '../../../../lib/sessionTypes';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -41,5 +42,10 @@ export async function GET(request: Request) {
   const { activities, error } = await loadAllStudentActivity(supabase);
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
-  return Response.json({ sessions: activities }, { status: 200 });
+  // Annotated with the shared row type (GitHub #173) rather than left to inference, so this
+  // route and lib/sessionClient.ts's loadInstructorActivities are checked against the same
+  // declaration instead of agreeing by accident.
+  const payload: { sessions: InstructorActivityEntry[] } = { sessions: activities };
+
+  return Response.json(payload, { status: 200 });
 }

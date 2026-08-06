@@ -69,7 +69,10 @@ export async function GET(request: Request) {
 
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
-  const sessions = ((rows ?? []) as Record<string, unknown>[]).map(
+  // selectColumns is a runtime string, not a literal, so supabase-js can't statically parse it
+  // and infers rows as a ParserError type — cast through unknown, same as the compiler suggests,
+  // since the actual runtime shape (SESSION_COLUMNS plus a nested `activity` join) is known.
+  const sessions = ((rows ?? []) as unknown as Record<string, unknown>[]).map(
     ({ activity, ...rest }) => rest,
   ) as { session_id: string }[];
 

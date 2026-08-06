@@ -9,24 +9,16 @@
 // from the feedback route, and only after the answer has been committed.
 
 import type { ActivityType } from './activityTypes';
+import type { InstructorActivityEntry, SessionListEntry, SessionRecord } from './sessionTypes';
 import { getCachedCompletedAttempts, setCachedCompletedAttempts } from './completedAttemptsStore';
 import { getCachedActivityLog, setCachedActivityLog } from './activityLogStore';
 import { getCachedCompletedSessions, setCachedCompletedSessions } from './completedSessionsStore';
 import { getCachedScore, setCachedScore } from './scoreStore';
 
-export type SessionRecord = {
-  session_id: string;
-  user_id: string;
-  activity_type: string;
-  difficulty_level: number;
-  started_at: string;
-  ended_at: string | null;
-  status: string;
-  cumulative_score: number;
-  max_score: number;
-  passed: boolean;
-  badge_id: string | null;
-};
+// The row shapes themselves live in lib/sessionTypes.ts, which imports nothing, so the routes
+// can share them without importing this 'use client' module. Re-exported here so this file
+// stays the one import the UI needs for anything session-related.
+export type { InstructorActivityEntry, SessionListEntry, SessionRecord } from './sessionTypes';
 
 export type SessionQuestionOption = {
   answer_id: string;
@@ -50,23 +42,6 @@ export type SessionAnswer = {
   submitted_at: string;
   correct: boolean | null;
   explanation: string | null;
-};
-
-/** A session as the list endpoint returns it: the record plus how far it got. */
-export type SessionListEntry = SessionRecord & {
-  questionCount: number;
-  answeredCount: number;
-  nextPosition: number | null;
-};
-
-/**
- * The same entry as returned by the class-wide instructor endpoint, plus who it belongs to.
- * studentName is already a display name — the server derives it from first/last name or
- * username, so no caller has to know the profile's shape.
- */
-export type InstructorSessionEntry = SessionListEntry & {
-  studentId: string;
-  studentName: string;
 };
 
 export type StartSessionResult = {
@@ -367,7 +342,7 @@ export function loadActivityLog(
  * an instructor stale results with no invalidation point to fix it.
  */
 export function loadInstructorActivities(token: string) {
-  return request<{ sessions: InstructorSessionEntry[] }>('/api/instructor/activities', { method: 'GET' }, token);
+  return request<{ sessions: InstructorActivityEntry[] }>('/api/instructor/activities', { method: 'GET' }, token);
 }
 
 /**

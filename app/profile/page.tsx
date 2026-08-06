@@ -46,6 +46,18 @@ export default function ProfilePage() {
   const { token, profile, loading, setProfile } = useUser();
   const [error, setError] = useState('');
 
+  // Role is known from profile once it exists; before that (create flow) it lives in the
+  // JWT user_metadata set at registration time — decoded here so instructors never see
+  // the Semester field even on their very first profile-creation visit.
+  function getRoleFromToken(t: string): string | null {
+    try {
+      return (JSON.parse(atob(t.split('.')[1])) as { user_metadata?: { role?: string } }).user_metadata?.role ?? null;
+    } catch {
+      return null;
+    }
+  }
+  const isInstructor = profile?.role === 'instructor' || getRoleFromToken(token ?? '') === 'instructor';
+
   // No session, and we're done checking: send the user to a real "logged out"
   // screen instead of leaving the profile page mounted with nothing to show.
   useEffect(() => {
@@ -290,7 +302,7 @@ export default function ProfilePage() {
                   placeholder="Enter your last name"
                 />
               </label>
-              <div className="grid grid-cols-2 gap-4">
+              <div className={isInstructor ? undefined : 'grid grid-cols-2 gap-4'}>
                 <label className="block text-sm font-bold text-gray-600">
                   Age
                   <input
@@ -303,18 +315,20 @@ export default function ProfilePage() {
                     placeholder="Age in years"
                   />
                 </label>
-                <label className="block text-sm font-bold text-gray-600">
-                  Semester
-                  <input
-                    type="number"
-                    value={newSemester}
-                    onChange={(e) => setNewSemester(e.target.value)}
-                    min={1}
-                    max={20}
-                    className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-brand-navy outline-none transition focus:border-brand-purple"
-                    placeholder="Enter your current semester"
-                  />
-                </label>
+                {!isInstructor && (
+                  <label className="block text-sm font-bold text-gray-600">
+                    Semester
+                    <input
+                      type="number"
+                      value={newSemester}
+                      onChange={(e) => setNewSemester(e.target.value)}
+                      min={1}
+                      max={20}
+                      className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-brand-navy outline-none transition focus:border-brand-purple"
+                      placeholder="Enter your current semester"
+                    />
+                  </label>
+                )}
               </div>
               <label className="block text-sm font-bold text-gray-600">
                 Biography
@@ -402,16 +416,18 @@ export default function ProfilePage() {
               max={129}
               placeholder="Age in years"
             />
-            <EditableField
-              label="Semester"
-              editing={isEditing}
-              value={isEditing ? (draft?.semester ?? '') : (profile.semester != null ? String(profile.semester) : '')}
-              onChange={(v) => updateDraft('semester', v)}
-              inputType="number"
-              min={1}
-              max={20}
-              placeholder="Enter your current semester"
-            />
+            {!isInstructor && (
+              <EditableField
+                label="Semester"
+                editing={isEditing}
+                value={isEditing ? (draft?.semester ?? '') : (profile.semester != null ? String(profile.semester) : '')}
+                onChange={(v) => updateDraft('semester', v)}
+                inputType="number"
+                min={1}
+                max={20}
+                placeholder="Enter your current semester"
+              />
+            )}
             <EditableField
               label="Biography"
               editing={isEditing}

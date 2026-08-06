@@ -3,6 +3,7 @@
 
 import { getSupabaseClient } from './supabase';
 import { DEFAULT_QUESTION_MAX_SCORE, SESSION_COLUMNS } from './sessionRules';
+import type { InstructorActivityEntry, InstructorSessionEntry, SessionListEntry, SessionRecord } from './sessionTypes';
 import { shuffleArray } from './shuffleArray';
 
 export type SupabaseClient = NonNullable<ReturnType<typeof getSupabaseClient>>;
@@ -241,28 +242,16 @@ export type SessionProgress = {
 };
 
 /**
- * A session plus its progress, exactly the shape lib/sessionClient.ts's SessionListEntry
- * describes for the UI — this is the server-side counterpart, kept as its own type rather than
- * imported from that 'use client' module. Not to be confused with lib/activityLogTypes.ts's
- * ActivityLogEntry, the display shape the profile/dashboard log UI (GitHub #48) actually renders
- * — that one is derived from this one client-side (see toActivityLogEntry in app/dashboard/page.tsx).
+ * A session plus its progress — the server-side name for lib/sessionTypes.ts's SessionListEntry,
+ * which is the one declaration of this shape (GitHub #173). It used to be a hand-kept copy so
+ * that nothing here imported from the 'use client' lib/sessionClient.ts; sessionTypes.ts imports
+ * nothing at all, so both sides can now share it without that risk.
+ *
+ * Not to be confused with lib/activityLogTypes.ts's ActivityLogEntry, the display shape the
+ * profile/dashboard log UI (GitHub #48) actually renders — that one is derived from this one
+ * client-side (see toActivityLogEntry in lib/activityLogTypes.ts).
  */
-export type ActivityLogRow = {
-  session_id: string;
-  user_id: string;
-  activity_type: string;
-  difficulty_level: number;
-  started_at: string;
-  ended_at: string | null;
-  status: string;
-  cumulative_score: number;
-  max_score: number;
-  passed: boolean;
-  badge_id: string | null;
-  questionCount: number;
-  answeredCount: number;
-  nextPosition: number | null;
-};
+export type ActivityLogRow = SessionListEntry;
 
 /**
  * Every session the student has ever started, across every activity type and status — the full
@@ -310,12 +299,6 @@ export async function loadActivityLog(supabase: SupabaseClient, userId: string) 
 
   return { activities, error: null };
 }
-
-/** One attempt as the Instructor Dashboard needs it: the session plus who it belongs to. */
-export type StudentActivityRow = ActivityLogRow & {
-  studentId: string;
-  studentName: string;
-};
 
 /**
  * The "user" row joined onto a session, only for deriving a display name and for filtering
@@ -387,7 +370,7 @@ export async function loadAllStudentActivity(supabase: SupabaseClient) {
 
   // The embed is destructured off rather than spread along: it carries role and username,
   // which are inputs to this query, not part of what the endpoint discloses.
-  const activities: StudentActivityRow[] = rows.map(({ student, ...session }) => {
+  const activities: InstructorActivityEntry[] = rows.map(({ student, ...session }) => {
     const sessionProgress = progress!.get(session.session_id);
 
     return {
@@ -401,6 +384,44 @@ export async function loadAllStudentActivity(supabase: SupabaseClient) {
   });
 
   return { activities, error: null };
+}
+
+/**
+ * Every session_log record belonging to a student, class-wide (GitHub #115) — the leaner
+ * counterpart to loadAllStudentActivity (#171): same STUDENT_EMBED join and role = 'student'
+ * scope, but no loadProgressForSessions call, since this endpoint's AC (student, activity,
+ * level, start date, score, result) never asks how far into the session the student got.
+ *
+ * "Students of the current prof" is, today, every account with role 'student' — there is no
+ * professor-to-student assignment (class/section) anywhere in the schema, so this is the same
+ * scope #171 already uses. A real per-professor scope would need that relationship to exist
+ * first.
+ *
+ * Newest first by started_at — the AC does not specify an order, but every other listing in
+ * this codebase defaults to newest-first, and "Start date" is the one date this endpoint has.
+ */
+export async function loadAllStudentSessions(supabase: SupabaseClient) {
+  const { data, error } = await supabase
+    .from('session_log')
+    .select(`${SESSION_COLUMNS}, ${STUDENT_EMBED}`)
+    .eq('student.role', 'student')
+    .order('started_at', { ascending: false });
+
+  if (error) return { sessions: null, error };
+
+  type SessionRow = SessionRecord & { student: EmbeddedStudent };
+
+  // The embed is destructured off rather than spread along: it carries role and username,
+  // which are inputs to this query, not part of what the endpoint discloses.
+  const sessions: InstructorSessionEntry[] = ((data ?? []) as unknown as SessionRow[]).map(
+    ({ student, ...session }) => ({
+      ...session,
+      studentId: session.user_id,
+      studentName: studentDisplayName(student),
+    }),
+  );
+
+  return { sessions, error: null };
 }
 
 /**

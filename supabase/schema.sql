@@ -203,17 +203,18 @@ CREATE TABLE session_to_question (
 -- ---------------------------------------------------------------------
 -- REQ-DL-4: Answered Question Log
 --
--- Tracks which user answered (user_id), the score achieved for that
--- specific submission (score), and the session it belongs to
--- (session_id) so a resumed activity can tell which of the 4 questions
--- are already done.
+-- Tracks the score achieved for a specific submission (score), and the
+-- session it belongs to (session_id) so a resumed activity can tell
+-- which of the 4 questions are already done.
+-- user_id was removed (GitHub #93) — it is redundant because it can be
+-- retrieved via a join on session_log, and keeping it in sync risked
+-- inconsistency.
 -- ---------------------------------------------------------------------
 CREATE TABLE answered_question_log (
     log_id uuid NOT NULL,
     submitted_at timestamp NOT NULL DEFAULT now(),
     score int4 NOT NULL,
     session_id uuid NOT NULL,
-    user_id uuid NOT NULL,
     question_id uuid NOT NULL,
     submitted_option uuid NOT NULL,
     PRIMARY KEY (log_id));
@@ -248,7 +249,6 @@ ALTER TABLE submission ADD CONSTRAINT fk_submission_user_story FOREIGN KEY (user
 
 ALTER TABLE instructor_llm_config ADD CONSTRAINT fk_instructor_llm_config_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
 
-ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
 ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_question FOREIGN KEY (question_id) REFERENCES question (question_id);
 ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_answer FOREIGN KEY (submitted_option) REFERENCES answer (answer_id);
 ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_session FOREIGN KEY (session_id) REFERENCES session_log (session_id) ON DELETE CASCADE;
@@ -369,10 +369,16 @@ CREATE POLICY own_sessions_select ON session_log
 CREATE POLICY own_sessions_insert ON session_log
   FOR INSERT WITH CHECK (auth.uid() = user_id);
 
+-- GitHub #93: user_id removed from answered_question_log — ownership is now
+-- derived via the session_log join instead of a direct column check.
 CREATE POLICY own_answers_select ON answered_question_log
-  FOR SELECT USING (auth.uid() = user_id);
+  FOR SELECT USING (
+    auth.uid() = (SELECT user_id FROM session_log WHERE session_id = answered_question_log.session_id)
+  );
 CREATE POLICY own_answers_insert ON answered_question_log
-  FOR INSERT WITH CHECK (auth.uid() = user_id);
+  FOR INSERT WITH CHECK (
+    auth.uid() = (SELECT user_id FROM session_log WHERE session_id = answered_question_log.session_id)
+  );
 
 -- No UPDATE policy: grading (llm_score/llm_feedback/graded_at) is only ever
 -- written by a service-role route, never directly by the student.

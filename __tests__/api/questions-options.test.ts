@@ -106,4 +106,28 @@ describe('GET /api/questions/:questionId/options', () => {
     const res = await GET(makeRequest('q-1'), PARAMS('q-1'));
     expect(res.status).toBe(500);
   });
+
+  it('does not always return the correct option first (GitHub #128 regression check)', async () => {
+    // Seed data for "Identify Weak Acceptance Criteria" always inserts the correct answer first —
+    // the bug in #128 was that the route returned options in DB insertion order, so the correct
+    // answer was always options[0]. We call the route many times and verify the first option
+    // isn't always the same answer_id.
+    const seedOrder = [
+      { answer: { answer_id: 'correct-answer', option_text: 'This is the correct AC' } },
+      { answer: { answer_id: 'wrong-1', option_text: 'Wrong option 1' } },
+      { answer: { answer_id: 'wrong-2', option_text: 'Wrong option 2' } },
+      { answer: { answer_id: 'wrong-3', option_text: 'Wrong option 3' } },
+    ];
+
+    const firstIds = new Set<string>();
+    for (let i = 0; i < 20; i++) {
+      queue('question', { data: { question_id: 'q-ac' }, error: null });
+      queue('question_to_answer', { data: seedOrder, error: null });
+      const res = await GET(makeRequest('q-ac'), PARAMS('q-ac'));
+      const body = await res.json();
+      firstIds.add((body.options[0] as { answer_id: string }).answer_id);
+    }
+
+    expect(firstIds.size).toBeGreaterThan(1);
+  });
 });

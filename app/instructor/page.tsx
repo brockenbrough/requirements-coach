@@ -14,7 +14,7 @@ import {
 } from '../../components/InstructorFilters';
 import { InstructorRoster } from '../../components/InstructorRoster';
 import { summarizeStudents, toStudentActivitySummary, type StudentActivitySummary } from '../../lib/activityLogTypes';
-import { loadInstructorActivities } from '../../lib/sessionClient';
+import { loadInstructorActivities, type InstructorActivityEntry } from '../../lib/sessionClient';
 import { useRequireRole } from '../../lib/useRequireRole';
 
 const PAGE_SIZE = 10;
@@ -52,8 +52,13 @@ function InstructorDashboardContent() {
 
     loadInstructorActivities(token).then((result) => {
       if (cancelled) return;
-      if (result.ok) setEntries(result.data.sessions.map(toStudentActivitySummary));
-      else setError(result.error);
+      if (result.ok) {
+        setEntries(result.data.sessions.map((session: InstructorActivityEntry) => toStudentActivitySummary(session)));
+      } else {
+        // result.error already distinguishes "server said no" from "never reached the server"
+        // (status 0) — see the request helper in lib/sessionClient.ts.
+        setError(result.error);
+      }
     });
 
     return () => {

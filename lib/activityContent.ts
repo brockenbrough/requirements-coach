@@ -1,6 +1,14 @@
 import type { ActivityType } from './activityTypes';
 
-export type ActivitySlug = 'weak-user-stories' | 'weak-acceptance-criteria';
+/**
+ * 'write-acceptance-criteria' is the Type B activity from GitHub #149 (REQ-FU-2) — it deliberately
+ * has no entry in ACTIVITIES below (no question bank, no activity_type, no session_log row is
+ * ever created for it; see app/activities/write-acceptance-criteria/page.tsx). It's included in
+ * this union purely so ActivityCard (components/ActivityCard.tsx) and the mock leveling store
+ * (lib/activityStore.ts) can be typed uniformly across all three activities on /activities,
+ * instead of a fourth, differently-typed card component.
+ */
+export type ActivitySlug = 'weak-user-stories' | 'weak-acceptance-criteria' | 'write-acceptance-criteria';
 
 export type Difficulty = 1 | 2 | 3;
 
