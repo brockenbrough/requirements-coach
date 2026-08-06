@@ -62,6 +62,11 @@ CREATE TABLE question (
     activity_type varchar(50) NOT NULL,
     order_number int4 NOT NULL,
     max_score int4,
+    -- GitHub #201: the instructor who created the question, so #116 can scope "my quiz's
+    -- questions" to one professor. Nullable — the seeded question bank (supabase/seed.sql) has
+    -- no real "user" row to point at when it runs, and a question without a specific creator is
+    -- a legitimate state, not a data error.
+    user_id uuid,
     PRIMARY KEY (question_id));
 
 -- ---------------------------------------------------------------------
@@ -233,6 +238,11 @@ ALTER TABLE "user" ADD CONSTRAINT fk_user_auth_users FOREIGN KEY (user_id) REFER
 -- from #122, instead of being free text (question, session_log) or a hardcoded CHECK
 -- (title_definition, see the constraint removed below).
 ALTER TABLE question ADD CONSTRAINT fk_question_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
+
+-- GitHub #201: which instructor created the question. No ON DELETE clause on purpose — a
+-- deleted instructor account should not silently orphan or cascade-delete their questions;
+-- that decision is left for whoever eventually handles account deletion.
+ALTER TABLE question ADD CONSTRAINT fk_question_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
 
 ALTER TABLE question_to_answer ADD CONSTRAINT fk_question_to_answer_question FOREIGN KEY (question_id) REFERENCES question (question_id);
 ALTER TABLE question_to_answer ADD CONSTRAINT fk_question_to_answer_answer FOREIGN KEY (answer_id) REFERENCES answer (answer_id);
@@ -452,6 +462,14 @@ CREATE POLICY own_submissions_insert ON submission
 --   ALTER TABLE title_definition DROP CONSTRAINT IF EXISTS ck_title_definition_activity_type;
 --   ALTER TABLE title_definition ADD CONSTRAINT fk_title_definition_activity_type
 --     FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
+
+-- GitHub #201 (question.user_id — which instructor created the question, for #116): if your
+-- "question" table predates this column, add it and its FK; existing rows get NULL, meaning
+-- no specific creator, same as a fresh run of this script gives the seeded question bank —
+--
+--   ALTER TABLE question ADD COLUMN IF NOT EXISTS user_id uuid;
+--   ALTER TABLE question ADD CONSTRAINT fk_question_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
+
 -- User Story bank (new table, no rename path — it has no starter-template or prior-schema
 -- predecessor): if your database already has everything above and you only need this table,
 -- run just its CREATE TABLE, CHECK constraint, index, fk_user_story_user, and RLS statements
