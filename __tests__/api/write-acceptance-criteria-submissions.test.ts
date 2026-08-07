@@ -9,12 +9,18 @@ const h = vi.hoisted(() => {
     inserts: [] as { table: string; payload: unknown }[],
     updates: [] as { table: string; payload: unknown }[],
     tables: [] as string[],
+    filters: [] as { table: string; column: string; value: unknown }[],
   };
 
   function makeBuilder(table: string, result: Result) {
     const builder: Record<string, unknown> = {
       select: () => builder,
-      eq: () => builder,
+      eq: (column: string, value: unknown) => {
+        state.filters.push({ table, column, value });
+        return builder;
+      },
+      order: () => builder,
+      limit: () => builder,
       insert: (payload: unknown) => {
         state.inserts.push({ table, payload });
         return builder;
@@ -64,8 +70,12 @@ vi.mock('../../lib/llm/factory', async (importOriginal) => {
 import { getLLMProvider } from '../../lib/llm/factory';
 import { POST } from '../../app/api/activities/write-acceptance-criteria/submissions/route';
 
-const STORY = { user_story_id: 'story-1', story_text: 'As a user, I want to log in with email.' };
-const CONFIG = { provider: 'CLAUDE', api_key: 'sk-test' };
+const STORY = {
+  user_story_id: 'story-1',
+  story_text: 'As a user, I want to log in with email.',
+  creator_id: 'instructor-1',
+};
+const CONFIG = { provider: 'CLAUDE', api_key: 'sk-test', model: 'claude-opus-5' };
 
 function req(body?: object, token: string | null = 'valid-token') {
   return new Request('http://localhost/api/activities/write-acceptance-criteria/submissions', {
@@ -78,7 +88,7 @@ function req(body?: object, token: string | null = 'valid-token') {
   });
 }
 
-/** Queues story lookup + active config lookup, the two reads before any write. */
+/** Queues story lookup + the story creator's config lookup, the two reads before any write. */
 function queueLookups({ story = STORY as Result['data'], config = CONFIG as Result['data'] } = {}) {
   queue('user_story', { data: story, error: null });
   queue('instructor_llm_config', { data: config, error: null });
@@ -99,6 +109,7 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
     h.state.inserts = [];
     h.state.updates = [];
     h.state.tables = [];
+    h.state.filters = [];
     vi.mocked(getLLMProvider).mockReset();
   });
 
@@ -156,18 +167,43 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
     expect(response.status).toBe(500);
   });
 
-  it('returns 500 when no LLM provider is configured as active', async () => {
+  it('returns 500 when the story creator has no LLM provider configured', async () => {
     queueLookups({ config: null });
 
     const response = await POST(req({ userStoryId: 'story-1', submittedText: 'Given...' }));
     const body = await response.json();
 
     expect(response.status).toBe(500);
-    expect(body.error).toMatch(/no active/i);
+    expect(body.error).toMatch(/has not configured an llm provider/i);
     expect(h.state.inserts).toHaveLength(0);
   });
 
-  it('returns 500 when the active config lookup errors', async () => {
+  it('looks up instructor_llm_config filtered by the story creator, not a global flag', async () => {
+    queueLookups();
+    mockProvider({ score: 8, feedback: 'ok' });
+
+    await POST(req({ userStoryId: 'story-1', submittedText: 'Given...' }));
+
+    expect(h.state.filters).toContainEqual({
+      table: 'instructor_llm_config',
+      column: 'user_id',
+      value: STORY.creator_id,
+    });
+    expect(h.state.filters).not.toContainEqual(
+      expect.objectContaining({ table: 'instructor_llm_config', column: 'is_active' }),
+    );
+  });
+
+  it('passes the config row\'s provider, api_key, and model to getLLMProvider', async () => {
+    queueLookups();
+    mockProvider({ score: 8, feedback: 'ok' });
+
+    await POST(req({ userStoryId: 'story-1', submittedText: 'Given...' }));
+
+    expect(getLLMProvider).toHaveBeenCalledWith(CONFIG.provider, CONFIG.api_key, CONFIG.model);
+  });
+
+  it('returns 500 when the config lookup errors', async () => {
     queue('user_story', { data: STORY, error: null });
     queue('instructor_llm_config', { data: null, error: { message: 'db down' } });
 
@@ -177,7 +213,7 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
   });
 
   it('returns 500 when the configured provider name is invalid', async () => {
-    queueLookups({ config: { provider: 'NOT_A_PROVIDER', api_key: 'sk-test' } });
+    queueLookups({ config: { provider: 'NOT_A_PROVIDER', api_key: 'sk-test', model: 'x' } });
 
     const response = await POST(req({ userStoryId: 'story-1', submittedText: 'Given...' }));
 
@@ -186,7 +222,7 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
   });
 
   it('returns 500 when the provider factory returns null (missing api key)', async () => {
-    queueLookups({ config: { provider: 'CLAUDE', api_key: '' } });
+    queueLookups({ config: { provider: 'CLAUDE', api_key: '', model: 'claude-opus-5' } });
     vi.mocked(getLLMProvider).mockReturnValue(null);
 
     const response = await POST(req({ userStoryId: 'story-1', submittedText: 'Given...' }));
