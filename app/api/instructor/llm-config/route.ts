@@ -15,8 +15,8 @@ function getToken(request: Request): string | null {
 }
 
 /**
- * POST /api/instructor/llm-config — an instructor saves an LLM provider + model + API key used
- * to grade free-text submissions (instructor_llm_config).
+ * GET/POST /api/instructor/llm-config — an instructor's LLM provider + model + API key used to
+ * grade free-text submissions (instructor_llm_config).
  *
  * Instructor-only: requireInstructor runs before any row is touched, the same guard every other
  * /api/instructor/* route uses.
@@ -29,13 +29,66 @@ function getToken(request: Request): string | null {
  * unique index; on that 23505 the pair is retried once, the same bounded-retry idea POST
  * /api/sessions uses for uq_session_log_one_active.
  *
- * AC summary:
+ * POST AC summary:
  *  - 401 if the bearer token is missing or invalid
  *  - 403 if the caller isn't an instructor (no body, matching requireInstructor's convention)
  *  - 400 if provider isn't one of CLAUDE/CHATGPT/GEMINI, or apiKey is empty
  *  - 200 with the saved row — api_key never included
  *  - 500 if Supabase isn't configured or a query fails
+ *
+ * GET AC summary:
+ *  - Same 401/403 as POST.
+ *  - No ?provider=&model= given: 200 with the caller's own most recently saved row (POST
+ *    always inserts, never updates in place, so a caller can have several rows over time —
+ *    this is the same "most recent row for this user_id" precedent the grading route uses for
+ *    the story's creator), or `{ config: null }` if they've never saved one — a normal state,
+ *    not a 404.
+ *  - ?provider=&model= given together: 200 with the most recent row for that *exact* pair, or
+ *    `{ config: null }` if the caller has never saved one for it, even if a different pair is
+ *    now their most recent save. 400 if provider isn't one of CLAUDE/CHATGPT/GEMINI, or only
+ *    one of the two query params is given.
+ *  - 500 if Supabase isn't configured or the query fails.
  */
+export async function GET(request: Request) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
+
+  const guard = await requireInstructor(supabase, getToken(request));
+  if (!guard.ok) {
+    return guard.status === 403
+      ? new Response(null, { status: 403 })
+      : Response.json(
+          { error: guard.status === 401 ? 'Unauthorized' : 'Supabase credentials are not configured.' },
+          { status: guard.status },
+        );
+  }
+
+  const { searchParams } = new URL(request.url);
+  const providerParam = searchParams.get('provider');
+  const modelParam = searchParams.get('model');
+  const hasFilter = providerParam !== null || modelParam !== null;
+
+  if (hasFilter) {
+    if (!isLLMProviderName(providerParam)) {
+      return Response.json({ error: 'provider must be one of CLAUDE, CHATGPT, GEMINI.' }, { status: 400 });
+    }
+    if (!modelParam || modelParam.trim() === '') {
+      return Response.json({ error: 'model is required when filtering by provider.' }, { status: 400 });
+    }
+  }
+
+  let query = supabase.from('instructor_llm_config').select(CONFIG_COLUMNS).eq('user_id', guard.user_id);
+  if (hasFilter) {
+    query = query.eq('provider', providerParam).eq('model', modelParam);
+  }
+
+  const { data: config, error } = await query.order('updated_at', { ascending: false }).limit(1).maybeSingle();
+
+  if (error) return Response.json({ error: error.message }, { status: 500 });
+
+  return Response.json({ config: config ?? null }, { status: 200 });
+}
+
 export async function POST(request: Request) {
   const supabase = getSupabaseClient();
   if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
