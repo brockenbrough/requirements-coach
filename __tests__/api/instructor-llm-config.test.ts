@@ -18,6 +18,8 @@ const h = vi.hoisted(() => {
         state.filters.push({ table, column, value });
         return builder;
       },
+      order: () => builder,
+      limit: () => builder,
       insert: (payload: unknown) => {
         state.inserts.push({ table, payload });
         return builder;
@@ -64,7 +66,7 @@ vi.mock('../../lib/supabase', () => ({
   }),
 }));
 
-import { POST } from '../../app/api/instructor/llm-config/route';
+import { GET, POST } from '../../app/api/instructor/llm-config/route';
 
 function req(body: unknown, token: string | null = 'valid-token') {
   return new Request('http://localhost/api/instructor/llm-config', {
@@ -74,6 +76,13 @@ function req(body: unknown, token: string | null = 'valid-token') {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(body),
+  });
+}
+
+function getReq(token: string | null = 'valid-token') {
+  return new Request('http://localhost/api/instructor/llm-config', {
+    method: 'GET',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
 }
 
@@ -252,5 +261,78 @@ describe('POST /api/instructor/llm-config', () => {
     );
 
     expect(res.status).toBe(400);
+  });
+});
+
+describe('GET /api/instructor/llm-config', () => {
+  it("returns the caller's own most recent config, api key never included", async () => {
+    queueRole('instructor');
+    queue('instructor_llm_config', { data: configRow(), error: null });
+
+    const res = await GET(getReq());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.config).toEqual(configRow());
+    expect(JSON.stringify(body)).not.toContain('api_key');
+
+    expect(h.state.filters).toContainEqual({
+      table: 'instructor_llm_config',
+      column: 'user_id',
+      value: 'instructor-1',
+    });
+  });
+
+  it('returns { config: null } when the instructor has never saved one', async () => {
+    queueRole('instructor');
+    queue('instructor_llm_config', { data: null, error: null });
+
+    const res = await GET(getReq());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ config: null });
+  });
+
+  it('answers 401 without a token', async () => {
+    const res = await GET(getReq(null));
+    const body = await res.json();
+
+    expect(res.status).toBe(401);
+    expect(body.error).toBe('Unauthorized');
+    expect(h.state.tables).toEqual([]);
+  });
+
+  it('answers 401 for an invalid token', async () => {
+    const res = await GET(getReq('bad-token'));
+
+    expect(res.status).toBe(401);
+  });
+
+  it('rejects a student with 403 and an empty body', async () => {
+    queueRole('student');
+    const res = await GET(getReq());
+
+    expect(res.status).toBe(403);
+    expect(await res.text()).toBe('');
+    expect(h.state.tables).not.toContain('instructor_llm_config');
+  });
+
+  it('rejects an account without a profile row', async () => {
+    queue('user', { data: null, error: null });
+    const res = await GET(getReq());
+
+    expect(res.status).toBe(403);
+  });
+
+  it('answers 500 when the query fails', async () => {
+    queueRole('instructor');
+    queue('instructor_llm_config', { data: null, error: { message: 'boom' } });
+
+    const res = await GET(getReq());
+    const body = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(body.error).toBe('boom');
   });
 });
