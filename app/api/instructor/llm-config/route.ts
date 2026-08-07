@@ -38,10 +38,15 @@ function getToken(request: Request): string | null {
  *
  * GET AC summary:
  *  - Same 401/403 as POST.
- *  - 200 with the caller's own most recently saved row (POST always inserts, never updates in
- *    place, so a caller can have several rows over time — this is the same "most recent row
- *    for this user_id" precedent the grading route uses for the story's creator), or
- *    `{ config: null }` if they've never saved one — a normal state, not a 404.
+ *  - No ?provider=&model= given: 200 with the caller's own most recently saved row (POST
+ *    always inserts, never updates in place, so a caller can have several rows over time —
+ *    this is the same "most recent row for this user_id" precedent the grading route uses for
+ *    the story's creator), or `{ config: null }` if they've never saved one — a normal state,
+ *    not a 404.
+ *  - ?provider=&model= given together: 200 with the most recent row for that *exact* pair, or
+ *    `{ config: null }` if the caller has never saved one for it, even if a different pair is
+ *    now their most recent save. 400 if provider isn't one of CLAUDE/CHATGPT/GEMINI, or only
+ *    one of the two query params is given.
  *  - 500 if Supabase isn't configured or the query fails.
  */
 export async function GET(request: Request) {
@@ -58,13 +63,26 @@ export async function GET(request: Request) {
         );
   }
 
-  const { data: config, error } = await supabase
-    .from('instructor_llm_config')
-    .select(CONFIG_COLUMNS)
-    .eq('user_id', guard.user_id)
-    .order('updated_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const { searchParams } = new URL(request.url);
+  const providerParam = searchParams.get('provider');
+  const modelParam = searchParams.get('model');
+  const hasFilter = providerParam !== null || modelParam !== null;
+
+  if (hasFilter) {
+    if (!isLLMProviderName(providerParam)) {
+      return Response.json({ error: 'provider must be one of CLAUDE, CHATGPT, GEMINI.' }, { status: 400 });
+    }
+    if (!modelParam || modelParam.trim() === '') {
+      return Response.json({ error: 'model is required when filtering by provider.' }, { status: 400 });
+    }
+  }
+
+  let query = supabase.from('instructor_llm_config').select(CONFIG_COLUMNS).eq('user_id', guard.user_id);
+  if (hasFilter) {
+    query = query.eq('provider', providerParam).eq('model', modelParam);
+  }
+
+  const { data: config, error } = await query.order('updated_at', { ascending: false }).limit(1).maybeSingle();
 
   if (error) return Response.json({ error: error.message }, { status: 500 });
 

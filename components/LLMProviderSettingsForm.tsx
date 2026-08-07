@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { PasswordField } from './PasswordField';
-import { loadLlmConfig, saveLlmConfig } from '../lib/instructorLlmConfigClient';
+import { checkLlmConfigForSelection, loadLlmConfig, saveLlmConfig } from '../lib/instructorLlmConfigClient';
 import { LLM_MODELS_BY_PROVIDER, LLM_PROVIDERS, type InstructorLlmConfig, type LLMProviderId } from '../lib/instructorLlmConfigTypes';
 
 const PILL_BASE = 'rounded-full border px-3.5 py-1.5 text-xs font-bold transition';
@@ -22,7 +22,12 @@ const PILL_INACTIVE = 'border-gray-300 bg-white text-gray-600 hover:border-brand
  * default true, since nothing else on that page renders a title for it.
  */
 export function LLMProviderSettingsForm({ token, showHeading = true }: { token: string; showHeading?: boolean }) {
-  const [config, setConfig] = useState<InstructorLlmConfig | null>(null);
+  // Always represents "is there a saved key for the *currently selected* provider+model pair" —
+  // refreshed via checkSelection() on every change, not derived by comparing against a single
+  // cached value. POST never updates a row in place, so an earlier pair can still have a saved
+  // key even once a different pair becomes the instructor's most recent save; only the backend
+  // can answer "does this exact pair have one."
+  const [selectionConfig, setSelectionConfig] = useState<InstructorLlmConfig | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
 
@@ -34,6 +39,10 @@ export function LLMProviderSettingsForm({ token, showHeading = true }: { token: 
   const [submitting, setSubmitting] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  // Tracks the most recently requested pair, so a slower response to an earlier change can't
+  // clobber a newer one if the instructor clicks through providers/models quickly.
+  const latestSelectionRef = useRef({ provider, model });
 
   useEffect(() => {
     let cancelled = false;
@@ -47,10 +56,13 @@ export function LLMProviderSettingsForm({ token, showHeading = true }: { token: 
         return;
       }
 
+      // The unfiltered fetch already returns the row for whichever pair it is — no extra
+      // per-pair check call needed to know the answer for this initial selection.
       if (result.data.config) {
-        setConfig(result.data.config);
+        setSelectionConfig(result.data.config);
         setProvider(result.data.config.provider);
         setModel(result.data.config.model);
+        latestSelectionRef.current = { provider: result.data.config.provider, model: result.data.config.model };
       }
       setIsLoading(false);
     });
@@ -60,23 +72,43 @@ export function LLMProviderSettingsForm({ token, showHeading = true }: { token: 
     };
   }, [token]);
 
+  async function checkSelection(nextProvider: LLMProviderId, nextModel: string) {
+    latestSelectionRef.current = { provider: nextProvider, model: nextModel };
+    // Clear immediately so the previous pair's "already saved" text doesn't flash for the new
+    // pair while the check is in flight.
+    setSelectionConfig(null);
+
+    const result = await checkLlmConfigForSelection(token, nextProvider, nextModel);
+    const stillCurrent =
+      latestSelectionRef.current.provider === nextProvider && latestSelectionRef.current.model === nextModel;
+    if (!stillCurrent) return; // superseded by a newer selection before this resolved
+
+    // A failed check is swallowed — this is a secondary UX nicety, not worth a hard error
+    // state; the indicator just won't show "already saved" until the next successful check.
+    if (result.ok) setSelectionConfig(result.data.config);
+  }
+
   // Switching provider invalidates the previous model choice — each provider's model list is
   // disjoint — so this lands on that provider's first model, same as how the provider pills
-  // themselves always have a selected default rather than an empty state.
+  // themselves always have a selected default rather than an empty state. A provider change is
+  // a pair change too, so it needs the same live check as a plain model change.
   function handleProviderChange(nextProvider: LLMProviderId) {
+    const nextModel = LLM_MODELS_BY_PROVIDER[nextProvider][0].id;
     setProvider(nextProvider);
-    setModel(LLM_MODELS_BY_PROVIDER[nextProvider][0].id);
+    setModel(nextModel);
+    checkSelection(nextProvider, nextModel);
+  }
+
+  function handleModelChange(nextModel: string) {
+    setModel(nextModel);
+    checkSelection(provider, nextModel);
   }
 
   const modelOptions = LLM_MODELS_BY_PROVIDER[provider];
   // Provider/model always have a default value (never actually blank), so in practice this
   // gates on the one field that starts empty: the API key.
   const canSave = Boolean(provider && model && apiKeyInput.trim());
-  // The API only ever returns the instructor's single most-recently-saved row (one config
-  // total, not one per provider/model), so "already saved" is only true when the currently
-  // selected provider AND model are the exact pair that row was saved for — otherwise the
-  // saved key belongs to a different combination and doesn't cover this one.
-  const hasSavedKeyForSelection = Boolean(config?.hasApiKey && config.provider === provider && config.model === model);
+  const hasSavedKeyForSelection = Boolean(selectionConfig?.hasApiKey);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -96,8 +128,9 @@ export function LLMProviderSettingsForm({ token, showHeading = true }: { token: 
 
     // Refresh local state straight from the response — the form reflects the new saved config
     // immediately, no refetch/reload needed — and clear the typed key so it never lingers in
-    // state once it's been sent.
-    setConfig(result.data.config);
+    // state once it's been sent. The response is the row for the pair just submitted, so it's
+    // exactly what selectionConfig should hold now.
+    setSelectionConfig(result.data.config);
     setApiKeyInput('');
     setSaveSuccess(true);
   }
@@ -148,7 +181,7 @@ export function LLMProviderSettingsForm({ token, showHeading = true }: { token: 
             Model
             <select
               value={model}
-              onChange={(event) => setModel(event.target.value)}
+              onChange={(event) => handleModelChange(event.target.value)}
               className="mt-1.5 block w-full rounded-brand-md border border-gray-300 bg-white px-3.5 py-2.5 text-sm font-bold text-gray-600 outline-none transition focus:border-brand-purple"
             >
               {modelOptions.map((option) => (

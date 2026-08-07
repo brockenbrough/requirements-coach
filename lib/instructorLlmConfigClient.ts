@@ -64,6 +64,27 @@ export async function loadLlmConfig(token: string): Promise<ApiResult<{ config: 
 }
 
 /**
+ * GET .../llm-config?provider=&model=: does the instructor have a previously saved key for
+ * this *exact* provider/model pair? Distinct from loadLlmConfig's unfiltered "most recent
+ * config overall" — POST never updates in place, so an earlier pair can still have a saved key
+ * even once a different pair becomes the most recent save.
+ */
+export async function checkLlmConfigForSelection(
+  token: string,
+  provider: LLMProviderId,
+  model: string,
+): Promise<ApiResult<{ config: InstructorLlmConfig | null }>> {
+  const params = new URLSearchParams({ provider, model });
+  const result = await request<{ config: ConfigRow | null }>(
+    `/api/instructor/llm-config?${params.toString()}`,
+    { method: 'GET' },
+    token,
+  );
+  if (!result.ok) return result;
+  return { ok: true, data: { config: toInstructorLlmConfig(result.data.config) } };
+}
+
+/**
  * POST .../llm-config: saves provider, model, and key together. All three are required —
  * LLMProviderSettingsForm only calls this once its own canSave check (provider + model + a
  * non-blank key) passes, but the route validates independently regardless.

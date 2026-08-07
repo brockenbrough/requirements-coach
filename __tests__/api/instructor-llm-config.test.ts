@@ -79,8 +79,8 @@ function req(body: unknown, token: string | null = 'valid-token') {
   });
 }
 
-function getReq(token: string | null = 'valid-token') {
-  return new Request('http://localhost/api/instructor/llm-config', {
+function getReq(token: string | null = 'valid-token', query = '') {
+  return new Request(`http://localhost/api/instructor/llm-config${query}`, {
     method: 'GET',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
@@ -323,6 +323,59 @@ describe('GET /api/instructor/llm-config', () => {
     const res = await GET(getReq());
 
     expect(res.status).toBe(403);
+  });
+
+  it('filters by both provider and model when given', async () => {
+    queueRole('instructor');
+    queue('instructor_llm_config', { data: configRow({ provider: 'GEMINI', model: 'gemini-3.6-flash' }), error: null });
+
+    const res = await GET(getReq('valid-token', '?provider=GEMINI&model=gemini-3.6-flash'));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.config).toEqual(configRow({ provider: 'GEMINI', model: 'gemini-3.6-flash' }));
+
+    expect(h.state.filters).toContainEqual({ table: 'instructor_llm_config', column: 'provider', value: 'GEMINI' });
+    expect(h.state.filters).toContainEqual({
+      table: 'instructor_llm_config',
+      column: 'model',
+      value: 'gemini-3.6-flash',
+    });
+  });
+
+  it('returns { config: null } for a valid pair the instructor never saved', async () => {
+    queueRole('instructor');
+    queue('instructor_llm_config', { data: null, error: null });
+
+    const res = await GET(getReq('valid-token', '?provider=CLAUDE&model=claude-sonnet-5'));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ config: null });
+  });
+
+  it('rejects an invalid provider in the filter with 400', async () => {
+    queueRole('instructor');
+    const res = await GET(getReq('valid-token', '?provider=LLAMA&model=llama-4'));
+
+    expect(res.status).toBe(400);
+    expect(h.state.tables).not.toContain('instructor_llm_config');
+  });
+
+  it('rejects provider without model with 400', async () => {
+    queueRole('instructor');
+    const res = await GET(getReq('valid-token', '?provider=CLAUDE'));
+
+    expect(res.status).toBe(400);
+    expect(h.state.tables).not.toContain('instructor_llm_config');
+  });
+
+  it('rejects model without provider with 400', async () => {
+    queueRole('instructor');
+    const res = await GET(getReq('valid-token', '?model=claude-opus-5'));
+
+    expect(res.status).toBe(400);
+    expect(h.state.tables).not.toContain('instructor_llm_config');
   });
 
   it('answers 500 when the query fails', async () => {
