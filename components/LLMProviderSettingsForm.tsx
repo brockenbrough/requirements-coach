@@ -72,6 +72,11 @@ export function LLMProviderSettingsForm({ token, showHeading = true }: { token: 
   // Provider/model always have a default value (never actually blank), so in practice this
   // gates on the one field that starts empty: the API key.
   const canSave = Boolean(provider && model && apiKeyInput.trim());
+  // The API only ever returns the instructor's single most-recently-saved row (one config
+  // total, not one per provider/model), so "already saved" is only true when the currently
+  // selected provider AND model are the exact pair that row was saved for — otherwise the
+  // saved key belongs to a different combination and doesn't cover this one.
+  const hasSavedKeyForSelection = Boolean(config?.hasApiKey && config.provider === provider && config.model === model);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -158,13 +163,14 @@ export function LLMProviderSettingsForm({ token, showHeading = true }: { token: 
             label="API Key"
             value={apiKeyInput}
             onChange={setApiKeyInput}
-            placeholder={config?.hasApiKey ? '•••• already saved' : 'Paste your API key'}
+            placeholder={hasSavedKeyForSelection ? '•••• already saved' : 'Paste your API key'}
             autoComplete="off"
             variant="light"
           />
-          {config?.hasApiKey ? (
+          {hasSavedKeyForSelection ? (
             <p className="mt-1.5 text-xs font-semibold text-gray-500">
-              A key for {LLM_PROVIDERS.find((p) => p.id === config.provider)?.label} is already saved.
+              A key for {LLM_PROVIDERS.find((p) => p.id === provider)?.label} (
+              {modelOptions.find((m) => m.id === model)?.label}) is already saved.
             </p>
           ) : null}
 
