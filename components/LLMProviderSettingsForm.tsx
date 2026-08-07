@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { PasswordField } from './PasswordField';
+import { useUser } from './UserProvider';
 import { checkLlmConfigForSelection, loadLlmConfig, saveLlmConfig } from '../lib/instructorLlmConfigClient';
 import { LLM_MODELS_BY_PROVIDER, LLM_PROVIDERS, type InstructorLlmConfig, type LLMProviderId } from '../lib/instructorLlmConfigTypes';
 
@@ -22,6 +23,12 @@ const PILL_INACTIVE = 'border-gray-300 bg-white text-gray-600 hover:border-brand
  * default true, since nothing else on that page renders a title for it.
  */
 export function LLMProviderSettingsForm({ token, showHeading = true }: { token: string; showHeading?: boolean }) {
+  // Only used to key the local cache (lib/instructorLlmConfigStore.ts) per instructor, the same
+  // way components/AppShell.tsx already reads profile.user_id off this hook — not threaded in
+  // as a prop, since neither of this component's two hosts otherwise needs it.
+  const { profile } = useUser();
+  const userId = profile?.user_id;
+
   // Always represents "is there a saved key for the *currently selected* provider+model pair" —
   // refreshed via checkSelection() on every change, not derived by comparing against a single
   // cached value. POST never updates a row in place, so an earlier pair can still have a saved
@@ -47,7 +54,7 @@ export function LLMProviderSettingsForm({ token, showHeading = true }: { token: 
   useEffect(() => {
     let cancelled = false;
 
-    loadLlmConfig(token).then((result) => {
+    loadLlmConfig(token, { userId }).then((result) => {
       if (cancelled) return;
 
       if (!result.ok) {
@@ -78,7 +85,7 @@ export function LLMProviderSettingsForm({ token, showHeading = true }: { token: 
     // pair while the check is in flight.
     setSelectionConfig(null);
 
-    const result = await checkLlmConfigForSelection(token, nextProvider, nextModel);
+    const result = await checkLlmConfigForSelection(token, nextProvider, nextModel, { userId });
     const stillCurrent =
       latestSelectionRef.current.provider === nextProvider && latestSelectionRef.current.model === nextModel;
     if (!stillCurrent) return; // superseded by a newer selection before this resolved
@@ -118,7 +125,7 @@ export function LLMProviderSettingsForm({ token, showHeading = true }: { token: 
     setSaveSuccess(false);
     setSubmitting(true);
 
-    const result = await saveLlmConfig(token, provider, model, apiKeyInput);
+    const result = await saveLlmConfig(token, provider, model, apiKeyInput, { userId });
     setSubmitting(false);
 
     if (!result.ok) {

@@ -5,6 +5,12 @@
 // talks to GET/POST /api/instructor/llm-config, so no component hand-rolls the Authorization
 // header or picks apart an error body.
 
+import {
+  getCachedLlmConfig,
+  getCachedLlmConfigForSelection,
+  setCachedLlmConfig,
+  setCachedLlmConfigForSelection,
+} from './instructorLlmConfigStore';
 import type { InstructorLlmConfig, LLMProviderId } from './instructorLlmConfigTypes';
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number; error: string };
@@ -56,11 +62,30 @@ function toInstructorLlmConfig(row: ConfigRow | null): InstructorLlmConfig | nul
   };
 }
 
-/** GET .../llm-config: the signed-in instructor's own most recently saved config, if any. */
-export async function loadLlmConfig(token: string): Promise<ApiResult<{ config: InstructorLlmConfig | null }>> {
+/**
+ * GET .../llm-config: the signed-in instructor's own most recently saved config, if any.
+ *
+ * Cached in localStorage (lib/instructorLlmConfigStore.ts) when userId is given — the same
+ * "optional key opts into the cache" shape as lib/sessionClient.ts's loadSessions, since userId
+ * (from useUser()'s profile) may not have loaded yet when this is first called. A plain call is
+ * served from the cache when present; pass forceRefresh to bypass it and re-cache the server's
+ * answer.
+ */
+export async function loadLlmConfig(
+  token: string,
+  options: { userId?: string; forceRefresh?: boolean } = {},
+): Promise<ApiResult<{ config: InstructorLlmConfig | null }>> {
+  if (options.userId && !options.forceRefresh) {
+    const cached = getCachedLlmConfig(options.userId);
+    if (cached !== null) return { ok: true, data: cached };
+  }
+
   const result = await request<{ config: ConfigRow | null }>('/api/instructor/llm-config', { method: 'GET' }, token);
   if (!result.ok) return result;
-  return { ok: true, data: { config: toInstructorLlmConfig(result.data.config) } };
+
+  const data = { config: toInstructorLlmConfig(result.data.config) };
+  if (options.userId) setCachedLlmConfig(options.userId, data);
+  return { ok: true, data };
 }
 
 /**
@@ -68,12 +93,20 @@ export async function loadLlmConfig(token: string): Promise<ApiResult<{ config: 
  * this *exact* provider/model pair? Distinct from loadLlmConfig's unfiltered "most recent
  * config overall" — POST never updates in place, so an earlier pair can still have a saved key
  * even once a different pair becomes the most recent save.
+ *
+ * Same cache shape as loadLlmConfig, keyed additionally by provider+model.
  */
 export async function checkLlmConfigForSelection(
   token: string,
   provider: LLMProviderId,
   model: string,
+  options: { userId?: string; forceRefresh?: boolean } = {},
 ): Promise<ApiResult<{ config: InstructorLlmConfig | null }>> {
+  if (options.userId && !options.forceRefresh) {
+    const cached = getCachedLlmConfigForSelection(options.userId, provider, model);
+    if (cached !== null) return { ok: true, data: cached };
+  }
+
   const params = new URLSearchParams({ provider, model });
   const result = await request<{ config: ConfigRow | null }>(
     `/api/instructor/llm-config?${params.toString()}`,
@@ -81,7 +114,10 @@ export async function checkLlmConfigForSelection(
     token,
   );
   if (!result.ok) return result;
-  return { ok: true, data: { config: toInstructorLlmConfig(result.data.config) } };
+
+  const data = { config: toInstructorLlmConfig(result.data.config) };
+  if (options.userId) setCachedLlmConfigForSelection(options.userId, provider, model, data);
+  return { ok: true, data };
 }
 
 /**
@@ -92,12 +128,17 @@ export async function checkLlmConfigForSelection(
  * setActive is intentionally omitted: the settings form has no control for it, and grading
  * (app/api/activities/write-acceptance-criteria/submissions/route.ts) scopes by the story's
  * creator_id, not by the global is_active flag, so there's nothing here for it to affect.
+ *
+ * On success, writes through to both caches — the pair just saved, and the "most recent
+ * overall" slot, since a fresh save *is* now the most recent — no extra round trip needed, the
+ * response here is already the authoritative new state.
  */
 export async function saveLlmConfig(
   token: string,
   provider: LLMProviderId,
   model: string,
   apiKey: string,
+  options: { userId?: string } = {},
 ): Promise<ApiResult<{ config: InstructorLlmConfig }>> {
   const result = await request<{ config: ConfigRow }>(
     '/api/instructor/llm-config',
@@ -110,5 +151,11 @@ export async function saveLlmConfig(
   );
 
   if (!result.ok) return result;
-  return { ok: true, data: { config: toInstructorLlmConfig(result.data.config)! } };
+
+  const data = { config: toInstructorLlmConfig(result.data.config)! };
+  if (options.userId) {
+    setCachedLlmConfigForSelection(options.userId, provider, model, data);
+    setCachedLlmConfig(options.userId, data);
+  }
+  return { ok: true, data };
 }

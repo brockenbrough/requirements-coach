@@ -5,6 +5,7 @@ import { checkLlmConfigForSelection, loadLlmConfig, saveLlmConfig } from '../../
 // stubFetch: the only collaborator to fake is fetch.
 
 const TOKEN = 'instructor-token';
+const USER_ID = 'instructor-1';
 
 function stubFetch(impl: (url: string, init: RequestInit) => Promise<Response>) {
   const spy = vi.fn(impl);
@@ -32,7 +33,7 @@ describe('loadLlmConfig', () => {
   it('translates a returned row into hasApiKey: true, sends the bearer token', async () => {
     const spy = stubFetch(() => jsonResponse({ config: ROW }, 200));
 
-    const result = await loadLlmConfig(TOKEN);
+    const result = await loadLlmConfig(TOKEN, { userId: USER_ID });
 
     expect(result).toEqual({
       ok: true,
@@ -48,7 +49,7 @@ describe('loadLlmConfig', () => {
   it('returns config: null when the instructor has no saved config', async () => {
     stubFetch(() => jsonResponse({ config: null }, 200));
 
-    const result = await loadLlmConfig(TOKEN);
+    const result = await loadLlmConfig(TOKEN, { userId: USER_ID });
 
     expect(result).toEqual({ ok: true, data: { config: null } });
   });
@@ -56,7 +57,7 @@ describe('loadLlmConfig', () => {
   it('propagates a non-ok response as ok: false', async () => {
     stubFetch(() => jsonResponse({ error: 'Unauthorized' }, 401));
 
-    const result = await loadLlmConfig(TOKEN);
+    const result = await loadLlmConfig(TOKEN, { userId: USER_ID });
 
     expect(result).toEqual({ ok: false, status: 401, error: 'Unauthorized' });
   });
@@ -66,7 +67,7 @@ describe('saveLlmConfig', () => {
   it('sends provider, model, and apiKey with the bearer token, translates the response', async () => {
     const spy = stubFetch(() => jsonResponse({ config: ROW }, 200));
 
-    const result = await saveLlmConfig(TOKEN, 'CLAUDE', 'claude-opus-5', 'sk-secret');
+    const result = await saveLlmConfig(TOKEN, 'CLAUDE', 'claude-opus-5', 'sk-secret', { userId: USER_ID });
 
     expect(result).toEqual({
       ok: true,
@@ -87,7 +88,7 @@ describe('saveLlmConfig', () => {
   it('propagates a non-ok response as ok: false', async () => {
     stubFetch(() => jsonResponse({ error: 'apiKey is required.' }, 400));
 
-    const result = await saveLlmConfig(TOKEN, 'CLAUDE', 'claude-opus-5', '');
+    const result = await saveLlmConfig(TOKEN, 'CLAUDE', 'claude-opus-5', '', { userId: USER_ID });
 
     expect(result).toEqual({ ok: false, status: 400, error: 'apiKey is required.' });
   });
@@ -97,7 +98,7 @@ describe('checkLlmConfigForSelection', () => {
   it('sends provider and model as a query string, translates a returned row', async () => {
     const spy = stubFetch(() => jsonResponse({ config: ROW }, 200));
 
-    const result = await checkLlmConfigForSelection(TOKEN, 'CLAUDE', 'claude-opus-5');
+    const result = await checkLlmConfigForSelection(TOKEN, 'CLAUDE', 'claude-opus-5', { userId: USER_ID });
 
     expect(result).toEqual({
       ok: true,
@@ -113,7 +114,7 @@ describe('checkLlmConfigForSelection', () => {
   it('returns config: null for a pair with no saved key', async () => {
     stubFetch(() => jsonResponse({ config: null }, 200));
 
-    const result = await checkLlmConfigForSelection(TOKEN, 'GEMINI', 'gemini-3.6-flash');
+    const result = await checkLlmConfigForSelection(TOKEN, 'GEMINI', 'gemini-3.6-flash', { userId: USER_ID });
 
     expect(result).toEqual({ ok: true, data: { config: null } });
   });
@@ -121,7 +122,7 @@ describe('checkLlmConfigForSelection', () => {
   it('propagates a non-ok response as ok: false', async () => {
     stubFetch(() => jsonResponse({ error: 'provider must be one of CLAUDE, CHATGPT, GEMINI.' }, 400));
 
-    const result = await checkLlmConfigForSelection(TOKEN, 'CLAUDE', 'claude-opus-5');
+    const result = await checkLlmConfigForSelection(TOKEN, 'CLAUDE', 'claude-opus-5', { userId: USER_ID });
 
     expect(result).toEqual({ ok: false, status: 400, error: 'provider must be one of CLAUDE, CHATGPT, GEMINI.' });
   });
