@@ -1,10 +1,15 @@
 import type { LLMProvider, LLMRatingResult } from '../provider';
 import { buildRatingPrompt, parseRatingResponse, RATING_JSON_SCHEMA } from '../promptUtils';
 
-const MODEL = 'gpt-4o-mini';
+const DEFAULT_MODEL = 'gpt-4o-mini';
 
 export class ChatGptProvider implements LLMProvider {
-  constructor(private readonly apiKey: string) {}
+  private readonly model: string;
+
+  // See ClaudeProvider's constructor comment: falls back to DEFAULT_MODEL on a blank model.
+  constructor(private readonly apiKey: string, model?: string) {
+    this.model = model?.trim() || DEFAULT_MODEL;
+  }
 
   async rateAcceptanceCriteria(userStory: string, submittedText: string): Promise<LLMRatingResult> {
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -14,7 +19,7 @@ export class ChatGptProvider implements LLMProvider {
         Authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({
-        model: MODEL,
+        model: this.model,
         messages: [{ role: 'user', content: buildRatingPrompt(userStory, submittedText) }],
         response_format: {
           type: 'json_schema',
