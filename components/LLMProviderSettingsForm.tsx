@@ -164,7 +164,7 @@ export function LLMProviderSettingsForm({ token, showHeading = true }: { token: 
           />
           {config?.hasApiKey ? (
             <p className="mt-1.5 text-xs font-semibold text-gray-500">
-              A key for {LLM_PROVIDERS.find((p) => p.id === config.provider)?.label} is already saved. Enter a new key to replace it.
+              A key for {LLM_PROVIDERS.find((p) => p.id === config.provider)?.label} is already saved.
             </p>
           ) : null}
 
