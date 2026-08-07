@@ -4,8 +4,8 @@ import {
   isLLMProviderName,
 } from "../../../../../lib/llm/factory";
 
-type UserStoryRow = { user_story_id: string; story_text: string };
-type LLMConfigRow = { provider: string; api_key: string };
+type UserStoryRow = { user_story_id: string; story_text: string; creator_id: string };
+type LLMConfigRow = { provider: string; api_key: string; model: string };
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get("Authorization");
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
 
   const { data: story, error: storyError } = await supabase
     .from("user_story")
-    .select("user_story_id, story_text")
+    .select("user_story_id, story_text, creator_id")
     .eq("user_story_id", userStoryId)
     .maybeSingle();
 
@@ -81,24 +81,26 @@ export async function POST(request: Request) {
   if (!story)
     return Response.json({ error: "User story not found." }, { status: 404 });
 
-  // One global setting today, not per-instructor-of-record: exactly one row is expected to
-  // carry is_active = true. Two active rows makes maybeSingle() itself error, which is reported
-  // below as the same "no usable config" 500 a missing row would give.
+  // Scoped to the instructor who authored this story, not a single global toggle — an
+  // instructor can accumulate multiple config rows over time (POST /api/instructor/llm-config
+  // always inserts, never updates in place), so this takes their most recently saved one.
   const { data: config, error: configError } = await supabase
     .from("instructor_llm_config")
-    .select("provider, api_key")
-    .eq("is_active", true)
+    .select("provider, api_key, model")
+    .eq("user_id", (story as UserStoryRow).creator_id)
+    .order("updated_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (configError)
     return Response.json({ error: configError.message }, { status: 500 });
   if (!config)
     return Response.json(
-      { error: "No active LLM provider is configured." },
+      { error: "The instructor who created this prompt has not configured an LLM provider." },
       { status: 500 },
     );
 
-  const { provider: providerName, api_key: apiKey } = config as LLMConfigRow;
+  const { provider: providerName, api_key: apiKey, model } = config as LLMConfigRow;
   if (!isLLMProviderName(providerName)) {
     return Response.json(
       { error: "Configured LLM provider is invalid." },
@@ -106,7 +108,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const provider = getLLMProvider(providerName, apiKey);
+  const provider = getLLMProvider(providerName, apiKey, model);
   if (!provider) {
     return Response.json(
       { error: "Configured LLM provider is missing an API key." },

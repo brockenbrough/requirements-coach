@@ -1,18 +1,12 @@
 import type { LLMRatingResult } from './provider';
 
-// REQ-FU-2 (Write Acceptance Criteria): evaluate whether the acceptance criteria
-// are clear, testable, and connected to the user story, then give feedback to
-// help the student improve them. Score is 1-10 — a scale of its own for this
-// free-text activity, separate from the Type A quiz's 100-point session score.
-export function buildRatingPrompt(userStory: string, submittedText: string): string {
-  return [
-    'You are grading a student\'s submitted acceptance criteria for a user story.',
-    'Evaluate whether the acceptance criteria are clear, testable, and connected to the user story.',
-    'Give a score from 1 to 10 and feedback that helps the student improve the acceptance criteria.',
-    '',
-    `User story: ${userStory}`,
-    `Submitted acceptance criteria: ${submittedText}`,
-  ].join('\n');
+// REQ-FU-2 (Write Acceptance Criteria): test-mode prompt — sends exactly what the student
+// typed into the input field, nothing else. userStory is intentionally unused; each
+// provider still requests structured output via RATING_JSON_SCHEMA (output_config /
+// response_format / responseSchema), which is what keeps score/feedback populated
+// regardless of what the prompt itself says.
+export function buildRatingPrompt(_userStory: string, submittedText: string): string {
+  return submittedText;
 }
 
 export const RATING_JSON_SCHEMA = {

@@ -45,4 +45,10 @@ describe('getLLMProvider', () => {
     const second = getLLMProvider('CLAUDE', 'test-key');
     expect(first).not.toBe(second);
   });
+
+  it('accepts an optional model without throwing, for every provider', () => {
+    expect(() => getLLMProvider('CLAUDE', 'test-key', 'claude-haiku-4-5')).not.toThrow();
+    expect(() => getLLMProvider('CHATGPT', 'test-key', 'gpt-4o')).not.toThrow();
+    expect(() => getLLMProvider('GEMINI', 'test-key', 'gemini-1.5-flash')).not.toThrow();
+  });
 });
