@@ -96,12 +96,14 @@ export function ActivityLogRow({
               state === 'passed' ? 'bg-brand-teal' : state === 'in-progress' ? 'bg-brand-purple' : 'bg-brand-danger'
             }`}
             style={{
-              width: state === 'in-progress' ? `${(entry.answeredQuestions / entry.totalQuestions) * 100}%` : `${entry.score}%`,
+              width: state === 'in-progress'
+                ? `${(entry.answeredQuestions / entry.totalQuestions) * 100}%`
+                : `${Math.min(100, Math.max(0, entry.maxScore > 0 ? (entry.score / entry.maxScore) * 100 : 0))}%`,
             }}
           />
         </div>
         <div className="mt-1 whitespace-nowrap text-xs font-semibold text-brand-ink-muted">
-          {state === 'in-progress' || state === 'abandoned' ? `${entry.answeredQuestions} of ${entry.totalQuestions} answered` : `${entry.score}%`}
+          {state === 'in-progress' || state === 'abandoned' ? `${entry.answeredQuestions} of ${entry.totalQuestions} answered` : `${entry.maxScore > 0 ? Math.round((entry.score / entry.maxScore) * 100) : 0}%`}
         </div>
       </td>
       <td className="px-4 py-3.5">
