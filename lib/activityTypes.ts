@@ -10,6 +10,7 @@
 export const ACTIVITY_TYPES = [
   'IDENTIFY_WEAK_USER_STORIES',
   'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA',
+  'WRITE_ACCEPTANCE_CRITERIA',
 ] as const;
 
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];

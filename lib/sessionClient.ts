@@ -14,10 +14,11 @@ import { getCachedCompletedAttempts, setCachedCompletedAttempts } from './comple
 import { getCachedActivityLog, setCachedActivityLog } from './activityLogStore';
 import { getCachedCompletedSessions, setCachedCompletedSessions } from './completedSessionsStore';
 import { getCachedScore, setCachedScore } from './scoreStore';
+import { getCachedInstructorStudents, setCachedInstructorStudents } from './instructorStudentsStore';
 import {
-  getCachedInstructorStudents,
-  setCachedInstructorStudents,
-} from './instructorStudentsStore';
+  getCachedAcceptanceCriteriaSubmissions,
+  setCachedAcceptanceCriteriaSubmissions,
+} from './acceptanceCriteriaSubmissionsStore';
 
 // The row shapes themselves live in lib/sessionTypes.ts, which imports nothing, so the routes
 // can share them without importing this 'use client' module. Re-exported here so this file
@@ -386,6 +387,76 @@ export function loadInstructorStudents(
   ).then((result) => {
     if (result.ok) {
       setCachedInstructorStudents(instructorId, result.data.students);
+    }
+    return result;
+  });
+}
+
+/** One mastery title entry as returned by GET /api/students/{id}/titles. */
+export type StudentTitle = {
+  activityType: string;
+  difficultyLevel: number | null;
+  title: string | null;
+};
+
+/**
+ * The student's current mastery title per activity type
+ * (GET /api/students/{studentId}/titles, REQ-GAM-BL-1).
+ *
+ * Not cached: titles change whenever a session completes with passed=true, and the dashboard
+ * that shows them re-mounts on every visit — hitting the network once per page load is cheap
+ * enough that a cache would just risk showing a stale title after a student passes a new level.
+ */
+export function loadStudentTitles(token: string, studentId: string) {
+  return request<{ titles: StudentTitle[] }>(
+    `/api/students/${encodeURIComponent(studentId)}/titles`,
+    { method: 'GET' },
+    token,
+  );
+}
+
+/** One acceptance-criteria submission row as returned by the submissions API. */
+export type SubmissionEntry = {
+  submissionId: string;
+  userStoryId: string;
+  storyText: string;
+  submittedText: string;
+  llmScore: number | null;
+  llmFeedback: string | null;
+  submittedAt: string;
+  gradedAt: string | null;
+};
+
+/**
+ * A student's acceptance-criteria submission history
+ * (GET /api/instructor/students/{studentId}/acceptance-criteria/submissions, GitHub #153).
+ *
+ * Cache-first: returns the stored list on a hit, calls the network only on a miss or when
+ * forceRefresh is true — same pattern as loadActivityLog. The cache is keyed by studentId so
+ * switching between students in the Review page is a hit after the first visit.
+ */
+export function loadAcceptanceCriteriaSubmissions(
+  token: string,
+  studentId: string,
+  options: { forceRefresh?: boolean } = {},
+) {
+  if (!options.forceRefresh) {
+    const cached = getCachedAcceptanceCriteriaSubmissions(studentId);
+    if (cached !== null) {
+      return Promise.resolve<ApiResult<{ submissions: SubmissionEntry[] }>>({
+        ok: true,
+        data: { submissions: cached },
+      });
+    }
+  }
+
+  return request<{ submissions: SubmissionEntry[] }>(
+    `/api/instructor/students/${encodeURIComponent(studentId)}/acceptance-criteria/submissions`,
+    { method: 'GET' },
+    token,
+  ).then((result) => {
+    if (result.ok) {
+      setCachedAcceptanceCriteriaSubmissions(studentId, result.data.submissions);
     }
     return result;
   });

@@ -7,7 +7,7 @@ import { ActivityLogRow } from "../../components/ActivityLogRow";
 import { ACTIVITIES, Difficulty } from "../../lib/activityContent";
 import { toActivityLogEntry } from "../../lib/activityLogTypes";
 import { ActivityState, getActivityState } from "../../lib/activityStore";
-import { type SessionListEntry, loadSessions } from "../../lib/sessionClient";
+import { type SessionListEntry, type StudentTitle, loadSessions, loadStudentTitles } from "../../lib/sessionClient";
 import { useRequireRole } from "../../lib/useRequireRole";
 
 const RECENT_LIMIT = 3;
@@ -29,6 +29,7 @@ export default function DashboardPage() {
     ActivityState
   > | null>(null);
   const [recent, setRecent] = useState<SessionListEntry[] | null>(null);
+  const [titles, setTitles] = useState<StudentTitle[] | null>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -53,6 +54,16 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
+  }, [token, profile?.user_id]);
+
+  useEffect(() => {
+    if (!token || !profile?.user_id) return;
+    let cancelled = false;
+    loadStudentTitles(token, profile.user_id).then((result) => {
+      if (cancelled) return;
+      if (result.ok) setTitles(result.data.titles);
+    });
+    return () => { cancelled = true; };
   }, [token, profile?.user_id]);
 
   // Blank rather than a "logged out" message while useRequireRole's effect redirects — for
@@ -243,13 +254,8 @@ export default function DashboardPage() {
       </h3>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {ACTIVITIES.map((activity) => {
-          const state = statesBySlug?.[activity.slug];
-          const passedLevels =
-            state?.history.filter((h) => h.passed).map((h) => h.level) ?? [];
-          const highest =
-            passedLevels.length > 0
-              ? (Math.max(...passedLevels) as Difficulty)
-              : null;
+          const titleEntry = titles?.find((t) => t.activityType === activity.activityType);
+          const highest = (titleEntry?.difficultyLevel ?? null) as Difficulty | null;
           return (
             <div
               key={activity.slug}
