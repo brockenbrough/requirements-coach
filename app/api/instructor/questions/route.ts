@@ -1,7 +1,8 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { requireInstructor } from '../../../../lib/instructorAuth';
-import { isActivityType } from '../../../../lib/activityTypes';
+import { isActivityType, type ActivityType } from '../../../../lib/activityTypes';
 import { DEFAULT_QUESTION_MAX_SCORE } from '../../../../lib/sessionRules';
+import type { QuizQuestion } from '../../../../lib/quizQuestionTypes';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -13,6 +14,84 @@ type AnswerInput = {
   isCorrect: boolean;
   explanation?: string | null;
 };
+
+type AnswerRow = {
+  answer_id: string;
+  option_text: string;
+  is_correct: boolean;
+  explanation: string | null;
+};
+
+type QuestionRow = {
+  question_id: string;
+  question_prompt: string;
+  difficulty_level: number;
+  activity_type: string;
+  question_to_answer: { answer: AnswerRow | null }[];
+};
+
+/**
+ * GET /api/instructor/questions — the question bank the calling instructor authored, for the
+ * instructor's Question Bank page (GitHub #170). Scoped by question.user_id (GitHub #201) to
+ * guard.user_id, the same way GET /api/instructor/user-stories scopes by creator_id.
+ *
+ * Caveat: question.user_id is nullable, and supabase/seed.sql inserts every question with no
+ * user_id at all (NULL) — so this filter means a fresh instructor sees an empty bank until they
+ * personally add questions via POST /api/instructor/questions. That's the intended behavior,
+ * not a bug: unowned/seeded rows aren't attributed to anyone, so they aren't shown as "yours."
+ *
+ * Joins question -> question_to_answer -> answer to include is_correct and explanation, which
+ * the two existing question-reading routes deliberately omit for the student quiz flow.
+ *
+ * Returns 200 with { questions: [] } for an empty bank — not a 404, same as every other
+ * instructor list route.
+ */
+export async function GET(request: Request) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
+
+  const guard = await requireInstructor(supabase, getToken(request));
+  if (!guard.ok) {
+    return guard.status === 403
+      ? new Response(null, { status: 403 })
+      : Response.json(
+          { error: guard.status === 401 ? 'Unauthorized' : 'Supabase credentials are not configured.' },
+          { status: guard.status },
+        );
+  }
+
+  const { data, error } = await supabase
+    .from('question')
+    .select(
+      'question_id, question_prompt, difficulty_level, activity_type, question_to_answer(answer:answer_id(answer_id, option_text, is_correct, explanation))',
+    )
+    .eq('user_id', guard.user_id)
+    .order('order_number', { ascending: true });
+
+  if (error) return Response.json({ error: error.message }, { status: 500 });
+
+  const questions: QuizQuestion[] = ((data ?? []) as unknown as QuestionRow[]).map((row) => {
+    const answers = row.question_to_answer.map((link) => link.answer).filter((a): a is AnswerRow => a !== null);
+
+    // QuizQuestion.explanation is one string per question, but the database stores explanation
+    // per answer option (supabase/schema.sql) — every seeded answer has its own "Correct: .../
+    // Incorrect: ..." text. We surface the *correct* answer's explanation as the question-level
+    // one: that's already what a student sees as "the" explanation on the feedback route after
+    // answering, so this mirrors an existing convention rather than inventing a new one.
+    const correctAnswer = answers.find((a) => a.is_correct);
+
+    return {
+      id: row.question_id,
+      quizType: row.activity_type as ActivityType,
+      level: row.difficulty_level as 1 | 2 | 3,
+      questionText: row.question_prompt,
+      answerOptions: answers.map((a) => ({ id: a.answer_id, text: a.option_text, isCorrect: a.is_correct })),
+      explanation: correctAnswer?.explanation ?? '',
+    };
+  });
+
+  return Response.json({ questions }, { status: 200 });
+}
 
 /**
  * POST /api/instructor/questions — adds a new question with its answers to the question bank
