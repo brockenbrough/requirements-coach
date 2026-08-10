@@ -193,11 +193,25 @@ export async function POST(request: Request) {
 
   if (questionError) return Response.json({ error: questionError.message }, { status: 500 });
 
+  // An orphaned question with no (or partial) answers is unplayable and pollutes order_number
+  // sequencing for its activity_type — clean it up on any failure below, in child-before-parent
+  // order (question_to_answer's FKs reference both answer and question). Same fire-and-forget,
+  // best-effort style as the session_to_question rollback in app/api/sessions/route.ts: no
+  // transaction (the Supabase JS client doesn't offer one), and the cleanup's own errors are
+  // ignored in favor of surfacing the original failure.
+  async function rollbackAndFail(insertedAnswerIds: string[], message: string) {
+    await supabase!.from('question_to_answer').delete().eq('question_id', questionId);
+    if (insertedAnswerIds.length > 0) {
+      await supabase!.from('answer').delete().in('answer_id', insertedAnswerIds);
+    }
+    await supabase!.from('question').delete().eq('question_id', questionId);
+    return Response.json({ error: message }, { status: 500 });
+  }
+
   const answerIds: string[] = [];
 
   for (const a of answerInputs) {
     const answerId = crypto.randomUUID();
-    answerIds.push(answerId);
 
     const { error: answerError } = await supabase.from('answer').insert({
       answer_id: answerId,
@@ -206,14 +220,16 @@ export async function POST(request: Request) {
       explanation: a.explanation ?? null,
     });
 
-    if (answerError) return Response.json({ error: answerError.message }, { status: 500 });
+    if (answerError) return rollbackAndFail(answerIds, answerError.message);
+
+    answerIds.push(answerId);
 
     const { error: linkError } = await supabase.from('question_to_answer').insert({
       question_id: questionId,
       answer_id: answerId,
     });
 
-    if (linkError) return Response.json({ error: linkError.message }, { status: 500 });
+    if (linkError) return rollbackAndFail(answerIds, linkError.message);
   }
 
   return Response.json({ questionId, answerIds }, { status: 201 });
