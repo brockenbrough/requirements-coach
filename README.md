@@ -1,6 +1,6 @@
-# SSU Starter App V2
+# Requirements Coach
 
-Professor Brockenbrough's Next.js starter with Tailwind CSS, Supabase auth, and a user profile system.
+A gamified practice app that helps students write and evaluate software requirements, built with Next.js, Tailwind CSS, and Supabase.
 
 ## Prerequisites
 
