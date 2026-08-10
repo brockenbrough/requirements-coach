@@ -28,6 +28,12 @@ function queue(table: string, result: Result) {
 
 vi.mock('../../lib/supabase', () => ({
   getSupabaseClient: () => ({
+    auth: {
+      getUser: async (token: string) =>
+        token === 'valid-token'
+          ? { data: { user: { id: 'student-1' } }, error: null }
+          : { data: { user: null }, error: { message: 'Invalid token' } },
+    },
     from: (table: string) => {
       h.state.tables.push(table);
       const queued = h.state.queues[table]?.shift() ?? { data: null, error: null };
@@ -38,8 +44,10 @@ vi.mock('../../lib/supabase', () => ({
 
 import { GET } from '../../app/api/questions/[questionId]/options/route';
 
-function makeRequest(questionId: string) {
-  return new Request(`http://localhost/api/questions/${questionId}/options`);
+function makeRequest(questionId: string, token: string | null = 'valid-token') {
+  return new Request(`http://localhost/api/questions/${questionId}/options`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
 }
 
 const PARAMS = (questionId: string) => ({ params: { questionId } });
@@ -50,6 +58,16 @@ beforeEach(() => {
 });
 
 describe('GET /api/questions/:questionId/options', () => {
+  it('returns 401 without a token', async () => {
+    const res = await GET(makeRequest('q-1', null), PARAMS('q-1'));
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 401 for an invalid token', async () => {
+    const res = await GET(makeRequest('q-1', 'bad-token'), PARAMS('q-1'));
+    expect(res.status).toBe(401);
+  });
+
   it('returns 404 when the question does not exist', async () => {
     queue('question', { data: null, error: null });
     const res = await GET(makeRequest('non-existent-id'), PARAMS('non-existent-id'));
