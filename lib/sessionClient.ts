@@ -349,6 +349,29 @@ export function loadInstructorActivities(token: string) {
   return request<{ sessions: InstructorActivityEntry[] }>('/api/instructor/activities', { method: 'GET' }, token);
 }
 
+/** One mastery title entry as returned by GET /api/students/{id}/titles. */
+export type StudentTitle = {
+  activityType: string;
+  difficultyLevel: number | null;
+  title: string | null;
+};
+
+/**
+ * The student's current mastery title per activity type
+ * (GET /api/students/{studentId}/titles, REQ-GAM-BL-1).
+ *
+ * Not cached: titles change whenever a session completes with passed=true, and the dashboard
+ * that shows them re-mounts on every visit — hitting the network once per page load is cheap
+ * enough that a cache would just risk showing a stale title after a student passes a new level.
+ */
+export function loadStudentTitles(token: string, studentId: string) {
+  return request<{ titles: StudentTitle[] }>(
+    `/api/students/${encodeURIComponent(studentId)}/titles`,
+    { method: 'GET' },
+    token,
+  );
+}
+
 /** One acceptance-criteria submission row as returned by the submissions API. */
 export type SubmissionEntry = {
   submissionId: string;
