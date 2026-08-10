@@ -68,22 +68,19 @@ export default function ActivityDetailPage({
     };
   }, [token, activity, profile?.user_id]);
 
+  // Type B activities (e.g. write-acceptance-criteria) have their own dedicated page under
+  // the same path. The static Next.js route normally wins, but guard here in case the dynamic
+  // segment is somehow matched — redirect rather than showing "Unknown activity."
+  useEffect(() => {
+    if (!loading && authorized && !activity) {
+      router.replace(`/activities/${params.slug}`);
+    }
+  }, [loading, authorized, activity, params.slug, router]);
+
   if (loading || !authorized) return null;
 
   if (!activity) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-[#0e0b1e] px-6 text-center text-[#F3F1FF]">
-        <div>
-          <p className="mb-4">Unknown activity.</p>
-          <Link
-            href="/activities"
-            className="rounded-full bg-[#7C4DFF] px-4 py-2 text-sm font-bold text-white"
-          >
-            Back to activities
-          </Link>
-        </div>
-      </main>
-    );
+    return null;
   }
 
   async function handleStart() {
