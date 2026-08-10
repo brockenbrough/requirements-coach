@@ -154,6 +154,14 @@ function postJson(payload: unknown): RequestInit {
   };
 }
 
+function patchJson(payload: unknown): RequestInit {
+  return {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  };
+}
+
 /**
  * Starts an activity — or picks up the one already running.
  *
@@ -355,13 +363,62 @@ export function loadInstructorActivities(token: string) {
  * The entire question bank (GET /api/instructor/questions, GitHub #170) — what the instructor's
  * Question Bank page renders instead of the old MOCK_QUESTIONS array.
  *
- * Deliberately **not** cached, same reasoning as loadInstructorActivities: nothing on the page
- * that reads this list currently writes back through it (the add/edit modal only updates local
- * React state, not the database), so there's no in-page action that could ever call
- * forceRefresh to invalidate a stale cache.
+ * Deliberately **not** cached, same reasoning as loadInstructorActivities: createQuestion/
+ * updateQuestion update the page's in-memory list directly from their own response instead of
+ * refetching, so there's still no in-page action that would ever call forceRefresh here.
  */
 export function loadInstructorQuestions(token: string) {
   return request<{ questions: QuizQuestion[] }>('/api/instructor/questions', { method: 'GET' }, token);
+}
+
+/** What POST/PATCH /api/instructor/questions echo back — ids only, not a full QuizQuestion. */
+export type SaveQuestionResult = { questionId: string; answerIds: string[] };
+
+/**
+ * Translates a QuizQuestion (UI shape) into the request body POST/PATCH expect (DB-facing field
+ * names). The question-level `explanation` only has anywhere to go on the correct answer — the
+ * database stores explanation per answer option, but QuizQuestion carries just one string, so
+ * that's the only round trip this shape can support.
+ *
+ * includeIds is false for create: the modal's placeholder ids (`q-${Date.now()}`, etc.) aren't
+ * real answer ids, and POST doesn't accept or use them — only PATCH needs an id per option, to
+ * know which existing answer row each entry updates.
+ */
+function answersPayload(question: QuizQuestion, includeIds: boolean) {
+  return question.answerOptions.map((option) => ({
+    ...(includeIds ? { id: option.id } : {}),
+    optionText: option.text,
+    isCorrect: option.isCorrect,
+    ...(option.isCorrect ? { explanation: question.explanation } : {}),
+  }));
+}
+
+/** Adds a new question to the bank (POST /api/instructor/questions, GitHub #121). */
+export function createQuestion(token: string, question: QuizQuestion) {
+  return request<SaveQuestionResult>(
+    '/api/instructor/questions',
+    postJson({
+      questionPrompt: question.questionText,
+      activityType: question.quizType,
+      difficultyLevel: question.level,
+      answers: answersPayload(question, false),
+    }),
+    token,
+  );
+}
+
+/** Edits an existing question in place (PATCH /api/instructor/questions/{id}, GitHub #158). */
+export function updateQuestion(token: string, question: QuizQuestion) {
+  return request<SaveQuestionResult>(
+    `/api/instructor/questions/${encodeURIComponent(question.id)}`,
+    patchJson({
+      questionPrompt: question.questionText,
+      activityType: question.quizType,
+      difficultyLevel: question.level,
+      answers: answersPayload(question, true),
+    }),
+    token,
+  );
 }
 
 /** One student row as returned by GET /api/instructor/students. */
