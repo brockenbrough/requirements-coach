@@ -33,3 +33,9 @@ export function setCachedCompletedSessions(studentId: string, sessions: SessionL
   store[studentId] = sessions;
   writeStore(store);
 }
+
+/** Drops every entry, for every student — see lib/clientCaches.ts. */
+export function clearCachedCompletedSessions(): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(STORAGE_KEY);
+}

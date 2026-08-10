@@ -37,3 +37,9 @@ export function setCachedActivityLog(studentId: string, activities: SessionListE
   store[studentId] = activities;
   writeStore(store);
 }
+
+/** Drops every entry, for every student — see lib/clientCaches.ts. */
+export function clearCachedActivityLog(): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(STORAGE_KEY);
+}

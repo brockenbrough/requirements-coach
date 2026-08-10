@@ -31,3 +31,9 @@ export function setCachedScore(studentId: string, score: number): void {
   store[studentId] = score;
   writeStore(store);
 }
+
+/** Drops every entry, for every student — see lib/clientCaches.ts. */
+export function clearCachedScore(): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(STORAGE_KEY);
+}

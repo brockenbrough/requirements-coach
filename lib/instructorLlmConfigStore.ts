@@ -70,3 +70,9 @@ export function setCachedLlmConfigForSelection(
   store[selectionKey(userId, provider, model)] = data;
   writeStore(store);
 }
+
+/** Drops both slots, for every instructor — see lib/clientCaches.ts. */
+export function clearCachedLlmConfig(): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(STORAGE_KEY);
+}

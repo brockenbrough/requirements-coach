@@ -36,3 +36,9 @@ export function setCachedInstructorStudents(instructorId: string, students: Stud
   store[instructorId] = students;
   writeStore(store);
 }
+
+/** Drops every entry, for every instructor — see lib/clientCaches.ts. */
+export function clearCachedInstructorStudents(): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(STORAGE_KEY);
+}

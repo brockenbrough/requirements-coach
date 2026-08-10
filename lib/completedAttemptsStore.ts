@@ -7,7 +7,11 @@
 import type { ActivityType } from './activityTypes';
 import type { CompletedAttempt } from './sessionClient';
 
-const STORAGE_KEY = 'rc_completed_attempts_v1';
+// Bumped to v2: loadCompletedAttempts now stores completedAt already normalized to a real
+// instant (lib/dateTime.ts), so v1 entries hold the old zone-less form and would keep rendering
+// an hour or two off until something happened to force a refresh. This is what the version in
+// the key is for — the stale entries are simply never read again.
+const STORAGE_KEY = 'rc_completed_attempts_v2';
 
 type CompletedAttemptsStore = Partial<Record<string, CompletedAttempt[]>>;
 
@@ -43,4 +47,10 @@ export function setCachedCompletedAttempts(
   const store = readStore();
   store[cacheKey(studentId, activityType)] = attempts;
   writeStore(store);
+}
+
+/** Drops every entry, for every student and activity type — see lib/clientCaches.ts. */
+export function clearCachedCompletedAttempts(): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(STORAGE_KEY);
 }

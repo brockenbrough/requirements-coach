@@ -37,3 +37,9 @@ export function setCachedAcceptanceCriteriaSubmissions(studentId: string, submis
   store[studentId] = submissions;
   writeStore(store);
 }
+
+/** Drops every entry, for every student — see lib/clientCaches.ts. */
+export function clearCachedAcceptanceCriteriaSubmissions(): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(STORAGE_KEY);
+}
