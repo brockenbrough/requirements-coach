@@ -1,25 +1,24 @@
+import Link from 'next/link';
 import type { StudentAggregate } from '../lib/activityLogTypes';
 
 /**
  * One student's card — shared by the Instructor Dashboard's roster preview and the All
  * Students page (GitHub #82) so the two never drift on what a student's summary looks like.
- * Purely presentational: callers decide what a click does (toggle a filter in place, or
- * navigate elsewhere).
+ * Links to the student's detail page (GitHub #127) — the name travels along as a query param
+ * since that page's attempt data is currently mock (see lib/mockStudentAttempts.ts), not looked
+ * up from studentId against anything real yet.
  */
 export function InstructorStudentCard({
   student,
   isSelected = false,
-  onClick,
 }: {
   student: StudentAggregate;
   isSelected?: boolean;
-  onClick?: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-brand-lg border p-4 text-left transition ${
+    <Link
+      href={`/instructor/students/${encodeURIComponent(student.studentId)}?name=${encodeURIComponent(student.studentName)}`}
+      className={`block rounded-brand-lg border p-4 text-left transition ${
         isSelected
           ? 'border-brand-purple bg-brand-purple/5'
           : student.needsAttention
@@ -41,6 +40,6 @@ export function InstructorStudentCard({
       <p className="mt-0.5 text-xs font-semibold text-gray-500">
         Average score: {student.averageScore === null ? '—' : `${student.averageScore}%`}
       </p>
-    </button>
+    </Link>
   );
 }
