@@ -1,7 +1,6 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../../../components/AppShell';
 import { InstructorStudentCard } from '../../../components/InstructorStudentCard';
@@ -36,7 +35,6 @@ function compareByScore(a: StudentAggregate, b: StudentAggregate, direction: 1 |
  * (GitHub #171), so an enrolled student who never started an activity has no row to aggregate.
  */
 export default function AllStudentsPage() {
-  const router = useRouter();
   const { token, profile, loading, authorized } = useRequireRole('instructor');
 
   const [entries, setEntries] = useState<StudentActivitySummary[] | null>(null);
@@ -122,12 +120,6 @@ export default function AllStudentsPage() {
     setPage(1);
   }
 
-  // No per-student detail page exists yet — this is the same "jump to the filtered Activity
-  // Log" the dashboard's own roster cards do, just reachable from a different page.
-  function goToStudent(studentId: string) {
-    router.push(`/instructor?student=${encodeURIComponent(studentId)}`);
-  }
-
   if (loading || !authorized) return null;
 
   return (
@@ -139,7 +131,7 @@ export default function AllStudentsPage() {
 
         <h1 className="mb-1.5 text-2xl font-extrabold text-brand-navy">All Students</h1>
         <p className="mb-6 max-w-2xl text-sm font-semibold text-gray-500">
-          Every student in the class. Search by name, sort, or click through to a student&apos;s activity log.
+          Every student in the class. Search by name, sort, or click through to a student&apos;s detail page.
         </p>
 
         {error ? (
@@ -187,7 +179,7 @@ export default function AllStudentsPage() {
             ) : (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {pageStudents.map((student) => (
-                  <InstructorStudentCard key={student.studentId} student={student} onClick={() => goToStudent(student.studentId)} />
+                  <InstructorStudentCard key={student.studentId} student={student} />
                 ))}
               </div>
             )}

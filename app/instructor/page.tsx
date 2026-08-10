@@ -168,7 +168,7 @@ function InstructorDashboardContent() {
                 View all students →
               </Link>
             </div>
-            <InstructorRoster students={roster} selectedStudentId={studentId} onSelectStudent={handleStudentChange} />
+            <InstructorRoster students={roster} selectedStudentId={studentId} />
 
             <InstructorFilters
               students={students}

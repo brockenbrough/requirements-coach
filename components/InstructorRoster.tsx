@@ -11,8 +11,11 @@ const INITIAL_VISIBLE_COUNT = 6;
 /**
  * The class roster: one card per student, flagging low average scores or repeated abandons so
  * "who needs help" (the literal goal of GitHub #82's user story) reads at a glance rather than
- * requiring a scan of every row in the attempts table. Clicking a card sets the Student filter
- * below to that student. For the full class, see app/instructor/students/page.tsx instead.
+ * requiring a scan of every row in the attempts table. Each card links to that student's detail
+ * page (GitHub #127) — selectedStudentId still highlights whichever student the Student filter
+ * below is currently set to (via InstructorFilters' dropdown), it just no longer changes from
+ * clicking a card here now that a card click navigates instead. For the full class, see
+ * app/instructor/students/page.tsx instead.
  *
  * Collapsed to INITIAL_VISIBLE_COUNT by default — a real class can run well past what's
  * comfortable to scan at once, and summarizeStudents already put the students most worth
@@ -21,11 +24,9 @@ const INITIAL_VISIBLE_COUNT = 6;
 export function InstructorRoster({
   students,
   selectedStudentId,
-  onSelectStudent,
 }: {
   students: StudentAggregate[];
   selectedStudentId: string;
-  onSelectStudent: (studentId: string) => void;
 }) {
   const [showAllStudents, setShowAllStudents] = useState(false);
 
@@ -36,12 +37,7 @@ export function InstructorRoster({
     <div className="mb-6">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {visibleStudents.map((student) => (
-          <InstructorStudentCard
-            key={student.studentId}
-            student={student}
-            isSelected={selectedStudentId === student.studentId}
-            onClick={() => onSelectStudent(selectedStudentId === student.studentId ? 'all' : student.studentId)}
-          />
+          <InstructorStudentCard key={student.studentId} student={student} isSelected={selectedStudentId === student.studentId} />
         ))}
       </div>
 
