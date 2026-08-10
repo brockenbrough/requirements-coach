@@ -25,12 +25,14 @@ function ACSubmissionsContent() {
   const { token, loading, authorized } = useRequireRole('instructor');
   const searchParams = useSearchParams();
 
+  const [allSubmissions, setAllSubmissions] = useState<InstructorACSubmission[] | null>(null);
   const [submissions, setSubmissions] = useState<InstructorACSubmission[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [studentId, setStudentId] = useState<StudentFilterValue>('all');
   const [sort, setSort] = useState<InstructorSortOrder>('newest');
   const [page, setPage] = useState(1);
 
+  // Load all submissions once to populate the student dropdown.
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
@@ -38,6 +40,7 @@ function ACSubmissionsContent() {
     loadInstructorACSubmissions(token).then((result) => {
       if (cancelled) return;
       if (result.ok) {
+        setAllSubmissions(result.data.submissions);
         setSubmissions(result.data.submissions);
       } else {
         setError(result.error);
@@ -49,13 +52,35 @@ function ACSubmissionsContent() {
     };
   }, [token]);
 
+  // Re-fetch from API when student filter changes — server-side filter is reliable.
+  useEffect(() => {
+    if (!token || allSubmissions === null) return;
+    let cancelled = false;
+
+    if (studentId === 'all') {
+      setSubmissions(allSubmissions);
+      return;
+    }
+
+    loadInstructorACSubmissions(token, { studentId }).then((result) => {
+      if (cancelled) return;
+      if (result.ok) setSubmissions(result.data.submissions);
+      else setError(result.error);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, studentId, allSubmissions]);
+
   useEffect(() => {
     const studentParam = searchParams.get('student');
     if (studentParam) setStudentId(studentParam);
   }, [searchParams]);
 
   const students = useMemo(() => {
-    if (!submissions) return [];
+    if (!allSubmissions) return [];
+    const submissions = allSubmissions;
     const seen = new Map<string, string>();
     for (const s of submissions) {
       if (!seen.has(s.studentId)) seen.set(s.studentId, s.studentName);
@@ -66,8 +91,7 @@ function ACSubmissionsContent() {
   }, [submissions]);
 
   const filteredSorted = useMemo(() => {
-    const rows = (submissions ?? []).filter((s) => studentId === 'all' || s.studentId === studentId);
-    return [...rows].sort((a, b) => {
+    return [...(submissions ?? [])].sort((a, b) => {
       if (sort === 'oldest') return new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime();
       if (sort === 'lowest') {
         if (a.llmScore === null) return 1;
@@ -115,36 +139,30 @@ function ACSubmissionsContent() {
           <p className="text-sm font-semibold text-gray-500">Loading…</p>
         ) : (
           <>
-            <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
-              <label className="block text-xs font-extrabold uppercase tracking-wide text-gray-400">
-                Student
-                <select
-                  value={studentId}
-                  onChange={(e) => handleStudentChange(e.target.value)}
-                  className="mt-1 block rounded-brand-md border border-gray-300 bg-white px-3.5 py-2 text-sm font-bold text-gray-600 outline-none transition focus:border-brand-purple"
-                >
-                  <option value="all">All students</option>
-                  {students.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+            <div className="mb-5 flex flex-wrap items-center gap-3">
+              <select
+                value={studentId}
+                onChange={(e) => handleStudentChange(e.target.value)}
+                className="appearance-none rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm outline-none transition hover:border-brand-purple focus:border-brand-purple focus:ring-2 focus:ring-brand-purple/20"
+              >
+                <option value="all">All students</option>
+                {students.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
 
-              <label className="block text-xs font-extrabold uppercase tracking-wide text-gray-400">
-                Sort
-                <select
-                  value={sort}
-                  onChange={(e) => handleSortChange(e.target.value as InstructorSortOrder)}
-                  className="mt-1 block rounded-brand-md border border-gray-300 bg-white px-3.5 py-2 text-sm font-bold text-gray-600 outline-none transition focus:border-brand-purple"
-                >
-                  <option value="newest">Newest first</option>
-                  <option value="oldest">Oldest first</option>
-                  <option value="lowest">Lowest score first</option>
-                  <option value="highest">Highest score first</option>
-                </select>
-              </label>
+              <select
+                value={sort}
+                onChange={(e) => handleSortChange(e.target.value as InstructorSortOrder)}
+                className="appearance-none rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm outline-none transition hover:border-brand-purple focus:border-brand-purple focus:ring-2 focus:ring-brand-purple/20"
+              >
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+                <option value="lowest">Lowest score first</option>
+                <option value="highest">Highest score first</option>
+              </select>
             </div>
 
             {pageRows.length === 0 ? (
