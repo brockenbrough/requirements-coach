@@ -81,9 +81,11 @@ export function summarizeStudents(entries: StudentActivitySummary[]): StudentAgg
 
   return [...byStudent.entries()]
     .map(([studentId, list]) => {
-      const completed = list.filter((entry) => entry.status === 'completed');
+      const completed = list.filter((entry) => entry.status === 'completed' && entry.maxScore > 0);
       const averageScore =
-        completed.length === 0 ? null : Math.round(completed.reduce((sum, entry) => sum + entry.score, 0) / completed.length);
+        completed.length === 0
+          ? null
+          : Math.round(completed.reduce((sum, entry) => sum + (entry.score / entry.maxScore) * 100, 0) / completed.length);
       const abandonedCount = list.filter((entry) => entry.status === 'abandoned').length;
 
       return {

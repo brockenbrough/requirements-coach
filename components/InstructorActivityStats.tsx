@@ -6,9 +6,11 @@ export function InstructorActivityStats({ entries }: { entries: StudentActivityS
   return (
     <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
       {ACTIVITIES.map((activity) => {
-        const completed = entries.filter((entry) => entry.activityType === activity.activityType && entry.status === 'completed');
+        const completed = entries.filter((entry) => entry.activityType === activity.activityType && entry.status === 'completed' && entry.maxScore > 0);
         const average =
-          completed.length === 0 ? null : Math.round(completed.reduce((sum, entry) => sum + entry.score, 0) / completed.length);
+          completed.length === 0
+            ? null
+            : Math.round(completed.reduce((sum, entry) => sum + (entry.score / entry.maxScore) * 100, 0) / completed.length);
         const passRate =
           completed.length === 0 ? null : Math.round((completed.filter((entry) => entry.passed).length / completed.length) * 100);
 

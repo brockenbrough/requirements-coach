@@ -1,12 +1,9 @@
 import type { ActivityType } from './activityTypes';
 
 /**
- * 'write-acceptance-criteria' is the Type B activity from GitHub #149 (REQ-FU-2) — it deliberately
- * has no entry in ACTIVITIES below (no question bank, no activity_type, no session_log row is
- * ever created for it; see app/activities/write-acceptance-criteria/page.tsx). It's included in
- * this union purely so ActivityCard (components/ActivityCard.tsx) and the mock leveling store
- * (lib/activityStore.ts) can be typed uniformly across all three activities on /activities,
- * instead of a fourth, differently-typed card component.
+ * 'write-acceptance-criteria' is the Type B (LLM-graded) activity from GitHub #149 (REQ-FU-2).
+ * Unlike the MCQ activities it has no questionBank — students write free-text answers that are
+ * scored by AI, not by picking from a fixed set of options.
  */
 export type ActivitySlug = 'weak-user-stories' | 'weak-acceptance-criteria' | 'write-acceptance-criteria';
 
@@ -41,7 +38,8 @@ export type ActivityDefinition = {
   instructions: string;
   category: string;
   titles: Record<Difficulty, string>;
-  questionBank: Question[];
+  /** MCQ activities populate this; LLM-graded activities (e.g. WRITE_ACCEPTANCE_CRITERIA) omit it. */
+  questionBank?: Question[];
 };
 
 function opt(id: string, text: string, score: number, correct: boolean, explanation: string): AnswerOption {
@@ -341,6 +339,16 @@ export const ACTIVITIES: ActivityDefinition[] = [
     titles: { 1: 'Criteria Novice', 2: 'Criteria Analyst', 3: 'Criteria Expert' },
     questionBank: weakAcceptanceCriteria,
   },
+  {
+    slug: 'write-acceptance-criteria',
+    activityType: 'WRITE_ACCEPTANCE_CRITERIA',
+    name: 'Write Acceptance Criteria',
+    summary: 'Given a user story, write acceptance criteria that are clear, complete, and testable — then get AI feedback on your answer.',
+    instructions:
+      'You\'ll be given a user story. Write acceptance criteria for it. Your answer is scored by AI based on clarity, completeness, and testability.',
+    category: 'Acceptance Criteria',
+    titles: { 1: 'AC Beginner', 2: 'AC Practitioner', 3: 'AC Expert' },
+  },
 ];
 
 export function getActivity(slug: string): ActivityDefinition | undefined {
@@ -353,9 +361,9 @@ export function getActivityByType(activityType: string): ActivityDefinition | un
 }
 
 export function questionsForLevel(activity: ActivityDefinition, level: Difficulty): Question[] {
-  return activity.questionBank.filter((q) => q.difficulty === level);
+  return (activity.questionBank ?? []).filter((q) => q.difficulty === level);
 }
 
 export function getQuestion(activity: ActivityDefinition, questionId: string): Question | undefined {
-  return activity.questionBank.find((q) => q.id === questionId);
+  return (activity.questionBank ?? []).find((q) => q.id === questionId);
 }
