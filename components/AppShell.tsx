@@ -9,7 +9,7 @@ import { loadStudentScore } from '../lib/sessionClient';
 import { LLMProviderSettingsModal } from './LLMProviderSettingsModal';
 import { useUser } from './UserProvider';
 
-type NavKey = 'dashboard' | 'activities' | 'profile' | 'instructor' | 'instructor-questions' | 'instructor-settings';
+type NavKey = 'dashboard' | 'activities' | 'profile' | 'instructor' | 'instructor-questions' | 'instructor-settings' | 'instructor-ac';
 
 const STUDENT_NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
   { key: 'dashboard', label: 'Dashboard', href: '/dashboard' },
@@ -28,6 +28,7 @@ const STUDENT_NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
 const INSTRUCTOR_NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
   { key: 'instructor', label: 'Instructor Dashboard', href: '/instructor' },
   { key: 'instructor-questions', label: 'Question Bank', href: '/instructor/questions' },
+  { key: 'instructor-ac', label: 'AC Submissions', href: '/instructor/acceptance-criteria' },
   { key: 'profile', label: 'Profile', href: '/profile' },
   { key: 'instructor-settings', label: 'LLM Provider Settings', href: '/instructor/settings' },
 ];
@@ -80,6 +81,15 @@ function BookIcon() {
   );
 }
 
+function PencilIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5Z" />
+    </svg>
+  );
+}
+
 function GearIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -121,6 +131,7 @@ const NAV_ICONS: Record<NavKey, () => JSX.Element> = {
   profile: UserIcon,
   instructor: UsersIcon,
   'instructor-questions': BookIcon,
+  'instructor-ac': PencilIcon,
   'instructor-settings': GearIcon,
 };
 
