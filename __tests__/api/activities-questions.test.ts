@@ -31,6 +31,12 @@ function queue(table: string, result: Result) {
 
 vi.mock('../../lib/supabase', () => ({
   getSupabaseClient: () => ({
+    auth: {
+      getUser: async (token: string) =>
+        token === 'valid-token'
+          ? { data: { user: { id: 'student-1' } }, error: null }
+          : { data: { user: null }, error: { message: 'Invalid token' } },
+    },
     from: (table: string) => {
       h.state.tables.push(table);
       const queued = h.state.queues[table]?.shift() ?? { data: [], error: null };
@@ -41,9 +47,9 @@ vi.mock('../../lib/supabase', () => ({
 
 import { GET } from '../../app/api/activities/[activityType]/questions/route';
 
-function makeRequest(activityType: string, difficulty?: string) {
+function makeRequest(activityType: string, difficulty?: string, token: string | null = 'valid-token') {
   const url = `http://localhost/api/activities/${activityType}/questions${difficulty ? `?difficulty=${difficulty}` : ''}`;
-  return new Request(url);
+  return new Request(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
 }
 
 const PARAMS = (activityType: string) => ({ params: { activityType } });
@@ -55,6 +61,16 @@ beforeEach(() => {
 });
 
 describe('GET /api/activities/:activityType/questions', () => {
+  it('returns 401 without a token', async () => {
+    const res = await GET(makeRequest('IDENTIFY_WEAK_USER_STORIES', '1', null), PARAMS('IDENTIFY_WEAK_USER_STORIES'));
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 401 for an invalid token', async () => {
+    const res = await GET(makeRequest('IDENTIFY_WEAK_USER_STORIES', '1', 'bad-token'), PARAMS('IDENTIFY_WEAK_USER_STORIES'));
+    expect(res.status).toBe(401);
+  });
+
   it('returns 400 for an unknown activity type', async () => {
     const res = await GET(makeRequest('UNKNOWN_ACTIVITY', '1'), PARAMS('UNKNOWN_ACTIVITY'));
     expect(res.status).toBe(400);

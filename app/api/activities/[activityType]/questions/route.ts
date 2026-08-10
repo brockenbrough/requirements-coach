@@ -4,6 +4,11 @@ import { isActivityType } from '../../../../../lib/activityTypes';
 // REQ-DL-1.1: valid difficulty levels are 1 (easy), 2 (medium), 3 (hard).
 const VALID_DIFFICULTY_LEVELS = [1, 2, 3];
 
+function getToken(request: Request): string | null {
+  const auth = request.headers.get('Authorization');
+  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+}
+
 /**
  * GET /api/activities/:activityType/questions?difficulty=1
  *
@@ -11,6 +16,8 @@ const VALID_DIFFICULTY_LEVELS = [1, 2, 3];
  * that the session-start logic can draw 4 at random.
  *
  * AC summary:
+ *  - 401 if the bearer token is missing or invalid (GitHub #170: this route was previously
+ *    reachable with no credentials at all, on the service-role client)
  *  - 400 if activityType is not a known value
  *  - 400 if difficulty is not 1, 2, or 3
  *  - 200 with an empty array if no questions exist for the combination
@@ -22,6 +29,20 @@ export async function GET(
 ) {
   const { activityType } = params;
 
+  const token = getToken(request);
+  if (!token) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return Response.json(
+      { error: 'Supabase credentials are not configured.' },
+      { status: 500 },
+    );
+  }
+
+  const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+  if (authError || !user) return Response.json({ error: 'Invalid or expired token.' }, { status: 401 });
+
   if (!isActivityType(activityType)) {
     return Response.json({ error: 'Unknown activity type.' }, { status: 400 });
   }
@@ -32,14 +53,6 @@ export async function GET(
     return Response.json(
       { error: 'Difficulty level must be 1, 2, or 3.' },
       { status: 400 },
-    );
-  }
-
-  const supabase = getSupabaseClient();
-  if (!supabase) {
-    return Response.json(
-      { error: 'Supabase credentials are not configured.' },
-      { status: 500 },
     );
   }
 

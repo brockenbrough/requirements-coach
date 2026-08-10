@@ -1,6 +1,11 @@
 import { getSupabaseClient } from '../../../../../lib/supabase';
 import { shuffleArray } from '../../../../../lib/shuffleArray';
 
+function getToken(request: Request): string | null {
+  const auth = request.headers.get('Authorization');
+  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+}
+
 /**
  * GET /api/questions/:questionId/options
  *
@@ -9,6 +14,8 @@ import { shuffleArray } from '../../../../../lib/shuffleArray';
  * revealed after the student submits via POST .../answers + POST .../feedback.
  *
  * AC summary:
+ *  - 401 if the bearer token is missing or invalid (GitHub #170: this route was previously
+ *    reachable with no credentials at all, on the service-role client)
  *  - 404 if the question does not exist
  *  - 200 with all options (answer_id, option_text) — no is_correct, no explanation
  *
@@ -16,10 +23,13 @@ import { shuffleArray } from '../../../../../lib/shuffleArray';
  * Score will be included here once that column is added.
  */
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: { questionId: string } },
 ) {
   const { questionId } = params;
+
+  const token = getToken(request);
+  if (!token) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
   const supabase = getSupabaseClient();
   if (!supabase) {
@@ -28,6 +38,9 @@ export async function GET(
       { status: 500 },
     );
   }
+
+  const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+  if (authError || !user) return Response.json({ error: 'Invalid or expired token.' }, { status: 401 });
 
   // Check the question exists before fetching its options.
   const { data: question, error: questionError } = await supabase

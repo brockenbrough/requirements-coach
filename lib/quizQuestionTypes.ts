@@ -7,12 +7,12 @@ export type QuizAnswerOption = {
 };
 
 /**
- * One question as the Instructor's "Add Question" form (GitHub #120) creates it. Deliberately
- * its own shape rather than lib/activityContent.ts's Question/AnswerOption (built for the
- * legacy student-facing mock, with a fixed 25-point maxScore and a per-option explanation baked
- * in) — this one is designed to be what a real "create a question" endpoint would accept and
- * return, so lib/mockQuestions.ts is the only thing that needs replacing once that endpoint
- * exists; QuestionFormModal, AnswerOptionField and app/instructor/questions/page.tsx don't change.
+ * One question as the Instructor's "Add Question" form (GitHub #120) creates it, and as
+ * GET /api/instructor/questions (GitHub #170) returns it. Deliberately its own shape rather
+ * than lib/activityContent.ts's Question/AnswerOption (built for the legacy student-facing
+ * mock, with a fixed 25-point maxScore and a per-option explanation baked in) — this one is
+ * what the real question-bank endpoints accept and return; QuestionFormModal, AnswerOptionField
+ * and app/instructor/questions/page.tsx don't need to change shape around it.
  */
 export type QuizQuestion = {
   id: string;

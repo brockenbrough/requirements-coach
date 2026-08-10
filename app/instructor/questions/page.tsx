@@ -1,11 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AppShell } from '../../../components/AppShell';
 import { QuestionFormModal } from '../../../components/QuestionFormModal';
 import { ACTIVITIES, getActivityByType } from '../../../lib/activityContent';
 import type { ActivityType } from '../../../lib/activityTypes';
-import { MOCK_QUESTIONS } from '../../../lib/mockQuestions';
+import { loadInstructorQuestions } from '../../../lib/sessionClient';
 import type { QuizQuestion } from '../../../lib/quizQuestionTypes';
 import { useRequireRole } from '../../../lib/useRequireRole';
 
@@ -26,23 +26,43 @@ function EditIcon() {
 type ModalState = { mode: 'add' } | { mode: 'edit'; question: QuizQuestion };
 
 /**
- * Read-only browse of the question bank, plus adding (GitHub #120) and editing (GitHub #158) a
- * question — both through the same popup form. Everything here runs on MOCK_QUESTIONS in local
- * state; see lib/mockQuestions.ts for what replacing it with a real fetch/mutation involves.
+ * Read-only browse of the question bank (GitHub #170, fetched from GET /api/instructor/questions),
+ * plus adding (GitHub #120) and editing (GitHub #158) a question — both through the same popup
+ * form. The add/edit flow still only updates local React state; wiring it to the existing
+ * POST /api/instructor/questions is a separate story.
  */
 export default function InstructorQuestionsPage() {
-  const { loading, authorized } = useRequireRole('instructor');
+  const { token, loading, authorized } = useRequireRole('instructor');
 
-  const [questions, setQuestions] = useState<QuizQuestion[]>(MOCK_QUESTIONS);
+  const [questions, setQuestions] = useState<QuizQuestion[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [activityType, setActivityType] = useState<ActivityType>(ACTIVITIES[0].activityType);
   const [level, setLevel] = useState<1 | 2 | 3 | 'all'>('all');
   const [modalState, setModalState] = useState<ModalState | null>(null);
   const [highlight, setHighlight] = useState<{ id: string; label: string } | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+
+    loadInstructorQuestions(token).then((result) => {
+      if (cancelled) return;
+      if (result.ok) {
+        setQuestions(result.data.questions);
+      } else {
+        setError(result.error);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
   if (loading || !authorized) return null;
 
-  const visibleQuestions = questions.filter((question) => {
+  const visibleQuestions = (questions ?? []).filter((question) => {
     if (question.quizType !== activityType) return false;
     if (level !== 'all' && question.level !== level) return false;
     return true;
@@ -51,10 +71,12 @@ export default function InstructorQuestionsPage() {
   function handleSaveQuestion(question: QuizQuestion) {
     // The id already existing in state is what tells an edit and a new question apart — the
     // form itself doesn't need to report which one it was.
-    const isEdit = questions.some((existing) => existing.id === question.id);
+    const isEdit = (questions ?? []).some((existing) => existing.id === question.id);
 
     setQuestions((current) =>
-      isEdit ? current.map((existing) => (existing.id === question.id ? question : existing)) : [question, ...current],
+      isEdit
+        ? (current ?? []).map((existing) => (existing.id === question.id ? question : existing))
+        : [question, ...(current ?? [])],
     );
 
     // Jump the view to wherever the question landed — otherwise a save that also moved the
@@ -77,7 +99,7 @@ export default function InstructorQuestionsPage() {
           <div>
             <h1 className="mb-1.5 text-2xl font-extrabold text-brand-navy">Question Bank</h1>
             <p className="max-w-2xl text-sm font-semibold text-gray-500">
-              Every question across every activity and difficulty level. Add a new question, or edit an existing one, at any level.
+              Every question you've added, across every activity and difficulty level. Add a new question, or edit an existing one, at any level.
             </p>
           </div>
           <button
@@ -106,105 +128,115 @@ export default function InstructorQuestionsPage() {
           </div>
         ) : null}
 
-        <div className="mb-6 mt-6 flex flex-wrap items-center gap-4">
-          <div className="flex flex-wrap gap-1.5">
-            {ACTIVITIES.map((item) => (
-              <button
-                key={item.slug}
-                type="button"
-                onClick={() => setActivityType(item.activityType)}
-                className={`rounded-full border px-3.5 py-1.5 text-xs font-bold transition ${
-                  activityType === item.activityType
-                    ? 'border-brand-purple bg-brand-purple text-white'
-                    : 'border-gray-300 bg-white text-gray-600 hover:border-brand-purple hover:text-brand-purple'
-                }`}
-              >
-                {item.name}
-              </button>
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {LEVEL_OPTIONS.map((lvl) => (
-              <button
-                key={lvl}
-                type="button"
-                onClick={() => setLevel(lvl)}
-                className={`rounded-full border px-3.5 py-1.5 text-xs font-bold transition ${
-                  level === lvl
-                    ? 'border-brand-purple bg-brand-purple text-white'
-                    : 'border-gray-300 bg-white text-gray-600 hover:border-brand-purple hover:text-brand-purple'
-                }`}
-              >
-                {lvl === 'all' ? 'All levels' : LEVEL_LABEL[lvl]}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          {visibleQuestions.length === 0 ? (
-            <p className="rounded-brand-lg border border-gray-100 bg-gray-50 p-6 text-center text-sm font-semibold text-gray-500">
-              No questions yet at this level.
-            </p>
-          ) : (
-            visibleQuestions.map((question) => (
-              <div
-                key={question.id}
-                className={`rounded-brand-lg border bg-gray-50 p-5 transition ${
-                  question.id === highlight?.id ? 'border-brand-teal/50 ring-2 ring-brand-teal/30' : 'border-gray-100'
-                }`}
-              >
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="inline-block rounded-full bg-white px-2.5 py-1 text-xs font-extrabold text-gray-500">
-                      {LEVEL_LABEL[question.level]} · Level {question.level}
-                    </span>
-                    {question.id === highlight?.id ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-brand-teal/20 px-2.5 py-1 text-[11px] font-extrabold text-brand-teal-dark">
-                        {highlight.label}
-                      </span>
-                    ) : null}
-                  </div>
+        {error ? (
+          <p className="mt-6 rounded-brand-lg border border-brand-danger/40 bg-brand-danger/10 p-4 text-sm font-semibold text-brand-danger-light">
+            {error}
+          </p>
+        ) : questions === null ? (
+          <p className="mt-6 text-sm font-semibold text-gray-500">Loading…</p>
+        ) : (
+          <>
+            <div className="mb-6 mt-6 flex flex-wrap items-center gap-4">
+              <div className="flex flex-wrap gap-1.5">
+                {ACTIVITIES.map((item) => (
                   <button
+                    key={item.slug}
                     type="button"
-                    onClick={() => setModalState({ mode: 'edit', question })}
-                    aria-label="Edit this question"
-                    title="Edit this question"
-                    className="flex h-8 w-8 flex-none items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 transition hover:border-brand-purple hover:text-brand-purple"
+                    onClick={() => setActivityType(item.activityType)}
+                    className={`rounded-full border px-3.5 py-1.5 text-xs font-bold transition ${
+                      activityType === item.activityType
+                        ? 'border-brand-purple bg-brand-purple text-white'
+                        : 'border-gray-300 bg-white text-gray-600 hover:border-brand-purple hover:text-brand-purple'
+                    }`}
                   >
-                    <EditIcon />
+                    {item.name}
                   </button>
-                </div>
-                <p className="mb-4 text-sm font-bold text-brand-navy">{question.questionText}</p>
-                <div className="space-y-2">
-                  {question.answerOptions.map((option) => (
-                    <div
-                      key={option.id}
-                      className={`rounded-brand-md border p-3 ${
-                        option.isCorrect ? 'border-brand-teal/40 bg-brand-teal/10' : 'border-gray-200 bg-white'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <p className={`text-sm font-semibold ${option.isCorrect ? 'text-brand-teal-dark' : 'text-gray-700'}`}>
-                          {option.text}
-                        </p>
-                        {option.isCorrect ? (
-                          <span className="flex-none rounded-full bg-brand-teal/20 px-2 py-0.5 text-[11px] font-extrabold text-brand-teal-dark">
-                            Correct
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {LEVEL_OPTIONS.map((lvl) => (
+                  <button
+                    key={lvl}
+                    type="button"
+                    onClick={() => setLevel(lvl)}
+                    className={`rounded-full border px-3.5 py-1.5 text-xs font-bold transition ${
+                      level === lvl
+                        ? 'border-brand-purple bg-brand-purple text-white'
+                        : 'border-gray-300 bg-white text-gray-600 hover:border-brand-purple hover:text-brand-purple'
+                    }`}
+                  >
+                    {lvl === 'all' ? 'All levels' : LEVEL_LABEL[lvl]}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {visibleQuestions.length === 0 ? (
+                <p className="rounded-brand-lg border border-gray-100 bg-gray-50 p-6 text-center text-sm font-semibold text-gray-500">
+                  No questions yet at this level.
+                </p>
+              ) : (
+                visibleQuestions.map((question) => (
+                  <div
+                    key={question.id}
+                    className={`rounded-brand-lg border bg-gray-50 p-5 transition ${
+                      question.id === highlight?.id ? 'border-brand-teal/50 ring-2 ring-brand-teal/30' : 'border-gray-100'
+                    }`}
+                  >
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="inline-block rounded-full bg-white px-2.5 py-1 text-xs font-extrabold text-gray-500">
+                          {LEVEL_LABEL[question.level]} · Level {question.level}
+                        </span>
+                        {question.id === highlight?.id ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-brand-teal/20 px-2.5 py-1 text-[11px] font-extrabold text-brand-teal-dark">
+                            {highlight.label}
                           </span>
                         ) : null}
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => setModalState({ mode: 'edit', question })}
+                        aria-label="Edit this question"
+                        title="Edit this question"
+                        className="flex h-8 w-8 flex-none items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 transition hover:border-brand-purple hover:text-brand-purple"
+                      >
+                        <EditIcon />
+                      </button>
                     </div>
-                  ))}
-                </div>
-                <p className="mt-3 text-xs font-semibold text-gray-500">
-                  <span className="font-extrabold text-gray-600">Explanation: </span>
-                  {question.explanation}
-                </p>
-              </div>
-            ))
-          )}
-        </div>
+                    <p className="mb-4 text-sm font-bold text-brand-navy">{question.questionText}</p>
+                    <div className="space-y-2">
+                      {question.answerOptions.map((option) => (
+                        <div
+                          key={option.id}
+                          className={`rounded-brand-md border p-3 ${
+                            option.isCorrect ? 'border-brand-teal/40 bg-brand-teal/10' : 'border-gray-200 bg-white'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <p className={`text-sm font-semibold ${option.isCorrect ? 'text-brand-teal-dark' : 'text-gray-700'}`}>
+                              {option.text}
+                            </p>
+                            {option.isCorrect ? (
+                              <span className="flex-none rounded-full bg-brand-teal/20 px-2 py-0.5 text-[11px] font-extrabold text-brand-teal-dark">
+                                Correct
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="mt-3 text-xs font-semibold text-gray-500">
+                      <span className="font-extrabold text-gray-600">Explanation: </span>
+                      {question.explanation}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       {modalState ? (
