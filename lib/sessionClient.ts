@@ -10,6 +10,7 @@
 
 import type { ActivityType } from './activityTypes';
 import type { InstructorActivityEntry, SessionListEntry, SessionRecord } from './sessionTypes';
+import type { QuizQuestion } from './quizQuestionTypes';
 import { getCachedCompletedAttempts, setCachedCompletedAttempts } from './completedAttemptsStore';
 import { getCachedActivityLog, setCachedActivityLog } from './activityLogStore';
 import { getCachedCompletedSessions, setCachedCompletedSessions } from './completedSessionsStore';
@@ -348,6 +349,19 @@ export function loadActivityLog(
  */
 export function loadInstructorActivities(token: string) {
   return request<{ sessions: InstructorActivityEntry[] }>('/api/instructor/activities', { method: 'GET' }, token);
+}
+
+/**
+ * The entire question bank (GET /api/instructor/questions, GitHub #170) — what the instructor's
+ * Question Bank page renders instead of the old MOCK_QUESTIONS array.
+ *
+ * Deliberately **not** cached, same reasoning as loadInstructorActivities: nothing on the page
+ * that reads this list currently writes back through it (the add/edit modal only updates local
+ * React state, not the database), so there's no in-page action that could ever call
+ * forceRefresh to invalidate a stale cache.
+ */
+export function loadInstructorQuestions(token: string) {
+  return request<{ questions: QuizQuestion[] }>('/api/instructor/questions', { method: 'GET' }, token);
 }
 
 /** One student row as returned by GET /api/instructor/students. */
