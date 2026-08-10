@@ -15,7 +15,7 @@ import {
 import { InstructorDashboardSkeleton } from '../../components/InstructorDashboardSkeleton';
 import { InstructorRoster } from '../../components/InstructorRoster';
 import { summarizeStudents, toStudentActivitySummary, type StudentActivitySummary } from '../../lib/activityLogTypes';
-import { loadInstructorActivities, type InstructorActivityEntry } from '../../lib/sessionClient';
+import { loadInstructorActivities, loadInstructorStudents, type InstructorActivityEntry, type StudentSummary } from '../../lib/sessionClient';
 import { useRequireRole } from '../../lib/useRequireRole';
 
 const PAGE_SIZE = 10;
@@ -33,10 +33,11 @@ export default function InstructorDashboardPage() {
 function InstructorDashboardContent() {
   // GitHub #82: redirects anyone who isn't a confirmed instructor — see lib/useRequireRole.ts
   // for exactly what "confirmed" means for a profile-less or student account.
-  const { token, loading, authorized } = useRequireRole('instructor');
+  const { token, profile, loading, authorized } = useRequireRole('instructor');
   const searchParams = useSearchParams();
 
   const [entries, setEntries] = useState<StudentActivitySummary[] | null>(null);
+  const [allStudents, setAllStudents] = useState<StudentSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [studentId, setStudentId] = useState<StudentFilterValue>('all');
@@ -67,10 +68,19 @@ function InstructorDashboardContent() {
     };
   }, [token]);
 
+  useEffect(() => {
+    if (!token || !profile?.user_id) return;
+    let cancelled = false;
+    loadInstructorStudents(token, profile.user_id).then((result) => {
+      if (cancelled) return;
+      if (result.ok) setAllStudents(result.data.students);
+    });
+    return () => { cancelled = true; };
+  }, [token, profile?.user_id]);
+
   const roster = useMemo(() => summarizeStudents(entries ?? []), [entries]);
 
-  // Keyed by studentId, not by the attempt's own id (GitHub #174): a returning student owns many
-  // rows, and every one of them has to resolve to the same name from a single entry.
+  // Used by ActivityLogTable to resolve a student name for each attempt row.
   const studentNameById = useMemo(
     () => new Map((entries ?? []).map((entry) => [entry.studentId, entry.studentName])),
     [entries],
@@ -78,10 +88,10 @@ function InstructorDashboardContent() {
 
   const students = useMemo(
     () =>
-      [...studentNameById.entries()]
-        .map(([id, name]) => ({ id, name }))
+      (allStudents ?? [])
+        .map((s) => ({ id: s.userId, name: `${s.firstName} ${s.lastName}`.trim() || s.username }))
         .sort((a, b) => a.name.localeCompare(b.name)),
-    [studentNameById],
+    [allStudents],
   );
 
   // Lets app/instructor/students/page.tsx link straight into a filtered table

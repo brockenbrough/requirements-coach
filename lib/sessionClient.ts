@@ -14,6 +14,10 @@ import { getCachedCompletedAttempts, setCachedCompletedAttempts } from './comple
 import { getCachedActivityLog, setCachedActivityLog } from './activityLogStore';
 import { getCachedCompletedSessions, setCachedCompletedSessions } from './completedSessionsStore';
 import { getCachedScore, setCachedScore } from './scoreStore';
+import {
+  getCachedInstructorStudents,
+  setCachedInstructorStudents,
+} from './instructorStudentsStore';
 
 // The row shapes themselves live in lib/sessionTypes.ts, which imports nothing, so the routes
 // can share them without importing this 'use client' module. Re-exported here so this file
@@ -343,6 +347,48 @@ export function loadActivityLog(
  */
 export function loadInstructorActivities(token: string) {
   return request<{ sessions: InstructorActivityEntry[] }>('/api/instructor/activities', { method: 'GET' }, token);
+}
+
+/** One student row as returned by GET /api/instructor/students. */
+export type StudentSummary = {
+  userId: string;
+  username: string;
+  firstName: string;
+  lastName: string;
+};
+
+/**
+ * Every student in the system (GET /api/instructor/students, GitHub #146).
+ *
+ * Cache-first: returns the stored list on a hit, calls the network only on a miss or when
+ * forceRefresh is true — same pattern as loadActivityLog. Keyed by instructorId so switching
+ * accounts on the same device doesn't serve one instructor's cache to another.
+ */
+export function loadInstructorStudents(
+  token: string,
+  instructorId: string,
+  options: { forceRefresh?: boolean } = {},
+) {
+  if (!options.forceRefresh) {
+    const cached = getCachedInstructorStudents(instructorId);
+    if (cached !== null) {
+      return Promise.resolve<ApiResult<{ students: StudentSummary[] }>>({
+        ok: true,
+        data: { students: cached },
+      });
+    }
+  }
+
+  return request<{ students: StudentSummary[] }>(
+    '/api/instructor/students',
+    { method: 'GET' },
+    token,
+  ).then((result) => {
+    if (result.ok) {
+      setCachedInstructorStudents(instructorId, result.data.students);
+    }
+    return result;
+  });
 }
 
 /**
