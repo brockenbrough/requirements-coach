@@ -11,7 +11,7 @@ import {
   type StudentActivitySummary,
   type StudentAggregate,
 } from '../../../lib/activityLogTypes';
-import { loadInstructorActivities, type InstructorActivityEntry } from '../../../lib/sessionClient';
+import { loadInstructorActivities, loadInstructorStudents, type InstructorActivityEntry } from '../../../lib/sessionClient';
 import { useRequireRole } from '../../../lib/useRequireRole';
 
 const PAGE_SIZE = 9;
@@ -37,7 +37,7 @@ function compareByScore(a: StudentAggregate, b: StudentAggregate, direction: 1 |
  */
 export default function AllStudentsPage() {
   const router = useRouter();
-  const { token, loading, authorized } = useRequireRole('instructor');
+  const { token, profile, loading, authorized } = useRequireRole('instructor');
 
   const [entries, setEntries] = useState<StudentActivitySummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +65,16 @@ export default function AllStudentsPage() {
       cancelled = true;
     };
   }, [token]);
+
+  useEffect(() => {
+    if (!token || !profile?.user_id) return;
+    let cancelled = false;
+    loadInstructorStudents(token, profile.user_id).then((result) => {
+      if (cancelled || !result.ok) return;
+      // Warms the cache so repeat visits don't re-fetch the full roster.
+    });
+    return () => { cancelled = true; };
+  }, [token, profile?.user_id]);
 
   const allStudents = useMemo(() => summarizeStudents(entries ?? []), [entries]);
 
