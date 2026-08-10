@@ -54,7 +54,8 @@ export function QuestionFormModal({
   /** Which quiz's tab/filter the page currently has active — the starting value in 'add' mode. */
   defaultQuizType: ActivityType;
   onClose: () => void;
-  onSave: (question: QuizQuestion) => void;
+  /** Async so a failed save can keep the modal open with an error instead of closing blindly. */
+  onSave: (question: QuizQuestion) => Promise<{ ok: true } | { ok: false; error: string }>;
 }) {
   const [quizType, setQuizType] = useState<ActivityType>(initialData?.quizType ?? defaultQuizType);
   const [level, setLevel] = useState<1 | 2 | 3>(initialData?.level ?? 1);
@@ -67,6 +68,8 @@ export function QuestionFormModal({
   );
   const [explanation, setExplanation] = useState(initialData?.explanation ?? '');
   const [errors, setErrors] = useState<FormErrors>({});
+  const [isSaving, setIsSaving] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const panelRef = useRef<HTMLDivElement>(null);
   const firstFieldRef = useRef<HTMLSelectElement>(null);
@@ -81,7 +84,7 @@ export function QuestionFormModal({
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         event.preventDefault();
-        close();
+        requestClose();
         return;
       }
 
@@ -112,11 +115,17 @@ export function QuestionFormModal({
     previouslyFocusedRef.current?.focus();
   }
 
+  /** Cancel/×/backdrop/Escape all route through here so an in-flight save can't be abandoned. */
+  function requestClose() {
+    if (isSaving) return;
+    close();
+  }
+
   function updateOptionText(index: number, value: string) {
     setOptionTexts((current) => current.map((text, i) => (i === index ? value : text)));
   }
 
-  function handleSubmit(event: React.FormEvent) {
+  async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
 
     const nextErrors: FormErrors = {};
@@ -128,11 +137,11 @@ export function QuestionFormModal({
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
 
-    // Editing keeps the question's id, and each option's id at its position, so a real backend
-    // could update existing rows instead of treating every edit as a delete-and-recreate.
+    // Editing keeps the question's id, and each option's id at its position, so the PATCH route
+    // can update existing rows instead of treating every edit as a delete-and-recreate.
     const questionId = mode === 'edit' && initialData ? initialData.id : `q-${Date.now()}`;
 
-    onSave({
+    const question: QuizQuestion = {
       id: questionId,
       quizType,
       level,
@@ -143,9 +152,18 @@ export function QuestionFormModal({
         isCorrect: index === correctIndex,
       })),
       explanation: explanation.trim(),
-    });
+    };
 
-    close();
+    setSubmitError(null);
+    setIsSaving(true);
+    const result = await onSave(question);
+    setIsSaving(false);
+
+    if (result.ok) {
+      close();
+    } else {
+      setSubmitError(result.error);
+    }
   }
 
   const isEdit = mode === 'edit';
@@ -154,7 +172,7 @@ export function QuestionFormModal({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-8"
       onClick={(event) => {
-        if (event.target === event.currentTarget) close();
+        if (event.target === event.currentTarget) requestClose();
       }}
     >
       <div
@@ -173,9 +191,10 @@ export function QuestionFormModal({
           </div>
           <button
             type="button"
-            onClick={close}
+            onClick={requestClose}
+            disabled={isSaving}
             aria-label="Close"
-            className="flex h-8 w-8 flex-none items-center justify-center rounded-full border border-brand-navy-border bg-brand-navy-2 text-brand-ink-muted transition hover:text-white"
+            className="flex h-8 w-8 flex-none items-center justify-center rounded-full border border-brand-navy-border bg-brand-navy-2 text-brand-ink-muted transition hover:text-white disabled:opacity-60"
           >
             <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
               <path d="M6 6l12 12M18 6L6 18" />
@@ -260,19 +279,27 @@ export function QuestionFormModal({
           </label>
           {errors.explanation ? <p className="mb-4 text-xs font-bold text-brand-danger">{errors.explanation}</p> : null}
 
+          {submitError ? (
+            <p className="mb-4 rounded-brand-md border border-brand-danger/40 bg-brand-danger/10 p-3 text-xs font-bold text-brand-danger-light">
+              {submitError}
+            </p>
+          ) : null}
+
           <div className="mt-6 flex justify-end gap-3">
             <button
               type="button"
-              onClick={close}
-              className="rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-4 py-2 text-sm font-extrabold text-brand-ink-muted transition hover:text-white"
+              onClick={requestClose}
+              disabled={isSaving}
+              className="rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-4 py-2 text-sm font-extrabold text-brand-ink-muted transition hover:text-white disabled:opacity-60"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="rounded-brand-md bg-brand-purple px-5 py-2 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark"
+              disabled={isSaving}
+              className="rounded-brand-md bg-brand-purple px-5 py-2 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isEdit ? 'Save Changes' : 'Save Question'}
+              {isSaving ? 'Saving…' : isEdit ? 'Save Changes' : 'Save Question'}
             </button>
           </div>
         </form>
