@@ -56,6 +56,31 @@ export function loadUserStory(
   );
 }
 
+export type InstructorACSubmission = {
+  submissionId: string;
+  studentId: string;
+  studentName: string;
+  userStoryDescription: string;
+  submittedText: string;
+  llmScore: number | null;
+  llmFeedback: string | null;
+  submittedAt: string;
+  gradedAt: string | null;
+};
+
+/** GET /api/instructor/acceptance-criteria/submissions — all AC submissions, optionally scoped to one student. */
+export function loadInstructorACSubmissions(
+  token: string,
+  options: { studentId?: string } = {},
+): Promise<ApiResult<{ submissions: InstructorACSubmission[] }>> {
+  const params = options.studentId ? `?studentId=${encodeURIComponent(options.studentId)}` : '';
+  return request<{ submissions: InstructorACSubmission[] }>(
+    `/api/instructor/acceptance-criteria/submissions${params}`,
+    { method: 'GET' },
+    token,
+  );
+}
+
 /**
  * POST .../submissions: commits the answer, then returns the LLM's grading of it.
  *
