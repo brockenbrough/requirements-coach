@@ -103,7 +103,10 @@ CREATE TABLE user_story (
     story_text       text        NOT NULL,
     difficulty_level int2        NOT NULL,
     activity_type    varchar(50) NOT NULL,
-    creator_id       uuid        NOT NULL,
+    -- Nullable for the same reason as question.user_id (GitHub #201): the seeded starter set
+    -- (GitHub #133) runs when there is no real "user" row yet to attribute authorship to.
+    -- NULL means "no specific creator" — the seeded bank, not a data error.
+    creator_id       uuid,
     PRIMARY KEY (user_story_id));
 
 -- ---------------------------------------------------------------------
@@ -476,6 +479,12 @@ CREATE POLICY own_submissions_insert ON submission
 -- run just its CREATE TABLE, CHECK constraint, index, fk_user_story_user, and RLS statements
 -- from this script instead of re-running the whole thing. fk_user_story_user requires the
 -- "user" table to already exist.
+
+-- GitHub #133 (user_story.creator_id made nullable, so supabase/seed.sql can seed a starter set
+-- of stories before any real "user" row exists — same reasoning as question.user_id above): if
+-- your user_story table predates this change —
+--
+--   ALTER TABLE user_story ALTER COLUMN creator_id DROP NOT NULL;
 
 -- Submission table (free-text answers + LLM grading, REQ-FU-1/REQ-FU-2): also a new table
 -- with no rename path. Its two FKs (fk_submission_user, fk_submission_user_story) require
