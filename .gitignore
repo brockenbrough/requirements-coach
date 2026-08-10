@@ -5,3 +5,4 @@ node_modules
 coverage
 .devcontainer/devcontainer-lock.json
 tsconfig.tsbuildinfo
+.DS_Store
