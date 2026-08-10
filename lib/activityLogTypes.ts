@@ -1,5 +1,6 @@
 import { getActivityByType } from './activityContent';
 import type { ActivityType } from './activityTypes';
+import { toInstant } from './dateTime';
 import type { InstructorActivityEntry, SessionListEntry } from './sessionClient';
 
 export type ActivityLogStatus = 'completed' | 'in-progress' | 'abandoned';
@@ -129,7 +130,9 @@ export function toActivityLogEntry(session: SessionListEntry): ActivityLogEntry 
     activityType: session.activity_type as ActivityType,
     activityName: getActivityByType(session.activity_type)?.name ?? session.activity_type,
     level: session.difficulty_level as 1 | 2 | 3,
-    dateTime: session.ended_at ?? session.started_at,
+    // session_log's timestamps carry no zone; toInstant marks them as the UTC they are, so
+    // ActivityLogRow/StudentScoreChart/StudentMetricCards all format the right local time.
+    dateTime: toInstant(session.ended_at ?? session.started_at),
     status: session.status === 'in-progress' || session.status === 'abandoned' ? session.status : 'completed',
     passed: session.passed,
     score: session.cumulative_score,

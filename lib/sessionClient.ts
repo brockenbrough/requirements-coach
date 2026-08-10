@@ -9,6 +9,7 @@
 // from the feedback route, and only after the answer has been committed.
 
 import type { ActivityType } from './activityTypes';
+import { toInstant } from './dateTime';
 import type { InstructorActivityEntry, SessionListEntry, SessionRecord } from './sessionTypes';
 import type { QuizQuestion } from './quizQuestionTypes';
 import { getCachedCompletedAttempts, setCachedCompletedAttempts } from './completedAttemptsStore';
@@ -255,10 +256,17 @@ export function loadCompletedAttempts(
     { method: 'GET' },
     token,
   ).then((result) => {
-    if (result.ok) {
-      setCachedCompletedAttempts(studentId, activityType, result.data.attempts);
-    }
-    return result;
+    if (!result.ok) return result;
+
+    // completedAt comes from session_log.ended_at, which carries no zone — pinned to UTC before
+    // it is cached, so a cache hit and a fresh fetch can't disagree about what the value means.
+    const attempts = result.data.attempts.map((attempt) => ({
+      ...attempt,
+      completedAt: attempt.completedAt === null ? null : toInstant(attempt.completedAt),
+    }));
+
+    setCachedCompletedAttempts(studentId, activityType, attempts);
+    return { ok: true as const, data: { attempts } };
   });
 }
 

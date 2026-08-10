@@ -4,6 +4,8 @@
 // resulting session is persisted. Swap the localStorage handling here once
 // real Supabase session handling (cookies) replaces the current bearer-token
 // approach — no page needs to change.
+import { clearAllClientCaches } from './clientCaches';
+
 const ACCESS_TOKEN_KEY = 'access_token';
 const REFRESH_TOKEN_KEY = 'refresh_token';
 
@@ -21,10 +23,18 @@ function getStoredRefreshToken(): string | null {
   return window.localStorage.getItem(REFRESH_TOKEN_KEY);
 }
 
+/**
+ * Ends the session locally: tokens first, then every cache keyed off the account behind them.
+ *
+ * The cache clearing lives here rather than in signOut() so it cannot be skipped — both callers
+ * in components/UserProvider.tsx go through this function, the explicit sign-out as well as the
+ * path that gives up after refreshAccessToken() fails.
+ */
 export function clearStoredAccessToken(): void {
   if (typeof window === 'undefined') return;
   window.localStorage.removeItem(ACCESS_TOKEN_KEY);
   window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+  clearAllClientCaches();
 }
 
 /** Persists a Supabase session (access + refresh token) and returns the access token, or null if it didn't include one. */

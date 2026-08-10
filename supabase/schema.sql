@@ -305,6 +305,20 @@ ALTER TABLE "user" ADD CONSTRAINT ck_user_role CHECK (role IN ('student', 'instr
 -- The draw for a new session filters on exactly this pair.
 CREATE INDEX ix_question_activity_type_difficulty ON question (activity_type, difficulty_level);
 
+-- The class-wide instructor reads (GitHub #171/#115) scan session_log across every student
+-- instead of a single user_id, which the partial uq_session_log_one_active below cannot serve
+-- (it only covers rows with status = 'in-progress').
+--
+-- ix_session_log_user_id backs the per-student routes and the joins onto answered_question_log;
+-- ix_session_log_ended_at matches loadAllStudentActivity's ORDER BY exactly, both columns and
+-- both directions, so the newest-first timeline needs no sort step.
+CREATE INDEX ix_session_log_user_id ON session_log (user_id);
+CREATE INDEX ix_session_log_ended_at ON session_log (ended_at DESC, started_at DESC);
+
+-- loadAllStudentActivity/loadAllStudentSessions inner-join "user" filtered on role = 'student'
+-- so instructors don't turn up in their own report.
+CREATE INDEX ix_user_role ON "user" (role);
+
 -- At most one running session per student and activity type. This is what
 -- makes POST /api/sessions idempotent: "start" and "resume" are the same
 -- call, and two devices cannot build up independent state.
@@ -377,6 +391,21 @@ ALTER TABLE instructor_llm_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE session_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE answered_question_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE submission ENABLE ROW LEVEL SECURITY;
+
+-- Without this, "user" is readable through PostgREST with the anon key —
+-- the real names of every student in the class, next to the performance
+-- data the instructor routes already expose deliberately. The instructor
+-- reads are unaffected: they run on the service role key, which bypasses
+-- RLS, and requireInstructor (lib/instructorAuth.ts) is what authorises
+-- them. Profile writes go through app/api/profile, also service role, so
+-- SELECT is the only policy needed here.
+--
+-- Still open, same class of problem, out of scope for this change:
+-- badge, user_badge and title_definition have no RLS either.
+ALTER TABLE "user" ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY own_user_select ON "user"
+  FOR SELECT USING (auth.uid() = user_id);
 
 CREATE POLICY own_sessions_select ON session_log
   FOR SELECT USING (auth.uid() = user_id);
@@ -495,6 +524,22 @@ CREATE POLICY own_submissions_insert ON submission
 -- requires "user" to already exist. uq_instructor_llm_config_one_active is a global partial
 -- unique index (not scoped by user_id) — at most one row across the whole table can have
 -- is_active = true at a time.
+
+-- Class-wide instructor reads (GitHub #82): the indexes and the RLS on "user" are both new. On
+-- an existing database run them separately — none of them rewrites a table, and CREATE INDEX
+-- takes only a SHARE lock, so this is safe on a live deployment:
+--
+--   CREATE INDEX ix_session_log_user_id ON session_log (user_id);
+--   CREATE INDEX ix_session_log_ended_at ON session_log (ended_at DESC, started_at DESC);
+--   CREATE INDEX ix_user_role ON "user" (role);
+--
+--   ALTER TABLE "user" ENABLE ROW LEVEL SECURITY;
+--   CREATE POLICY own_user_select ON "user" FOR SELECT USING (auth.uid() = user_id);
+--
+-- Enabling RLS on a table that had none takes effect immediately for anon/authenticated
+-- callers. Verify afterwards that the app still works end to end — every route that touches
+-- "user" uses the service role key and is therefore unaffected, but a future route that
+-- reaches for the anon client would start returning empty results instead of erroring.
 
 -- LLM model selection: if your instructor_llm_config table already exists from an earlier run
 -- of this script, add the new column instead of recreating the table. model is NOT NULL with no

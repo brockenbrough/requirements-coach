@@ -8,6 +8,7 @@ import type {
   AcceptanceCriteriaResult,
   UserStoryPrompt,
 } from "./acceptanceCriteriaTypes";
+import { toInstant } from "./dateTime";
 
 export type ApiResult<T> =
   | { ok: true; data: T }
@@ -78,7 +79,19 @@ export function loadInstructorACSubmissions(
     `/api/instructor/acceptance-criteria/submissions${params}`,
     { method: 'GET' },
     token,
-  );
+  ).then((result) => {
+    if (!result.ok) return result;
+
+    // submission.submitted_at/graded_at are zone-less like session_log's timestamps — pinned to
+    // UTC here so AcceptanceCriteriaSubmissionRow renders the right local date.
+    const submissions = result.data.submissions.map((submission) => ({
+      ...submission,
+      submittedAt: toInstant(submission.submittedAt),
+      gradedAt: submission.gradedAt === null ? null : toInstant(submission.gradedAt),
+    }));
+
+    return { ok: true as const, data: { submissions } };
+  });
 }
 
 /**
