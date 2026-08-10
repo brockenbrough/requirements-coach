@@ -1,3 +1,5 @@
+import type { ActivityType } from './activityTypes';
+
 /**
  * GitHub #149: types for the "Write Acceptance Criteria" activity (REQ-FU-2) — a free-text,
  * LLM-graded activity, structurally distinct from the Type A question-bank activities in
@@ -21,4 +23,17 @@ export type AcceptanceCriteriaResult = {
   /** 1-10, this activity's own scale — see lib/llm/promptUtils.ts, separate from the Type A quiz's 100-point session score. */
   score: number;
   feedback: string;
+};
+
+/**
+ * One user_story row owned by the calling instructor, as returned by
+ * GET /api/instructor/user-stories (GitHub #225). Deliberately not UserStoryPrompt — that type
+ * is tied to the student-facing random-draw routes (its doc comment says so explicitly) and
+ * has no difficultyLevel/activityType; this one is instructor-facing and scoped by creator_id.
+ */
+export type InstructorUserStoryEntry = {
+  id: string;
+  storyText: string;
+  difficultyLevel: 1 | 2 | 3;
+  activityType: ActivityType;
 };
