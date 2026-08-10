@@ -1374,3 +1374,46 @@ INSERT INTO title_definition (title_definition_id, activity_type, difficulty_lev
 ('00000000-0000-0000-0002-000000000004', 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 1, 'Criteria Apprentice'),
 ('00000000-0000-0000-0002-000000000005', 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 2, 'Criteria Analyst'),
 ('00000000-0000-0000-0002-000000000006', 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 3, 'Criteria Expert');
+
+
+-- #####################################################################
+-- GitHub #133: User Story starter set (REQ-FU-1 / REQ-FU-2)
+--
+-- 15 stories for the Write Acceptance Criteria activity, 5 domains x
+-- 3 difficulty levels, so GET .../user-story has real content to draw
+-- from on day one instead of an empty table.
+--
+-- creator_id is NULL for all of these — there is no real "user" row to
+-- attribute them to when this script runs on a fresh schema (same
+-- reasoning as question.user_id for the seeded question bank). Known
+-- consequence: POST .../submissions looks up the grading LLM config by
+-- instructor_llm_config.user_id = story.creator_id, so a submission
+-- against one of these seeded (creator_id IS NULL) stories always 500s
+-- with "the instructor who created this prompt has not configured an
+-- LLM provider" until a real instructor adds their own stories. Fixing
+-- that is a separate story about instructor_llm_config, not this one.
+--
+-- To re-run: DELETE FROM user_story;
+-- #####################################################################
+
+INSERT INTO user_story (user_story_id, story_text, difficulty_level, activity_type, creator_id) VALUES
+-- E-commerce
+('00000000-0000-0000-0003-000000000001', 'As a shopper, I want to add items to my cart, so that I can purchase multiple products in a single checkout.', 1, 'WRITE_ACCEPTANCE_CRITERIA', NULL),
+('00000000-0000-0000-0003-000000000002', 'As a returning customer, I want to save items to a wishlist, so that I can buy them later without searching for them again.', 2, 'WRITE_ACCEPTANCE_CRITERIA', NULL),
+('00000000-0000-0000-0003-000000000003', 'As a shopper, I want to apply a promo code at checkout, so that a valid discount is reflected in my order total before I pay.', 3, 'WRITE_ACCEPTANCE_CRITERIA', NULL),
+-- Banking / fintech
+('00000000-0000-0000-0003-000000000004', 'As an account holder, I want to view my current balance, so that I know how much money I have available.', 1, 'WRITE_ACCEPTANCE_CRITERIA', NULL),
+('00000000-0000-0000-0003-000000000005', 'As a customer, I want to transfer money between my own accounts, so that I can move funds without visiting a branch.', 2, 'WRITE_ACCEPTANCE_CRITERIA', NULL),
+('00000000-0000-0000-0003-000000000006', 'As a customer, I want to set up a recurring monthly payment to another account, so that my bills are paid automatically even if I forget.', 3, 'WRITE_ACCEPTANCE_CRITERIA', NULL),
+-- Healthcare
+('00000000-0000-0000-0003-000000000007', 'As a patient, I want to book an appointment with a doctor, so that I can be seen for a medical concern.', 1, 'WRITE_ACCEPTANCE_CRITERIA', NULL),
+('00000000-0000-0000-0003-000000000008', 'As a patient, I want to receive a reminder before my upcoming appointment, so that I do not miss it.', 2, 'WRITE_ACCEPTANCE_CRITERIA', NULL),
+('00000000-0000-0000-0003-000000000009', 'As a patient, I want to reschedule an appointment up to 24 hours in advance, so that I can change my plans without losing my slot entirely.', 3, 'WRITE_ACCEPTANCE_CRITERIA', NULL),
+-- Ride-sharing
+('00000000-0000-0000-0003-000000000010', 'As a rider, I want to request a ride from my current location, so that a nearby driver can pick me up.', 1, 'WRITE_ACCEPTANCE_CRITERIA', NULL),
+('00000000-0000-0000-0003-000000000011', 'As a rider, I want to see the driver''s estimated arrival time, so that I know when to be ready outside.', 2, 'WRITE_ACCEPTANCE_CRITERIA', NULL),
+('00000000-0000-0000-0003-000000000012', 'As a rider, I want to split the fare with another passenger on the same ride, so that we each pay only our own share.', 3, 'WRITE_ACCEPTANCE_CRITERIA', NULL),
+-- Online learning
+('00000000-0000-0000-0003-000000000013', 'As a student, I want to enroll in a course, so that I can access its lessons.', 1, 'WRITE_ACCEPTANCE_CRITERIA', NULL),
+('00000000-0000-0000-0003-000000000014', 'As a student, I want to track my progress through a course''s lessons, so that I know how much I have left to complete.', 2, 'WRITE_ACCEPTANCE_CRITERIA', NULL),
+('00000000-0000-0000-0003-000000000015', 'As a student, I want to submit an assignment before its deadline, so that it is graded and counts toward my final score.', 3, 'WRITE_ACCEPTANCE_CRITERIA', NULL);
