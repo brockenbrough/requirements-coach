@@ -136,6 +136,32 @@ Students should be able to view a basic history of their own completed activitie
 
 Instructors should be able to view student activity results so they can see which activities students completed and how students performed.
 
+#### REQ-PL-3.3 — Instructor Activity Review
+
+Instructor should be able to enter a class code to restrict the students that are displayed. 
+
+#### REQ-PL-3.4 — Research Data Exports
+
+This section of the requirements discuss what is need to make the application be useful for research.  In this scenario it must be able to separate different classes (e.g. different instructors or institutions) to see differences between class.
+
+##### REQ-DL-3.4.1 — Table of Class Codes
+
+There needs to be a table of class codes.  A code is a unique value that identifies a particular instance of a class of students.  We do not need to have a UI for maintaining the table and it could be seeded by hand or script.
+
+##### REQ-DL-3.4.2 — Account Creation and Class Code
+
+When a student creates an account, they must enter a correct class code.  The code should NOT be selectable by the student.  Instead, the instructor will give the students the code to use.  The code is associated with the account.
+
+##### REQ-PL-3.4.3 — Exportable Depersonalized Report
+
+The instructor should be able to enter a class code and receive a depersonalized csv file of data collected on the students.  Depersonalized means that the students' name are not in the csv file, but instead are referred to by a consisted ID instead. This ID could possible be the user record ID. The exported data should be all student activity data that could be useful for research.
+
+
+##### REQ-PL-3.4.4 — Number of Students and User Interface
+
+The user interface must be designed so that the user interface is usable assuming that there maybe at least 3 classes with 150 students per class.
+
+
 ---
 
 # Indentifying Weak User Stories Requirements
