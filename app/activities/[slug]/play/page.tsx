@@ -197,6 +197,29 @@ export default function PlayActivityPage({
       router.push(`/activities/${activity!.slug}`);
       return;
     }
+
+    // GitHub #236: fold the just-graded answer into session.answers before dropping the
+    // feedback view — that's what lets the progress dots know this question's correctness
+    // once it stops being "current". Built entirely from outcome (already-fetched, real data
+    // from the submit/feedback round trip), not a second network call or a new parallel state.
+    setSession((current) =>
+      current
+        ? {
+            ...current,
+            answers: [
+              ...current.answers,
+              {
+                question_id: outcome.question.question_id,
+                submitted_option: outcome.feedback.selectedOption.answerId,
+                score: outcome.awardedScore,
+                submitted_at: outcome.feedback.submittedAt,
+                correct: outcome.feedback.correct,
+                explanation: outcome.feedback.selectedOption.explanation,
+              },
+            ],
+          }
+        : current,
+    );
     // The whole draw is already in hand — advancing is just dropping the feedback view.
     setOutcome(null);
   }
@@ -205,24 +228,37 @@ export default function PlayActivityPage({
 
   const { feedback } = outcome ?? {};
   const answeredDots = outcome ? answeredCount - 1 : answeredCount;
+  // Position is 1-indexed and dot index i is 0-indexed, so sort explicitly rather than assume
+  // the API already returned questions in position order — dot i must line up with position i+1
+  // for the per-question correctness lookup below to point at the right answer.
+  const dotQuestions = [...questions].sort((a, b) => a.position - b.position);
 
   return (
     <AppShell active="activities">
       <div className="mx-auto max-w-xl">
         <div className="mb-5 flex items-center justify-between">
-          <div className="flex gap-1.5">
-            {Array.from({ length: totalQuestions }).map((_, i) => (
-              <span
-                key={i}
-                className={`h-2 w-2 rounded-full ${
-                  i < answeredDots
-                    ? "bg-[#2DD4BF]"
-                    : i === answeredDots
-                      ? "bg-[#7C4DFF]"
-                      : "bg-[#332b6b]"
-                }`}
-              />
-            ))}
+          <div className="flex items-center gap-1.5">
+            {dotQuestions.map((question, i) => {
+              const isCurrent = i === answeredDots;
+              const isAnswered = i < answeredDots;
+              // GitHub #236: correctness for an already-answered question comes from
+              // session.answers — kept accurate across "Next question" clicks by handleContinue
+              // above, so no separate per-question tracking is needed here.
+              const isCorrect = isAnswered && session.answers.find((a) => a.question_id === question.question_id)?.correct === true;
+
+              return (
+                <span
+                  key={question.question_id}
+                  className={`rounded-full transition-all duration-300 ${
+                    isCurrent
+                      ? "h-3 w-3 bg-brand-purple"
+                      : isAnswered
+                        ? `h-2 w-2 ${isCorrect ? "bg-brand-green" : "bg-brand-danger"}`
+                        : "h-2 w-2 bg-brand-navy-border"
+                  }`}
+                />
+              );
+            })}
           </div>
           <span className="text-sm font-bold text-gray-500">
             Question {Math.min(answeredDots + 1, totalQuestions)} of{" "}
