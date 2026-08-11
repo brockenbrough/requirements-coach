@@ -28,7 +28,7 @@ const STUDENT_NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
 const INSTRUCTOR_NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
   { key: 'instructor', label: 'Instructor Dashboard', href: '/instructor' },
   { key: 'instructor-questions', label: 'Question Bank', href: '/instructor/questions' },
-  { key: 'instructor-ac', label: 'AC Submissions', href: '/instructor/acceptance-criteria' },
+  { key: 'instructor-ac', label: 'Acceptance Criteria', href: '/instructor/acceptance-criteria' },
   { key: 'profile', label: 'Profile', href: '/profile' },
   { key: 'instructor-settings', label: 'LLM Provider Settings', href: '/instructor/settings' },
 ];
