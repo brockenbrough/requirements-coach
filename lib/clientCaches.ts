@@ -15,6 +15,7 @@ import { clearCachedAcceptanceCriteriaSubmissions } from './acceptanceCriteriaSu
 import { clearCachedActivityLog } from './activityLogStore';
 import { clearCachedCompletedAttempts } from './completedAttemptsStore';
 import { clearCachedCompletedSessions } from './completedSessionsStore';
+import { clearCachedInstructorActivities } from './instructorActivityStore';
 import { clearCachedInstructorQuestions } from './instructorQuestionsStore';
 import { clearCachedInstructorStudents } from './instructorStudentsStore';
 import { clearCachedLlmConfig } from './instructorLlmConfigStore';
@@ -38,6 +39,7 @@ export function clearAllClientCaches(): void {
   clearCachedCompletedSessions();
   clearCachedCompletedAttempts();
   clearCachedActivityLog();
+  clearCachedInstructorActivities();
   clearCachedInstructorStudents();
   clearCachedInstructorQuestions();
   clearCachedAcceptanceCriteriaSubmissions();
