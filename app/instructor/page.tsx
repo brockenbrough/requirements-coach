@@ -40,26 +40,24 @@ function InstructorDashboardContent() {
   const [entries, setEntries] = useState<StudentActivitySummary[] | null>(null);
   const [allStudents, setAllStudents] = useState<StudentSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const [studentId, setStudentId] = useState<StudentFilterValue>('all');
   const [level, setLevel] = useState<LevelFilterValue>('all');
   const [sort, setSort] = useState<InstructorSortOrder>('newest');
   const [page, setPage] = useState(1);
 
-  // GET /api/instructor/activities (GitHub #171) — the whole class, guarded server-side by
-  // requireInstructor. Uncached on purpose: any student's answer changes this list, and this
-  // tab never hears about it (see loadInstructorActivities).
+  // GET /api/instructor/activities (GitHub #171/#176) — cache-first; forceRefresh on the
+  // Refresh button or when profile.user_id becomes available for the first time.
   useEffect(() => {
-    if (!token) return;
+    if (!token || !profile?.user_id) return;
     let cancelled = false;
 
-    loadInstructorActivities(token).then((result) => {
+    loadInstructorActivities(token, profile.user_id).then((result) => {
       if (cancelled) return;
       if (result.ok) {
         setEntries(result.data.sessions.map((session: InstructorActivityEntry) => toStudentActivitySummary(session)));
       } else {
-        // result.error already distinguishes "server said no" from "never reached the server"
-        // (status 0) — see the request helper in lib/sessionClient.ts.
         setError(result.error);
       }
     });
@@ -67,7 +65,21 @@ function InstructorDashboardContent() {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, profile?.user_id]);
+
+  function handleRefresh() {
+    if (!token || !profile?.user_id || refreshing) return;
+    setRefreshing(true);
+    loadInstructorActivities(token, profile.user_id, { forceRefresh: true }).then((result) => {
+      setRefreshing(false);
+      if (result.ok) {
+        setEntries(result.data.sessions.map((session: InstructorActivityEntry) => toStudentActivitySummary(session)));
+        setError(null);
+      } else {
+        setError(result.error);
+      }
+    });
+  }
 
   useEffect(() => {
     if (!token || !profile?.user_id) return;
@@ -136,7 +148,16 @@ function InstructorDashboardContent() {
   return (
     <AppShell active="instructor">
       <div className="mx-auto max-w-5xl">
-        <h1 className="mb-1.5 text-2xl font-extrabold text-brand-navy">Instructor Dashboard</h1>
+        <div className="mb-1.5 flex items-center justify-between gap-4">
+          <h1 className="text-2xl font-extrabold text-brand-navy">Instructor Dashboard</h1>
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing || entries === null}
+            className="rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-brand-purple hover:text-brand-purple disabled:opacity-40"
+          >
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
         <p className="mb-6 max-w-2xl text-sm font-semibold text-gray-500">
           Every student&apos;s activity, across every activity type — filter by student or level, or sort to surface who needs a
           hand.
