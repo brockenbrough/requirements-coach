@@ -9,6 +9,7 @@ import type { InstructorActivityEntry } from '../../lib/sessionTypes';
 // vitest's node environment.
 
 const TOKEN = 'instructor-token';
+const INSTRUCTOR_ID = 'instructor-1';
 
 function stubFetch(impl: (url: string, init: RequestInit) => Promise<Response> | Promise<never>) {
   const spy = vi.fn(impl);
@@ -47,7 +48,7 @@ describe('loadInstructorActivities', () => {
   it('returns the class-wide sessions and sends the bearer token', async () => {
     const fetchSpy = stubFetch(() => jsonResponse({ sessions: [SESSION] }, 200));
 
-    const result = await loadInstructorActivities(TOKEN);
+    const result = await loadInstructorActivities(TOKEN, INSTRUCTOR_ID);
 
     expect(result).toEqual({ ok: true, data: { sessions: [SESSION] } });
 
@@ -61,7 +62,7 @@ describe('loadInstructorActivities', () => {
   it('reports a non-2xx response as a failed result instead of throwing', async () => {
     stubFetch(() => jsonResponse({ error: 'Something went wrong.' }, 500));
 
-    await expect(loadInstructorActivities(TOKEN)).resolves.toEqual({
+    await expect(loadInstructorActivities(TOKEN, INSTRUCTOR_ID)).resolves.toEqual({
       ok: false,
       status: 500,
       error: 'Something went wrong.',
@@ -73,7 +74,7 @@ describe('loadInstructorActivities', () => {
     // { error } to pick apart — the caller still has to get 403 rather than an exception.
     stubFetch(() => Promise.resolve(new Response(null, { status: 403 })));
 
-    const result = await loadInstructorActivities(TOKEN);
+    const result = await loadInstructorActivities(TOKEN, INSTRUCTOR_ID);
 
     expect(result.ok).toBe(false);
     expect(result).toMatchObject({ status: 403 });
@@ -84,7 +85,7 @@ describe('loadInstructorActivities', () => {
 
     // Status 0 is what lets the page say "server unreachable" instead of blaming the server
     // for an error it never got the chance to send.
-    await expect(loadInstructorActivities(TOKEN)).resolves.toEqual({
+    await expect(loadInstructorActivities(TOKEN, INSTRUCTOR_ID)).resolves.toEqual({
       ok: false,
       status: 0,
       error: 'Could not reach the server. Please try again.',
