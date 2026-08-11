@@ -5,7 +5,7 @@ import { AppShell } from '../../../components/AppShell';
 import { QuestionFormModal } from '../../../components/QuestionFormModal';
 import { ACTIVITIES, getActivityByType } from '../../../lib/activityContent';
 import type { ActivityType } from '../../../lib/activityTypes';
-import { createQuestion, loadInstructorQuestions, updateQuestion } from '../../../lib/sessionClient';
+import { cacheInstructorQuestions, createQuestion, loadInstructorQuestions, updateQuestion } from '../../../lib/sessionClient';
 import type { QuizQuestion } from '../../../lib/quizQuestionTypes';
 import { useRequireRole } from '../../../lib/useRequireRole';
 
@@ -31,7 +31,7 @@ type ModalState = { mode: 'add' } | { mode: 'edit'; question: QuizQuestion };
  * PATCH /api/instructor/questions/{id}) a question — both through the same popup form.
  */
 export default function InstructorQuestionsPage() {
-  const { token, loading, authorized } = useRequireRole('instructor');
+  const { token, profile, loading, authorized } = useRequireRole('instructor');
 
   const [questions, setQuestions] = useState<QuizQuestion[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,10 +42,10 @@ export default function InstructorQuestionsPage() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!token) return;
+    if (!token || !profile?.user_id) return;
     let cancelled = false;
 
-    loadInstructorQuestions(token).then((result) => {
+    loadInstructorQuestions(token, profile.user_id).then((result) => {
       if (cancelled) return;
       if (result.ok) {
         setQuestions(result.data.questions);
@@ -57,7 +57,7 @@ export default function InstructorQuestionsPage() {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, profile?.user_id]);
 
   if (loading || !authorized) return null;
 
@@ -68,7 +68,7 @@ export default function InstructorQuestionsPage() {
   });
 
   async function handleSaveQuestion(question: QuizQuestion): Promise<{ ok: true } | { ok: false; error: string }> {
-    if (!token) return { ok: false, error: 'Your session has expired. Please sign in again.' };
+    if (!token || !profile?.user_id) return { ok: false, error: 'Your session has expired. Please sign in again.' };
 
     // The modal's own mode (not an id lookup) is what tells an edit and a new question apart —
     // a client-generated placeholder id could otherwise collide with nothing and look like "add".
@@ -89,11 +89,15 @@ export default function InstructorQuestionsPage() {
           })),
         };
 
-    setQuestions((current) =>
-      isEdit
-        ? (current ?? []).map((existing) => (existing.id === savedQuestion.id ? savedQuestion : existing))
-        : [savedQuestion, ...(current ?? [])],
-    );
+    const updatedQuestions = isEdit
+      ? (questions ?? []).map((existing) => (existing.id === savedQuestion.id ? savedQuestion : existing))
+      : [savedQuestion, ...(questions ?? [])];
+
+    setQuestions(updatedQuestions);
+    // Invalidates loadInstructorQuestions' cache by overwriting it with the fresh list, instead
+    // of just dropping it — the next mount (this tab or another) sees the save immediately
+    // rather than falling back to a network round trip.
+    cacheInstructorQuestions(profile.user_id, updatedQuestions);
 
     // Jump the view to wherever the question landed — otherwise a save that also moved the
     // question to a different quiz/level would look like it silently failed.
