@@ -7,6 +7,7 @@ import { AppShell } from '../../components/AppShell';
 import { ChangePasswordForm } from '../../components/ChangePasswordForm';
 import { EditableField } from '../../components/EditableField';
 import { ImageCropModal } from '../../components/ImageCropModal';
+import { MyCoursesSection } from '../../components/MyCoursesSection';
 import { useUser } from '../../components/UserProvider';
 import { getInitials } from '../../lib/initials';
 
@@ -475,6 +476,11 @@ export default function ProfilePage() {
                 </button>
               )}
             </div>
+
+            {/* GitHub #242 (UI-2): a course concept only exists for students right now — an
+                instructor manages courses from /instructor/courses instead, so this doesn't
+                apply to their profile. */}
+            {!isInstructor ? <MyCoursesSection token={token} studentId={profile.user_id} /> : null}
           </>
         )}
       </section>

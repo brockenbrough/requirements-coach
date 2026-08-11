@@ -16,7 +16,7 @@ import { useRequireRole } from '../../../lib/useRequireRole';
 export default function InstructorCoursesPage() {
   // Same guard as every other /instructor/* page (GitHub #82/#169) — a student hitting this
   // URL directly is redirected, never shown the courses list or create form.
-  const { token, loading, authorized } = useRequireRole('instructor');
+  const { token, profile, loading, authorized } = useRequireRole('instructor');
 
   const [courses, setCourses] = useState<Course[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -40,7 +40,9 @@ export default function InstructorCoursesPage() {
   }, [token, retryCount]);
 
   if (loading || !authorized) return null;
-  if (!token) return null;
+  if (!token || !profile) return null;
+
+  const professorName = `${profile.first_name} ${profile.last_name}`.trim() || profile.username;
 
   return (
     <AppShell active="instructor-courses">
@@ -78,7 +80,11 @@ export default function InstructorCoursesPage() {
         )}
 
         <p className="mb-3 text-xs font-extrabold uppercase tracking-wide text-gray-400">Create a course</p>
-        <CreateCourseForm token={token} onCreated={(course) => setCourses((current) => [course, ...(current ?? [])])} />
+        <CreateCourseForm
+          token={token}
+          professorName={professorName}
+          onCreated={(course) => setCourses((current) => [course, ...(current ?? [])])}
+        />
       </div>
     </AppShell>
   );
