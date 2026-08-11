@@ -3,22 +3,22 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { StudentCourseCard } from '../../components/StudentCourseCard';
-import { loadCourses, type Course } from '../../lib/mockCourses';
+import { loadJoinableCourses } from '../../lib/studentCourseClient';
+import type { JoinableCourse } from '../../lib/courseTypes';
 import { useRequireRole } from '../../lib/useRequireRole';
 
 /**
  * GitHub #242 (UI-2): browse every available course and join one — the expanded version of
- * "Join Course" the issue asks for, a full page instead of a bare code-entry modal. Backend
- * (API-2) doesn't exist yet, so this runs on lib/mockCourses.ts; see that file's header for
- * what a real integration needs to swap in (notably: a student-facing GET /api/courses, not
- * reusing the instructor-scoped one this mock's loadCourses stands in for either way).
+ * "Join Course" the issue asks for, a full page instead of a bare code-entry modal. Real now
+ * (lib/studentCourseClient.ts, REQ-DL-5): GET /api/courses returns only courses with a code
+ * (course_code IS NOT NULL) and each course's alreadyMember flag already scoped to this student.
  */
 export default function BrowseCoursesPage() {
   // Also redirects an instructor account away (GitHub #82) — joining a course as a student is
   // not something an instructor account does.
   const { token, profile, loading, authorized } = useRequireRole('student');
 
-  const [courses, setCourses] = useState<Course[] | null>(null);
+  const [courses, setCourses] = useState<JoinableCourse[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
 
@@ -32,7 +32,7 @@ export default function BrowseCoursesPage() {
 
     setLoadFailed(false);
 
-    loadCourses(token).then((result) => {
+    loadJoinableCourses(token).then((result) => {
       if (cancelled) return;
       if (result.ok) setCourses(result.data.courses);
       else setLoadFailed(true);
@@ -45,7 +45,7 @@ export default function BrowseCoursesPage() {
 
   // Three independent, always-combinable filters (AND, not OR) — matches the Activity Log's
   // filter row (components/ActivityFilters.tsx): each field narrows the list on its own,
-  // client-side, as soon as the mock course list is in hand.
+  // client-side, as soon as the course list is in hand.
   const filtered = useMemo(() => {
     if (!courses) return [];
     const code = codeQuery.trim().toLowerCase();
@@ -63,8 +63,8 @@ export default function BrowseCoursesPage() {
   if (loading || !authorized) return null;
   if (!token || !profile) return null;
 
-  function handleJoined(updated: Course) {
-    setCourses((current) => current?.map((c) => (c.id === updated.id ? updated : c)) ?? current);
+  function handleJoined(courseId: string) {
+    setCourses((current) => current?.map((c) => (c.id === courseId ? { ...c, alreadyMember: true } : c)) ?? current);
   }
 
   return (
@@ -128,7 +128,7 @@ export default function BrowseCoursesPage() {
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {filtered.map((course) => (
-              <StudentCourseCard key={course.id} course={course} token={token} studentId={profile.user_id} onJoined={handleJoined} />
+              <StudentCourseCard key={course.id} course={course} token={token} onJoined={handleJoined} />
             ))}
           </div>
         )}

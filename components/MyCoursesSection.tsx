@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { loadCourses, type Course } from '../lib/mockCourses';
+import { loadJoinableCourses } from '../lib/studentCourseClient';
+import type { JoinableCourse } from '../lib/courseTypes';
 
 /**
  * GitHub #242 (UI-2): persistent "which courses am I in" display — the profile page half of the
@@ -10,22 +11,26 @@ import { loadCourses, type Course } from '../lib/mockCourses';
  * is already tight on space and a growing course list wouldn't fit it well). Same
  * "border-t pt-6, uppercase label" section style as the Change Password block right above it on
  * app/profile/page.tsx, so it reads as one more section of that page, not a bolted-on widget.
+ *
+ * Real now (lib/studentCourseClient.ts, REQ-DL-5) — filters on course.alreadyMember, which the
+ * server already scopes to the caller's own token, rather than a client-side studentId
+ * comparison against an embedded roster.
  */
-export function MyCoursesSection({ token, studentId }: { token: string; studentId: string }) {
-  const [courses, setCourses] = useState<Course[] | null>(null);
+export function MyCoursesSection({ token }: { token: string }) {
+  const [courses, setCourses] = useState<JoinableCourse[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
-    loadCourses(token).then((result) => {
+    loadJoinableCourses(token).then((result) => {
       if (cancelled) return;
-      if (result.ok) setCourses(result.data.courses.filter((course) => course.studentIds.includes(studentId)));
+      if (result.ok) setCourses(result.data.courses.filter((course) => course.alreadyMember));
     });
 
     return () => {
       cancelled = true;
     };
-  }, [token, studentId]);
+  }, [token]);
 
   return (
     <div className="mt-8 border-t border-gray-100 pt-6">

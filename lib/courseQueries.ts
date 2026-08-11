@@ -234,3 +234,66 @@ export async function unenrollStudent(supabase: SupabaseClient, params: { course
 
   return { error };
 }
+
+export type JoinableCourseRecord = {
+  course_id: string;
+  course_name: string;
+  course_code: string;
+  created_at: string;
+  professor_name: string;
+  student_count: number;
+  already_member: boolean;
+};
+
+/**
+ * Every course a student can self-enroll in by code (course_code IS NOT NULL — a codeless
+ * course is instructor-assigned only, REQ-DL-5) plus a per-caller alreadyMember flag.
+ *
+ * Two queries, merged in JS, rather than one filtered embed: student_course rows for every
+ * *other* enrolled student are never fetched at all, only the caller's own — the response this
+ * backs must never disclose which other students are in a course, only whether the caller is.
+ * professor_name's fallback chain mirrors loadEnrolledStudents's exactly (first/last name, else
+ * username, else a fixed fallback).
+ */
+export async function listJoinableCourses(supabase: SupabaseClient, userId: string) {
+  const { data, error } = await supabase
+    .from('course')
+    .select('course_id, course_name, course_code, created_at, creator:creator_id(first_name, last_name, username), student_course(count)')
+    .not('course_code', 'is', null)
+    .order('created_at', { ascending: false });
+
+  if (error) return { courses: null, error };
+
+  const { data: memberships, error: membershipError } = await supabase
+    .from('student_course')
+    .select('course_id')
+    .eq('user_id', userId);
+
+  if (membershipError) return { courses: null, error: membershipError };
+
+  const memberIds = new Set(((memberships ?? []) as { course_id: string }[]).map((m) => m.course_id));
+
+  type Row = {
+    course_id: string;
+    course_name: string;
+    course_code: string;
+    created_at: string;
+    creator: { first_name: string | null; last_name: string | null; username: string | null } | null;
+    student_course: { count: number }[] | null;
+  };
+
+  const courses: JoinableCourseRecord[] = ((data ?? []) as unknown as Row[]).map((row) => {
+    const fullName = [row.creator?.first_name, row.creator?.last_name].filter(Boolean).join(' ').trim();
+    return {
+      course_id: row.course_id,
+      course_name: row.course_name,
+      course_code: row.course_code,
+      created_at: row.created_at,
+      professor_name: fullName || row.creator?.username || 'Unknown instructor',
+      student_count: row.student_course?.[0]?.count ?? 0,
+      already_member: memberIds.has(row.course_id),
+    };
+  });
+
+  return { courses, error: null };
+}

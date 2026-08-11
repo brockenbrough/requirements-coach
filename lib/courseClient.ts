@@ -1,8 +1,9 @@
 'use client';
 
 // REQ-DL-5: real client for the instructor course routes — same role as
-// lib/acceptanceCriteriaClient.ts. lib/mockCourses.ts still backs the student-facing "browse/
-// join a course" UI (a different, still-mock feature, GitHub #242/UI-2) — see that file's header.
+// lib/acceptanceCriteriaClient.ts. The student-facing "browse/join a course" UI (GitHub #242/
+// UI-2) is real too now, via lib/studentCourseClient.ts — a separate file since these two are
+// genuinely different audiences/routes, not a style variant of each other.
 
 import type { CourseDetail, CourseMeta, CourseStudent, CourseSummary } from './courseTypes';
 import { toInstant } from './dateTime';

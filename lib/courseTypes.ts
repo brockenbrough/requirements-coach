@@ -22,3 +22,11 @@ export type CourseStudent = {
 };
 
 export type CourseDetail = CourseMeta & { students: CourseStudent[] };
+
+/** A course a browsing student can self-enroll in by code (course_code IS NOT NULL). */
+export type JoinableCourse = CourseMeta & {
+  professorName: string;
+  studentCount: number;
+  /** Scoped to the caller's own token — never discloses which other students are enrolled. */
+  alreadyMember: boolean;
+};
