@@ -25,11 +25,12 @@
 //   - POST/DELETE .../courses/:id/students — add/remove, backed by the real student_course
 //     table, with the search-by-name-or-email this mock's searchMockStudents stands in for
 //     actually querying "user" instead of a fixed list.
-//   - POST /api/courses/:id/join (API-2) — student-facing, deriving the student from the
-//     caller's own token, never a body param the way joinCourse still has to accept one here.
-//     The enrollmentKey comparison MUST happen in this route, server-side — see the SECURITY
-//     NOTE on Course.enrollmentKey below for why the mock's approach (comparing in the client)
-//     is only acceptable because it's mock data.
+//   - POST /api/courses/join is real now (app/api/courses/join/route.ts, REQ-DL-5) — but its
+//     contract is code-only (body: { code }, no id, no enrollmentKey) and derives the student
+//     from the token, unlike this mock's joinCourse(token, courseId, studentId, enrollmentKey),
+//     which StudentCourseCard.tsx still calls. Rewiring that component to the real route (and
+//     dropping the enrollmentKey step, which has no server-side equivalent — see the note on
+//     CreateCourseForm.tsx's enrollmentKey field above) is still open.
 //     GET /api/courses (student-facing "browse all") likely needs its own route too, rather
 //     than reusing the instructor's GET .../courses — a student shouldn't need
 //     instructor-scoped auth just to browse what's joinable, and its response must not include

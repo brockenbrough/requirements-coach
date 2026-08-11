@@ -72,3 +72,39 @@ export async function createCourseWithUniqueCode(
     error: { message: `Could not generate a unique course code after ${MAX_CODE_ATTEMPTS} attempts.` },
   };
 }
+
+/**
+ * Looks up a course by its shareable code (course.course_code, uq_course_code). maybeSingle,
+ * not single: an unknown code is a valid outcome (course: null, error: null), not a query
+ * failure. Caller normalizes case/whitespace before calling this (see the route).
+ */
+export async function findCourseByCode(supabase: SupabaseClient, code: string) {
+  const { data, error } = await supabase
+    .from('course')
+    .select(COURSE_COLUMNS)
+    .eq('course_code', code)
+    .maybeSingle();
+
+  return { course: error ? null : (data as CourseRecord | null), error };
+}
+
+/**
+ * Links a student to a course (student_course), idempotently. uq_student_course_user_course is
+ * a plain (user_id, course_id) unique index, not a status-scoped one like
+ * uq_session_log_one_active — on a 23505 the row that already exists *is* the membership being
+ * requested, so there's nothing to refetch: return alreadyMember: true directly. Any other
+ * error (including 23503 on fk_student_course_user — no "user" row yet) is returned as-is for
+ * the route to classify.
+ */
+export async function enrollStudentInCourse(
+  supabase: SupabaseClient,
+  params: { userId: string; courseId: string },
+) {
+  const { error } = await supabase
+    .from('student_course')
+    .insert({ user_id: params.userId, course_id: params.courseId });
+
+  if (!error) return { alreadyMember: false, error: null };
+  if (error.code === UNIQUE_VIOLATION) return { alreadyMember: true, error: null };
+  return { alreadyMember: false, error };
+}
