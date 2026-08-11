@@ -9,7 +9,7 @@ import { loadStudentScore } from '../lib/sessionClient';
 import { LLMProviderSettingsModal } from './LLMProviderSettingsModal';
 import { useUser } from './UserProvider';
 
-type NavKey = 'dashboard' | 'activities' | 'profile' | 'instructor' | 'instructor-questions' | 'instructor-settings' | 'instructor-ac';
+type NavKey = 'dashboard' | 'activities' | 'profile' | 'instructor' | 'instructor-questions' | 'instructor-settings' | 'instructor-ac' | 'instructor-courses';
 
 const STUDENT_NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
   { key: 'dashboard', label: 'Dashboard', href: '/dashboard' },
@@ -27,6 +27,7 @@ const STUDENT_NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
 // ask not to add a fourth, separately-visible nav entry for it.
 const INSTRUCTOR_NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
   { key: 'instructor', label: 'Instructor Dashboard', href: '/instructor' },
+  { key: 'instructor-courses', label: 'Courses', href: '/instructor/courses' },
   { key: 'instructor-questions', label: 'Question Bank', href: '/instructor/questions' },
   { key: 'instructor-ac', label: 'Acceptance Criteria', href: '/instructor/acceptance-criteria' },
   { key: 'profile', label: 'Profile', href: '/profile' },
@@ -90,6 +91,16 @@ function PencilIcon() {
   );
 }
 
+function GraduationCapIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3 2 8l10 5 10-5-10-5Z" />
+      <path d="M6 10.5V16c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5v-5.5" />
+      <path d="M22 8v6" />
+    </svg>
+  );
+}
+
 function GearIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -130,6 +141,7 @@ const NAV_ICONS: Record<NavKey, () => JSX.Element> = {
   activities: ListIcon,
   profile: UserIcon,
   instructor: UsersIcon,
+  'instructor-courses': GraduationCapIcon,
   'instructor-questions': BookIcon,
   'instructor-ac': PencilIcon,
   'instructor-settings': GearIcon,
