@@ -7,7 +7,7 @@ function truncate(text: string, max: number): string {
   return text.length > max ? text.slice(0, max) + '…' : text;
 }
 
-/** llmScore is out of 10 — bands mirror the app's usual high/medium/low thresholds (>=80%/50-79%/<50%), just scaled to /10 instead of /100. */
+/** llmScore is out of 10 — bands use this activity's own high/medium/low thresholds (>=80%/50-79%/<50%), independent of the Type A quiz's PASS_RATIO. */
 function scoreBadgeClasses(llmScore: number): string {
   const pct = llmScore * 10;
   if (pct >= 80) return 'bg-brand-teal/20 text-brand-teal-dark';

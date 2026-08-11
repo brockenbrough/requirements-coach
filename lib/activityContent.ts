@@ -323,7 +323,7 @@ export const ACTIVITIES: ActivityDefinition[] = [
     name: 'Identify Weak User Stories',
     summary: 'Spot the weakest of four user stories and see why it fails the INVEST criteria.',
     instructions:
-      'You\'ll see four user stories per round. Pick the single weakest one — the one that is least Independent, Negotiable, Valuable, Estimable, Small, or Testable. Score 80% or higher across a round to advance to the next difficulty level.',
+      'You\'ll see four user stories per round. Pick the single weakest one — the one that is least Independent, Negotiable, Valuable, Estimable, Small, or Testable. Score 75% or higher across a round to advance to the next difficulty level.',
     category: 'User Stories',
     titles: { 1: 'Story Apprentice', 2: 'Story Analyst', 3: 'Story Master' },
     questionBank: weakUserStories,
@@ -334,7 +334,7 @@ export const ACTIVITIES: ActivityDefinition[] = [
     name: 'Identify Weak Acceptance Criteria',
     summary: 'Given a user story, find the acceptance criterion that is unclear, incomplete, or not testable.',
     instructions:
-      'Each round shows a user story with four candidate acceptance criteria. Pick the single weakest one. Score 80% or higher across a round to advance to the next difficulty level.',
+      'Each round shows a user story with four candidate acceptance criteria. Pick the single weakest one. Score 75% or higher across a round to advance to the next difficulty level.',
     category: 'Acceptance Criteria',
     titles: { 1: 'Criteria Novice', 2: 'Criteria Analyst', 3: 'Criteria Expert' },
     questionBank: weakAcceptanceCriteria,

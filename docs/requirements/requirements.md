@@ -27,7 +27,7 @@ A Type A activity presents the student with a prompt (e.g., a user story, or a s
 
 Examples of Type A activities include "Identify Weak User Stories" and "Identify Weak Acceptance Criteria" (identifying the single weakest acceptance criterion from a list).
 
-The questions are stored in a question bank.  Each question has a difficulty rating (1=easy, 2=medium, 3=hard). Students start at the easy level.  The student is given 4 random questions from the bank at that level.  Each question is worth 25 points at most.  If the student has a cummulative score of 80% on the questions, then the student can advance to the next level of difficult.  Otherwise, the student must repeat the level before advancing by trying a new version of the quiz with a newly selected set of random questions.
+The questions are stored in a question bank.  Each question has a difficulty rating (1=easy, 2=medium, 3=hard). Students start at the easy level.  The student is given 4 random questions from the bank at that level.  Each question is worth 25 points at most.  If the student has a cummulative score of 75% on the questions, then the student can advance to the next level of difficult.  Otherwise, the student must repeat the level before advancing by trying a new version of the quiz with a newly selected set of random questions.
 
 # Storage Requirements
 
@@ -81,7 +81,7 @@ Each session record shall include:
 - the date and time the activity was completed
 - the cumulative score earned so far (sum of points accumulated as questions are answered, updated each time a question is answered)
 - the maximum possible score for the activity (default = 100)
-- passed field set to true if the activity as completed with a score higher than 80%.
+- passed field set to true if the activity as completed with a score higher than 75%.
 
 ---
 
@@ -117,7 +117,7 @@ Each session record shall include:
 
 **REQ-PL-2.8.** When the student has answered all questions in the activity, the application shall mark the progress record's status as "completed" and shall create a corresponding activity attempt record summarizing the overall result.
 
-**REQ-PL-2.9.** If the student's score is 80% or higher, the student is informed that they passed.  Otherwise, the student is informed they must take the quiz again to advance.
+**REQ-PL-2.9.** If the student's score is 75% or higher, the student is informed that they passed.  Otherwise, the student is informed they must take the quiz again to advance.
 
 **REQ-PL-2.10.** If the student passes the last difficulty level (3), the student is informed that they have successfully completed this skill.
 
