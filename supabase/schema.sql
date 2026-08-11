@@ -117,11 +117,24 @@ CREATE TABLE user_story (
 -- the row is inserted at submit time before grading runs, then a
 -- service-role grading step fills them in afterward ("write before
 -- disclose", same as answered_question_log).
+--
+-- session_id ties a submission to the practice session it was made in (which of the 4
+-- session_to_user_story rows it answers), the same relationship answered_question_log has to
+-- session_log/session_to_question. Nullable for now: the write-acceptance-criteria route
+-- doesn't create/reuse a session_log row yet (see session_to_user_story), so it has nothing to
+-- put here until that wiring lands — same "column exists ahead of the code that populates it"
+-- reasoning as question.user_id / user_story.creator_id. Once a session_id is set,
+-- uq_submission_session_user_story below stops a second submission for the same story in the
+-- same session from being anything other than rejected: the original is kept, never overwritten.
+-- The next story to work on is derived the same way nextUnansweredPosition derives the next
+-- question — the lowest session_to_user_story.position with no matching submission — not stored
+-- as an index anywhere.
 -- ---------------------------------------------------------------------
 CREATE TABLE submission (
     submission_id  uuid        NOT NULL,
     user_id        uuid        NOT NULL,
     user_story_id  uuid        NOT NULL,
+    session_id     uuid,
     submitted_text text        NOT NULL,
     llm_score      int4,
     llm_feedback   text,
@@ -240,6 +253,24 @@ CREATE TABLE session_to_question (
     position               int4   NOT NULL,
     PRIMARY KEY (session_to_question_id));
 
+-- ---------------------------------------------------------------------
+-- The 4 drawn user stories for a practice session, same shape and
+-- reasoning as session_to_question above: draw once at session start,
+-- persist the set and its order (position, 0..3) so a resumed session
+-- shows the same 4 stories in the same order rather than drawing again.
+-- Currently unused by any route — GET .../user-story
+-- (app/api/activities/write-acceptance-criteria/user-story/route.ts)
+-- still draws one random story per call with no session tied to it;
+-- wiring that route (or a new one) to write/read through this table is
+-- a follow-up story.
+-- ---------------------------------------------------------------------
+CREATE TABLE session_to_user_story (
+    session_to_user_story_id SERIAL NOT NULL,
+    session_id               uuid   NOT NULL,
+    user_story_id            uuid   NOT NULL,
+    position                 int4   NOT NULL,
+    PRIMARY KEY (session_to_user_story_id));
+
 
 -- ---------------------------------------------------------------------
 -- REQ-DL-4: Answered Question Log
@@ -301,6 +332,9 @@ ALTER TABLE user_story ADD CONSTRAINT fk_user_story_user FOREIGN KEY (creator_id
 
 ALTER TABLE submission ADD CONSTRAINT fk_submission_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
 ALTER TABLE submission ADD CONSTRAINT fk_submission_user_story FOREIGN KEY (user_story_id) REFERENCES user_story (user_story_id);
+-- ON DELETE CASCADE matches fk_answered_question_log_session — a submission has no meaning
+-- once the session it was made in is gone.
+ALTER TABLE submission ADD CONSTRAINT fk_submission_session FOREIGN KEY (session_id) REFERENCES session_log (session_id) ON DELETE CASCADE;
 
 ALTER TABLE instructor_llm_config ADD CONSTRAINT fk_instructor_llm_config_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
 
@@ -314,6 +348,9 @@ ALTER TABLE session_log ADD CONSTRAINT fk_session_log_activity_type FOREIGN KEY 
 
 ALTER TABLE session_to_question ADD CONSTRAINT fk_session_to_question_session FOREIGN KEY (session_id) REFERENCES session_log (session_id) ON DELETE CASCADE;
 ALTER TABLE session_to_question ADD CONSTRAINT fk_session_to_question_question FOREIGN KEY (question_id) REFERENCES question (question_id);
+
+ALTER TABLE session_to_user_story ADD CONSTRAINT fk_session_to_user_story_session FOREIGN KEY (session_id) REFERENCES session_log (session_id) ON DELETE CASCADE;
+ALTER TABLE session_to_user_story ADD CONSTRAINT fk_session_to_user_story_user_story FOREIGN KEY (user_story_id) REFERENCES user_story (user_story_id);
 
 
 -- =====================================================================
@@ -390,9 +427,23 @@ CREATE UNIQUE INDEX uq_instructor_llm_config_one_active
 ALTER TABLE session_to_question ADD CONSTRAINT uq_session_to_question_position UNIQUE (session_id, position);
 ALTER TABLE session_to_question ADD CONSTRAINT uq_session_to_question_question UNIQUE (session_id, question_id);
 
+-- Same two guarantees for the drawn user stories: no duplicate position, and — the third
+-- acceptance criterion of the "remember which 4 stories were drawn" story — no story drawn
+-- twice into the same session.
+ALTER TABLE session_to_user_story ADD CONSTRAINT uq_session_to_user_story_position UNIQUE (session_id, position);
+ALTER TABLE session_to_user_story ADD CONSTRAINT uq_session_to_user_story_story UNIQUE (session_id, user_story_id);
+
 -- One answer per question per session: the second insert fails and the
 -- answers route returns 409 plus the current session state.
 ALTER TABLE answered_question_log ADD CONSTRAINT uq_answered_question_log_session_question UNIQUE (session_id, question_id);
+
+-- Same guarantee for acceptance-criteria submissions: at most one submission per story per
+-- session, so a resubmission attempt fails (23505) instead of overwriting the original — the
+-- submissions route should handle that race the same way the answers route handles
+-- uq_answered_question_log_session_question. NULL session_id rows are exempt (Postgres treats
+-- every NULL as distinct from every other), which only affects submissions made before session
+-- wiring existed.
+ALTER TABLE submission ADD CONSTRAINT uq_submission_session_user_story UNIQUE (session_id, user_story_id);
 
 
 -- =====================================================================
@@ -436,6 +487,7 @@ ALTER TABLE question ENABLE ROW LEVEL SECURITY;
 ALTER TABLE answer ENABLE ROW LEVEL SECURITY;
 ALTER TABLE question_to_answer ENABLE ROW LEVEL SECURITY;
 ALTER TABLE session_to_question ENABLE ROW LEVEL SECURITY;
+ALTER TABLE session_to_user_story ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_story ENABLE ROW LEVEL SECURITY;
 ALTER TABLE instructor_llm_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE course ENABLE ROW LEVEL SECURITY;
@@ -504,10 +556,10 @@ CREATE POLICY own_submissions_insert ON submission
 -- The statements above are deliberately plain (no IF NOT EXISTS), so drop
 -- first. CASCADE takes care of the foreign key order:
 --
---   DROP TABLE IF EXISTS session_to_question, answered_question_log,
---                        session_log, question_to_answer, answer,
---                        question, user_badge, badge, title_definition,
---                        activity_type CASCADE;
+--   DROP TABLE IF EXISTS session_to_question, session_to_user_story,
+--                        answered_question_log, session_log,
+--                        question_to_answer, answer, question, user_badge,
+--                        badge, title_definition, activity_type CASCADE;
 --                        user_story, submission, instructor_llm_config,
 --                        student_course, course CASCADE;
 --   DROP FUNCTION IF EXISTS bump_session_score() CASCADE;
@@ -574,6 +626,16 @@ CREATE POLICY own_submissions_insert ON submission
 -- "user" and user_story to already exist, so run user_story's statements first if adding
 -- both to an existing database.
 
+-- submission.session_id (links a submission to the practice session/story it belongs to): if
+-- your submission table predates this column, add it, its FK, and the uniqueness guarantee —
+-- fk_submission_session requires session_log to already exist:
+--
+--   ALTER TABLE submission ADD COLUMN IF NOT EXISTS session_id uuid;
+--   ALTER TABLE submission ADD CONSTRAINT fk_submission_session
+--     FOREIGN KEY (session_id) REFERENCES session_log (session_id) ON DELETE CASCADE;
+--   ALTER TABLE submission ADD CONSTRAINT uq_submission_session_user_story
+--     UNIQUE (session_id, user_story_id);
+
 -- Instructor LLM Config table: also new, no rename path. Its FK (fk_instructor_llm_config_user)
 -- requires "user" to already exist. uq_instructor_llm_config_one_active is a global partial
 -- unique index (not scoped by user_id) — at most one row across the whole table can have
@@ -614,3 +676,10 @@ CREATE POLICY own_submissions_insert ON submission
 --
 --   ALTER TABLE course RENAME COLUMN user_id TO creator_id;
 --   ALTER TABLE course ALTER COLUMN course_code DROP NOT NULL;
+
+-- session_to_user_story (the 4 drawn user stories for a practice session, same shape as
+-- session_to_question): also a new table, no rename path. Its two FKs
+-- (fk_session_to_user_story_session, fk_session_to_user_story_user_story) require session_log
+-- and user_story to already exist. If your database has everything above and you only need this
+-- table, run just its CREATE TABLE, both FKs, uq_session_to_user_story_position,
+-- uq_session_to_user_story_story, and RLS statements from this script.
