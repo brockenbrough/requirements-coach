@@ -171,6 +171,38 @@ CREATE TABLE user_badge (
     badge_id uuid NOT NULL,
     PRIMARY KEY (user_badge_id));
 
+-- ---------------------------------------------------------------------
+-- REQ-DL-5: Course Enrollment Storage
+--
+-- A course belongs to one instructor (creator_id, named like
+-- user_story.creator_id). Students normally self-enroll with a
+-- course-specific code (course.course_code) rather than the class_code
+-- table from REQ-DL-3.4.1/3.4.2 — that code is entered once at account
+-- registration, whereas course_code is used per-course, after the
+-- student already has an account, and a student may join more than one
+-- course. course_code is nullable: a codeless course has no self-serve
+-- join path, e.g. an instructor assigning it directly to every student
+-- (student_course rows inserted by the instructor's own action) instead
+-- of students opting in themselves. student_course is the link table —
+-- a SERIAL surrogate id, like question_to_answer / session_to_question,
+-- since nothing else needs to reference an individual enrollment row by
+-- id.
+-- ---------------------------------------------------------------------
+CREATE TABLE course (
+    course_id   uuid      NOT NULL,
+    creator_id  uuid      NOT NULL,
+    course_name text      NOT NULL,
+    course_code text,
+    created_at  timestamp NOT NULL DEFAULT now(),
+    PRIMARY KEY (course_id));
+
+CREATE TABLE student_course (
+    student_course_id SERIAL    NOT NULL,
+    user_id            uuid      NOT NULL,
+    course_id          uuid      NOT NULL,
+    enrolled_at        timestamp NOT NULL DEFAULT now(),
+    PRIMARY KEY (student_course_id));
+
 
 -- =====================================================================
 -- REQ-DL-3 / REQ-PL-2.1: Session Log
@@ -254,6 +286,15 @@ ALTER TABLE question_to_answer ADD CONSTRAINT fk_question_to_answer_answer FOREI
 ALTER TABLE user_badge ADD CONSTRAINT fk_user_badge_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
 ALTER TABLE user_badge ADD CONSTRAINT fk_user_badge_badge FOREIGN KEY (badge_id) REFERENCES badge (badge_id);
 
+-- REQ-DL-5: course belongs to one instructor. No ON DELETE clause, same reasoning as
+-- fk_question_user — a deleted instructor account should not silently cascade-delete courses.
+ALTER TABLE course ADD CONSTRAINT fk_course_user FOREIGN KEY (creator_id) REFERENCES "user" (user_id);
+
+ALTER TABLE student_course ADD CONSTRAINT fk_student_course_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
+-- Deleting a course removes its enrollments too, unlike fk_course_user above — an enrollment
+-- has no meaning once the course it points at is gone.
+ALTER TABLE student_course ADD CONSTRAINT fk_student_course_course FOREIGN KEY (course_id) REFERENCES course (course_id) ON DELETE CASCADE;
+
 ALTER TABLE title_definition ADD CONSTRAINT fk_title_definition_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
 -- Who authored the story, for attribution/moderation.
 ALTER TABLE user_story ADD CONSTRAINT fk_user_story_user FOREIGN KEY (creator_id) REFERENCES "user" (user_id);
@@ -318,6 +359,16 @@ CREATE INDEX ix_session_log_ended_at ON session_log (ended_at DESC, started_at D
 -- loadAllStudentActivity/loadAllStudentSessions inner-join "user" filtered on role = 'student'
 -- so instructors don't turn up in their own report.
 CREATE INDEX ix_user_role ON "user" (role);
+
+-- REQ-DL-5: a student's enrollment code lookup ("join this course") must resolve to exactly
+-- one course, and a student cannot enroll in the same course twice. course_code is nullable
+-- (codeless = instructor-assigned, no self-serve join) and Postgres UNIQUE treats every NULL
+-- as distinct from every other NULL, so any number of codeless courses can coexist here.
+ALTER TABLE course ADD CONSTRAINT uq_course_code UNIQUE (course_code);
+ALTER TABLE student_course ADD CONSTRAINT uq_student_course_user_course UNIQUE (user_id, course_id);
+
+-- An instructor's "my courses" list filters on exactly this column.
+CREATE INDEX ix_course_creator_id ON course (creator_id);
 
 -- At most one running session per student and activity type. This is what
 -- makes POST /api/sessions idempotent: "start" and "resume" are the same
@@ -387,6 +438,8 @@ ALTER TABLE question_to_answer ENABLE ROW LEVEL SECURITY;
 ALTER TABLE session_to_question ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_story ENABLE ROW LEVEL SECURITY;
 ALTER TABLE instructor_llm_config ENABLE ROW LEVEL SECURITY;
+ALTER TABLE course ENABLE ROW LEVEL SECURITY;
+ALTER TABLE student_course ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE session_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE answered_question_log ENABLE ROW LEVEL SECURITY;
@@ -455,7 +508,8 @@ CREATE POLICY own_submissions_insert ON submission
 --                        session_log, question_to_answer, answer,
 --                        question, user_badge, badge, title_definition,
 --                        activity_type CASCADE;
---                        user_story, submission, instructor_llm_config CASCADE;
+--                        user_story, submission, instructor_llm_config,
+--                        student_course, course CASCADE;
 --   DROP FUNCTION IF EXISTS bump_session_score() CASCADE;
 --
 -- Leaving "user" out of that list keeps the profiles.
@@ -548,3 +602,15 @@ CREATE POLICY own_submissions_insert ON submission
 -- stops being true before this runs, backfill a value before adding the constraint:
 --
 --   ALTER TABLE instructor_llm_config ADD COLUMN IF NOT EXISTS model text NOT NULL;
+
+-- REQ-DL-5 (course / student_course): also new tables, no rename path. course.fk_course_user
+-- requires "user" to already exist; student_course's two FKs require "user" and course. If your
+-- database has everything above and you only need these two tables, run just their CREATE TABLE,
+-- fk_course_user, fk_student_course_user, fk_student_course_course, uq_course_code,
+-- uq_student_course_user_course, ix_course_creator_id, and RLS statements from this script.
+--
+-- If your course table predates the creator_id rename or the nullable course_code (both added
+-- before this table was ever deployed, so no real database has the old shape) —
+--
+--   ALTER TABLE course RENAME COLUMN user_id TO creator_id;
+--   ALTER TABLE course ALTER COLUMN course_code DROP NOT NULL;
