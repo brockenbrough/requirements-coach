@@ -17,6 +17,7 @@ import { getCachedActivityLog, setCachedActivityLog } from './activityLogStore';
 import { getCachedCompletedSessions, setCachedCompletedSessions } from './completedSessionsStore';
 import { getCachedScore, setCachedScore } from './scoreStore';
 import { getCachedInstructorStudents, setCachedInstructorStudents } from './instructorStudentsStore';
+import { getCachedInstructorQuestions, setCachedInstructorQuestions } from './instructorQuestionsStore';
 import {
   getCachedAcceptanceCriteriaSubmissions,
   setCachedAcceptanceCriteriaSubmissions,
@@ -371,12 +372,39 @@ export function loadInstructorActivities(token: string) {
  * The entire question bank (GET /api/instructor/questions, GitHub #170) — what the instructor's
  * Question Bank page renders instead of the old MOCK_QUESTIONS array.
  *
- * Deliberately **not** cached, same reasoning as loadInstructorActivities: createQuestion/
- * updateQuestion update the page's in-memory list directly from their own response instead of
- * refetching, so there's still no in-page action that would ever call forceRefresh here.
+ * Cache-first: returns the stored list on a hit, calls the network only on a miss or when
+ * forceRefresh is true — same pattern as loadInstructorStudents. Keyed by instructorId so
+ * switching accounts on the same device doesn't serve one instructor's questions to another.
+ *
+ * createQuestion/updateQuestion (below) only echo back ids, not a full QuizQuestion, so they
+ * can't write the cache themselves — app/instructor/questions/page.tsx's handleSaveQuestion
+ * does it once it has assembled the saved question, via setCachedInstructorQuestions. That's
+ * the invalidation for this cache: a save always leaves it holding the exact list the page just
+ * rendered, so the next mount (or another tab) never sees a bank that's missing the new question.
  */
-export function loadInstructorQuestions(token: string) {
-  return request<{ questions: QuizQuestion[] }>('/api/instructor/questions', { method: 'GET' }, token);
+export function loadInstructorQuestions(
+  token: string,
+  instructorId: string,
+  options: { forceRefresh?: boolean } = {},
+) {
+  if (!options.forceRefresh) {
+    const cached = getCachedInstructorQuestions(instructorId);
+    if (cached !== null) {
+      return Promise.resolve<ApiResult<{ questions: QuizQuestion[] }>>({
+        ok: true,
+        data: { questions: cached },
+      });
+    }
+  }
+
+  return request<{ questions: QuizQuestion[] }>('/api/instructor/questions', { method: 'GET' }, token).then(
+    (result) => {
+      if (result.ok) {
+        setCachedInstructorQuestions(instructorId, result.data.questions);
+      }
+      return result;
+    },
+  );
 }
 
 /** What POST/PATCH /api/instructor/questions echo back — ids only, not a full QuizQuestion. */
@@ -427,6 +455,17 @@ export function updateQuestion(token: string, question: QuizQuestion) {
     }),
     token,
   );
+}
+
+/**
+ * Writes the question bank into the cache loadInstructorQuestions reads from. Called by
+ * app/instructor/questions/page.tsx's handleSaveQuestion once a createQuestion/updateQuestion
+ * response has been merged into the page's list, so the cache is invalidated with the fresh
+ * data rather than just dropped — the next load (this tab or another) sees the save immediately
+ * instead of falling back to a network round trip.
+ */
+export function cacheInstructorQuestions(instructorId: string, questions: QuizQuestion[]): void {
+  setCachedInstructorQuestions(instructorId, questions);
 }
 
 /** One student row as returned by GET /api/instructor/students. */
