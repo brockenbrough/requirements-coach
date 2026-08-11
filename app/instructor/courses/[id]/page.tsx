@@ -25,6 +25,15 @@ function EditIcon() {
   );
 }
 
+function LockIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <rect x="5" y="11" width="14" height="9" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+    </svg>
+  );
+}
+
 /**
  * GitHub #241 follow-up: one course's detail view — code + roster management. Backend doesn't
  * exist yet, so this runs on lib/mockCourses.ts; see that file's header for what a real
@@ -105,7 +114,18 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
             <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
               <div>
                 <h1 className="text-2xl font-extrabold text-brand-navy">{course.name}</h1>
-                <p className="mt-1.5 text-sm font-semibold tracking-[0.15em] text-brand-purple">{course.code}</p>
+                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold tracking-[0.15em] text-brand-purple">{course.code}</span>
+                  {course.enrollmentKey ? (
+                    <span
+                      className="inline-flex items-center gap-1 rounded-full bg-brand-gold/25 px-2.5 py-0.5 text-[11px] font-extrabold text-brand-gold-dark"
+                      title="Students need the enrollment key to join"
+                    >
+                      <LockIcon />
+                      Key required
+                    </span>
+                  ) : null}
+                </div>
               </div>
               <div className="flex flex-none items-center gap-3">
                 <CopyCodeButton code={course.code} />

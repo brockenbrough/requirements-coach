@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { updateCourseName, type Course } from '../lib/mockCourses';
+import { updateCourse, type Course } from '../lib/mockCourses';
 
 const FOCUSABLE_SELECTOR = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
@@ -24,6 +24,8 @@ export function EditCourseModal({
   onSaved: (course: Course) => void;
 }) {
   const [name, setName] = useState(course.name);
+  // Empty when the course has no key — mirrors CreateCourseForm's "blank input = null" rule.
+  const [enrollmentKey, setEnrollmentKey] = useState(course.enrollmentKey ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -78,7 +80,7 @@ export function EditCourseModal({
     setSubmitting(true);
     setError('');
 
-    const result = await updateCourseName(token, course.id, name.trim());
+    const result = await updateCourse(token, course.id, { name: name.trim(), enrollmentKey: enrollmentKey.trim() || null });
     setSubmitting(false);
 
     if (!result.ok) {
@@ -134,6 +136,18 @@ export function EditCourseModal({
               className="mt-1.5 block w-full rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none transition focus:border-brand-purple"
             />
           </label>
+
+          <label className="mb-1.5 mt-4 block text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted">
+            Enrollment key (optional)
+            <input
+              type="text"
+              value={enrollmentKey}
+              onChange={(event) => setEnrollmentKey(event.target.value)}
+              placeholder="Leave empty for open enrollment"
+              className="mt-1.5 block w-full rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none transition focus:border-brand-purple"
+            />
+          </label>
+          <p className="mt-1.5 text-xs font-semibold text-brand-ink-muted">Clear this field to remove the key and re-open enrollment.</p>
 
           {error ? <p className="mt-3 text-xs font-bold text-brand-danger">{error}</p> : null}
 
