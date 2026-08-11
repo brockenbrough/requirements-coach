@@ -1,13 +1,13 @@
 'use client';
 
-// REQ-DL-5: real client for POST /api/instructor/courses — same role as
-// lib/acceptanceCriteriaClient.ts for the write-acceptance-criteria routes. lib/mockCourses.ts
-// still backs every other course operation (list/detail/edit/roster) until their routes exist;
-// see that file's header for what's still missing.
+// REQ-DL-5: real client for the instructor course routes — same role as
+// lib/acceptanceCriteriaClient.ts. lib/mockCourses.ts still backs the student-facing "browse/
+// join a course" UI (a different, still-mock feature, GitHub #242/UI-2) — see that file's header.
 
-export type { Course } from './mockCourses';
-import type { Course } from './mockCourses';
+import type { CourseDetail, CourseMeta, CourseStudent, CourseSummary } from './courseTypes';
 import { toInstant } from './dateTime';
+
+export type { CourseDetail, CourseMeta, CourseStudent, CourseSummary } from './courseTypes';
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number; error: string };
 
@@ -43,49 +43,82 @@ function postJson(payload: unknown): RequestInit {
   };
 }
 
-type CreatedCourse = { id: string; name: string; code: string; createdAt: string };
+function patchJson(payload: unknown): RequestInit {
+  return {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  };
+}
 
 /**
  * Creates a course and generates its unique join code server-side (POST /api/instructor/courses).
  *
- * professorName and enrollmentKey never reach the request — the route only accepts `name`:
- *  - professorName isn't a course column at all (course only stores creator_id); it's merged
- *    in here purely so the caller's already-known display name shows up immediately, the same
- *    denormalized-display-name idea lib/mockCourses.ts documents, just computed client-side
- *    until a real GET route exists to join it from "user" instead.
- *  - enrollmentKey has no column on the real `course` table (REQ-DL-5 uses a nullable
- *    course_code instead — a codeless course is instructor-assigned rather than gated by a
- *    key). It's echoed back into the local Course object so the form's existing behavior is
- *    unchanged, but it is NOT persisted; it will not survive a reload or another device.
- *
- * studentIds starts empty since a brand-new course has no student_course rows yet.
+ * No professorName or enrollmentKey parameter: course only stores creator_id (no display-name
+ * column, and nothing renders one today), and course_code's nullability is REQ-DL-5's actual
+ * answer to "open vs. instructor-assigned" enrollment, not a gate layered on top of a code — so
+ * neither ever had a column to persist to. The create-course form no longer collects either.
  */
-export async function createCourse(
-  token: string,
-  name: string,
-  professorName: string,
-  enrollmentKey: string | null,
-): Promise<ApiResult<{ course: Course }>> {
-  const result = await request<{ course: CreatedCourse }>(
-    '/api/instructor/courses',
-    postJson({ name }),
+export async function createCourse(token: string, name: string): Promise<ApiResult<{ course: CourseSummary }>> {
+  const result = await request<{ course: CourseMeta }>('/api/instructor/courses', postJson({ name }), token);
+  if (!result.ok) return result;
+
+  return { ok: true, data: { course: { ...result.data.course, createdAt: toInstant(result.data.course.createdAt), studentCount: 0 } } };
+}
+
+/** Every course the calling instructor created, with a per-course enrollment count (GET /api/instructor/courses). */
+export async function loadCourses(token: string): Promise<ApiResult<{ courses: CourseSummary[] }>> {
+  const result = await request<{ courses: CourseSummary[] }>('/api/instructor/courses', { method: 'GET' }, token);
+  if (!result.ok) return result;
+
+  return { ok: true, data: { courses: result.data.courses.map((c) => ({ ...c, createdAt: toInstant(c.createdAt) })) } };
+}
+
+/**
+ * One course plus its enrolled students' attempt/score summaries (GET /api/instructor/courses/{id}).
+ * The roster arrives fully embedded — no separate per-student lookup needed.
+ */
+export async function loadCourse(token: string, courseId: string): Promise<ApiResult<{ course: CourseDetail }>> {
+  const result = await request<{ course: CourseMeta; students: CourseStudent[] }>(
+    `/api/instructor/courses/${encodeURIComponent(courseId)}`,
+    { method: 'GET' },
     token,
   );
   if (!result.ok) return result;
 
-  const { course } = result.data;
-  return {
-    ok: true,
-    data: {
-      course: {
-        id: course.id,
-        name: course.name,
-        code: course.code,
-        createdAt: toInstant(course.createdAt),
-        studentIds: [],
-        professorName,
-        enrollmentKey,
-      },
-    },
-  };
+  const { course, students } = result.data;
+  return { ok: true, data: { course: { ...course, createdAt: toInstant(course.createdAt), students } } };
+}
+
+/** Renames a course (PATCH /api/instructor/courses/{id}). No enrollmentKey — see createCourse. */
+export async function updateCourse(token: string, courseId: string, updates: { name: string }): Promise<ApiResult<{ course: CourseMeta }>> {
+  const result = await request<{ course: CourseMeta }>(
+    `/api/instructor/courses/${encodeURIComponent(courseId)}`,
+    patchJson({ name: updates.name }),
+    token,
+  );
+  if (!result.ok) return result;
+
+  return { ok: true, data: { course: { ...result.data.course, createdAt: toInstant(result.data.course.createdAt) } } };
+}
+
+/** Enrolls a student in a course (POST /api/instructor/courses/{id}/students). */
+export function addStudentToCourse(token: string, courseId: string, studentId: string): Promise<ApiResult<{ student: CourseStudent }>> {
+  return request<{ student: CourseStudent }>(
+    `/api/instructor/courses/${encodeURIComponent(courseId)}/students`,
+    postJson({ studentId }),
+    token,
+  );
+}
+
+/**
+ * Removes a student's enrollment link only (DELETE /api/instructor/courses/{id}/students/{studentId}).
+ * Their attempt/score history elsewhere in the app is untouched — see the route's docblock.
+ */
+export function removeStudentFromCourse(token: string, courseId: string, studentId: string): Promise<ApiResult<{ studentId: string }>> {
+  return request<{ studentId: string }>(
+    `/api/instructor/courses/${encodeURIComponent(courseId)}/students/${encodeURIComponent(studentId)}`,
+    { method: 'DELETE' },
+    token,
+  );
 }

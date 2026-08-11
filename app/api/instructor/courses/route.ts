@@ -1,10 +1,52 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { requireInstructor } from '../../../../lib/instructorAuth';
-import { createCourseWithUniqueCode } from '../../../../lib/courseQueries';
+import { createCourseWithUniqueCode, listCoursesForInstructor } from '../../../../lib/courseQueries';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
   return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+}
+
+/**
+ * GET /api/instructor/courses — every course the calling instructor created, with a per-course
+ * enrollment count (ix_course_creator_id backs the scoping filter).
+ *
+ * - 401 missing/invalid bearer token
+ * - 403 caller isn't an instructor (no body)
+ * - 200 { courses: [{ id, name, code, createdAt, studentCount }] }
+ * - 500 Supabase not configured, or the query fails
+ */
+export async function GET(request: Request) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
+
+  const guard = await requireInstructor(supabase, getToken(request));
+  if (!guard.ok) {
+    return guard.status === 403
+      ? new Response(null, { status: 403 })
+      : Response.json(
+          { error: guard.status === 401 ? 'Unauthorized' : 'Supabase credentials are not configured.' },
+          { status: guard.status },
+        );
+  }
+
+  const { courses, error } = await listCoursesForInstructor(supabase, guard.user_id);
+  if (error || !courses) {
+    return Response.json({ error: error?.message ?? 'Could not load courses.' }, { status: 500 });
+  }
+
+  return Response.json(
+    {
+      courses: courses.map((c) => ({
+        id: c.course_id,
+        name: c.course_name,
+        code: c.course_code,
+        createdAt: c.created_at,
+        studentCount: c.student_count,
+      })),
+    },
+    { status: 200 },
+  );
 }
 
 /**

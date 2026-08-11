@@ -17,6 +17,7 @@ const h = vi.hoisted(() => {
         return builder;
       },
       eq: () => builder,
+      order: () => builder,
       maybeSingle: async () => result,
       single: async () => result,
       then: (onOk: (r: Result) => unknown, onErr?: (e: unknown) => unknown) =>
@@ -48,7 +49,7 @@ vi.mock('../../lib/supabase', () => ({
   }),
 }));
 
-import { POST } from '../../app/api/instructor/courses/route';
+import { GET, POST } from '../../app/api/instructor/courses/route';
 
 function queueRole(role: string) {
   queue('user', { data: { role }, error: null });
@@ -71,6 +72,24 @@ function courseRow(overrides: Partial<Record<string, unknown>> = {}) {
     course_name: 'Software Requirements',
     course_code: 'ABCDEF',
     created_at: '2026-08-11T10:00:00',
+    ...overrides,
+  };
+}
+
+function getRequest(token: string | null = 'valid-token') {
+  return new Request('http://localhost/api/instructor/courses', {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+}
+
+/** A course row as GET's embedded student_course(count) select actually returns it. */
+function courseWithCountRow(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    course_id: 'course-1',
+    course_name: 'Software Requirements',
+    course_code: 'ABCDEF',
+    created_at: '2026-08-11T10:00:00',
+    student_course: [{ count: 3 }],
     ...overrides,
   };
 }
@@ -190,5 +209,55 @@ describe('POST /api/instructor/courses', () => {
     const body = await res.json();
     expect(body.error).toBe('DB failure');
     expect(h.state.inserts.filter((i) => i.table === 'course')).toHaveLength(1);
+  });
+});
+
+describe('GET /api/instructor/courses', () => {
+  it('returns 401 without a token', async () => {
+    const res = await GET(getRequest(null));
+    expect(res.status).toBe(401);
+    expect(h.state.tables).toEqual([]);
+  });
+
+  it('returns 403 with an empty body when the caller is a student', async () => {
+    queueRole('student');
+    const res = await GET(getRequest());
+    expect(res.status).toBe(403);
+    expect(await res.text()).toBe('');
+    expect(h.state.tables).not.toContain('course');
+  });
+
+  it('returns 200 with an empty list when the instructor has no courses', async () => {
+    queueRole('instructor');
+    queue('course', { data: [], error: null });
+
+    const res = await GET(getRequest());
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.courses).toEqual([]);
+  });
+
+  it('returns 200 with courses mapped from the embedded student_course(count) shape', async () => {
+    queueRole('instructor');
+    queue('course', { data: [courseWithCountRow(), courseWithCountRow({ course_id: 'course-2', student_course: [{ count: 0 }] })], error: null });
+
+    const res = await GET(getRequest());
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.courses).toEqual([
+      { id: 'course-1', name: 'Software Requirements', code: 'ABCDEF', createdAt: '2026-08-11T10:00:00', studentCount: 3 },
+      { id: 'course-2', name: 'Software Requirements', code: 'ABCDEF', createdAt: '2026-08-11T10:00:00', studentCount: 0 },
+    ]);
+  });
+
+  it('returns 500 when the query fails', async () => {
+    queueRole('instructor');
+    queue('course', { data: null, error: { message: 'DB down' } });
+
+    const res = await GET(getRequest());
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe('DB down');
   });
 });

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { updateCourse, type Course } from '../lib/mockCourses';
+import { updateCourse, type CourseDetail, type CourseMeta } from '../lib/courseClient';
 
 const FOCUSABLE_SELECTOR = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
@@ -10,7 +10,8 @@ const FOCUSABLE_SELECTOR = 'button, [href], input, select, textarea, [tabindex]:
  * components/QuestionFormModal.tsx (GitHub #120/#158) — same mount/unmount-is-open, focus-trap,
  * Escape-to-close, backdrop-click-to-close, and focus-return pattern, since that's the
  * established modal convention every popup in this project follows independently rather than
- * through a shared base component.
+ * through a shared base component. Fully real (lib/courseClient.ts, REQ-DL-5) — no
+ * enrollment-key field: the real course table has no such column.
  */
 export function EditCourseModal({
   course,
@@ -18,14 +19,12 @@ export function EditCourseModal({
   onClose,
   onSaved,
 }: {
-  course: Course;
+  course: CourseDetail;
   token: string;
   onClose: () => void;
-  onSaved: (course: Course) => void;
+  onSaved: (course: CourseMeta) => void;
 }) {
   const [name, setName] = useState(course.name);
-  // Empty when the course has no key — mirrors CreateCourseForm's "blank input = null" rule.
-  const [enrollmentKey, setEnrollmentKey] = useState(course.enrollmentKey ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -80,7 +79,7 @@ export function EditCourseModal({
     setSubmitting(true);
     setError('');
 
-    const result = await updateCourse(token, course.id, { name: name.trim(), enrollmentKey: enrollmentKey.trim() || null });
+    const result = await updateCourse(token, course.id, { name: name.trim() });
     setSubmitting(false);
 
     if (!result.ok) {
@@ -136,18 +135,6 @@ export function EditCourseModal({
               className="mt-1.5 block w-full rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none transition focus:border-brand-purple"
             />
           </label>
-
-          <label className="mb-1.5 mt-4 block text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted">
-            Enrollment key (optional)
-            <input
-              type="text"
-              value={enrollmentKey}
-              onChange={(event) => setEnrollmentKey(event.target.value)}
-              placeholder="Leave empty for open enrollment"
-              className="mt-1.5 block w-full rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none transition focus:border-brand-purple"
-            />
-          </label>
-          <p className="mt-1.5 text-xs font-semibold text-brand-ink-muted">Clear this field to remove the key and re-open enrollment.</p>
 
           {error ? <p className="mt-3 text-xs font-bold text-brand-danger">{error}</p> : null}
 
