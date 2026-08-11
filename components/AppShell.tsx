@@ -9,11 +9,24 @@ import { loadStudentScore } from '../lib/sessionClient';
 import { LLMProviderSettingsModal } from './LLMProviderSettingsModal';
 import { useUser } from './UserProvider';
 
-type NavKey = 'dashboard' | 'activities' | 'profile' | 'instructor' | 'instructor-questions' | 'instructor-settings' | 'instructor-ac' | 'instructor-courses';
+type NavKey =
+  | 'dashboard'
+  | 'activities'
+  | 'courses'
+  | 'profile'
+  | 'instructor'
+  | 'instructor-questions'
+  | 'instructor-settings'
+  | 'instructor-ac'
+  | 'instructor-courses';
 
+// GitHub #242 (UI-2): 'courses' here is the student-facing browse/join page (app/courses/page.tsx)
+// — a distinct NavKey/route from the instructor's 'instructor-courses' (create/manage), same
+// split as every other instructor-vs-student pair in this sidebar.
 const STUDENT_NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
   { key: 'dashboard', label: 'Dashboard', href: '/dashboard' },
   { key: 'activities', label: 'Activities', href: '/activities' },
+  { key: 'courses', label: 'Courses', href: '/courses' },
   { key: 'profile', label: 'Profile', href: '/profile' },
 ];
 
@@ -139,6 +152,7 @@ function CloseIcon() {
 const NAV_ICONS: Record<NavKey, () => JSX.Element> = {
   dashboard: GridIcon,
   activities: ListIcon,
+  courses: GraduationCapIcon,
   profile: UserIcon,
   instructor: UsersIcon,
   'instructor-courses': GraduationCapIcon,

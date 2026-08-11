@@ -73,7 +73,7 @@ Every protected API route then repeats its own preamble: read `Authorization: Be
 - **Scores roll up in the database.** The `trg_answered_question_log_score` trigger adds to `session_log.cumulative_score` inside the insert's transaction; routes re-read the row afterwards rather than computing the total locally.
 - **Column visibility is a query-level concern.** `SESSION_QUESTION_COLUMNS` in `lib/sessionQueries.ts` deliberately omits `is_correct` and `explanation`; only `loadQuestionOptions` (feedback path) selects them. Keep new queries on that split.
 - **Option order is shuffled server-side** with `lib/shuffleArray.ts` (Fisher-Yates, not a `sort()` comparator — the biased-comparator version was a real bug, see `__tests__/lib/shuffleArray.test.ts`).
-- `lib/sessionRules.ts` holds the shared constants (`QUESTIONS_PER_SESSION = 4`, `START_DIFFICULTY_LEVEL = 1`, `PASS_RATIO = 0.8`, `SESSION_COLUMNS`, `SESSION_STATUSES`) so routes cannot drift apart. Partial credit is a known gap: `scoreForAnswer` is all-or-nothing until `answer` gains a score column.
+- `lib/sessionRules.ts` holds the shared constants (`QUESTIONS_PER_SESSION = 4`, `START_DIFFICULTY_LEVEL = 1`, `PASS_RATIO = 0.75`, `SESSION_COLUMNS`, `SESSION_STATUSES`) so routes cannot drift apart. Partial credit is a known gap: `scoreForAnswer` is all-or-nothing until `answer` gains a score column.
 - Gamification is derived, not stored: `lib/scoreQueries.ts` sums the best *passing* score per (activity_type, difficulty_level); `lib/titleQueries.ts` looks up `title_definition` by the highest passed level per activity type. Nothing about score or title lives on the student row.
 
 ### Reading sessions: which route answers which question

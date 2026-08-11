@@ -1,8 +1,8 @@
 'use client';
 
-// GitHub #241 (UI-1) + its follow-up (course overview/detail/roster management): mock for
-// API-1 and friends — the courses backend, which doesn't exist yet (built separately, per the
-// issue). Same "mock now, swap later" shape as lib/acceptanceCriteriaClient.ts and
+// GitHub #241 (UI-1, instructor create/manage) + #242 (UI-2, student browse/join): mock for
+// API-1/API-2 and friends — the courses backend, which doesn't exist yet (built separately, per
+// both issues). Same "mock now, swap later" shape as lib/acceptanceCriteriaClient.ts and
 // lib/instructorLlmConfigClient.ts: ApiResult<T>, a token parameter already threaded through
 // even though unused, and a simulated network delay so the UI's disabled/loading states are
 // exercised the same way they will be against the real calls.
@@ -13,11 +13,19 @@
 //     (course_id, student user_id) instead of this file's studentIds: string[] array.
 //   - POST /api/instructor/courses, PATCH /api/instructor/courses/:id, GET .../courses,
 //     GET .../courses/:id — all behind requireInstructor() (lib/instructorAuth.ts), and scoped
-//     so an instructor only ever sees/edits their own courses.
+//     so an instructor only ever sees/edits their own courses. createCourse's professorName
+//     must come from the instructor's own "user" row server-side, never a client-supplied value.
 //   - POST/DELETE .../courses/:id/students — add/remove, with the search-by-name-or-email this
 //     mock's searchMockStudents stands in for actually querying "user" instead of a fixed list.
-//   - Whatever "a student joins a course by code" flow eventually consumes the code — still out
-//     of scope here, same as it was for the original create-course issue.
+//   - POST /api/courses/:id/join (API-2) — student-facing, deriving the student from the
+//     caller's own token, never a body param the way joinCourse still has to accept one here.
+//     The enrollmentKey comparison MUST happen in this route, server-side — see the SECURITY
+//     NOTE on Course.enrollmentKey below for why the mock's approach (comparing in the client)
+//     is only acceptable because it's mock data.
+//     GET /api/courses (student-facing "browse all") likely needs its own route too, rather
+//     than reusing the instructor's GET .../courses — a student shouldn't need
+//     instructor-scoped auth just to browse what's joinable, and its response must not include
+//     the raw enrollmentKey (a requiresEnrollmentKey boolean instead).
 //   - This whole mock is one shared module-level array — it resets on a hard reload and is not
 //     scoped per instructor (every instructor account sees the same mock courses). A real
 //     implementation scopes every read/write to the caller's own courses.
@@ -29,6 +37,24 @@ export type Course = {
   createdAt: string;
   /** Real backend: a course_student join table, not an embedded array — see file header. */
   studentIds: string[];
+  /**
+   * Denormalized display name — a real GET would join this from the instructor's "user" row
+   * (first_name/last_name), the same way it's derived here from the real signed-in instructor's
+   * own profile at creation time (see CreateCourseForm), not stored as a separate relation.
+   */
+  professorName: string;
+  /**
+   * GitHub #242 follow-up: optional gate on self-service joining — null means open enrollment.
+   * Mirrors a nullable DB column exactly (not an empty string for "none"), so `!!course.enrollmentKey`
+   * is always the right "does this course require a key" check on both sides.
+   *
+   * SECURITY NOTE for the real integration: this mock embeds the real key value directly in
+   * what loadCourses/loadCourse return, which a real GET /api/courses must never do — the
+   * student-facing list response should only ever carry a boolean (e.g. requiresEnrollmentKey),
+   * and the actual key comparison in joinCourse below must happen server-side in the real
+   * route, not in client code where the key would be readable in the network response/bundle.
+   */
+  enrollmentKey: string | null;
 };
 
 /**
@@ -89,6 +115,9 @@ let mockCourses: Course[] = [
     code: 'FALL26',
     createdAt: new Date(Date.now() - 21 * 24 * 60 * 60 * 1000).toISOString(),
     studentIds: ['mock-student-1', 'mock-student-2', 'mock-student-3', 'mock-student-4'],
+    professorName: 'Dr. Brockenbrough',
+    // Has a key, so both states (with/without) are exercisable in the UI out of the box.
+    enrollmentKey: 'REQ2026',
   },
   {
     id: 'mock-course-2',
@@ -96,6 +125,8 @@ let mockCourses: Course[] = [
     code: 'SPR26X',
     createdAt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(),
     studentIds: ['mock-student-5', 'mock-student-6'],
+    professorName: 'Dr. Osei',
+    enrollmentKey: null,
   },
 ];
 
@@ -124,9 +155,17 @@ export async function loadCourse(token: string, courseId: string): Promise<ApiRe
 /**
  * Mocks POST /api/instructor/courses. Takes `token` (unused for now) so the call site already
  * matches every other client wrapper's request(url, init, token) convention — swapping this for
- * a real fetch later doesn't change the signature CreateCourseForm calls it with.
+ * a real fetch later doesn't change the signature CreateCourseForm calls it with. professorName
+ * is passed in by the caller (the real signed-in instructor's own name) rather than looked up
+ * here — a real route would derive it server-side from the "user" row the token resolves to,
+ * the same way it derives user_id everywhere else in this app, never trust a client-supplied name.
  */
-export async function createCourse(token: string, name: string): Promise<ApiResult<{ course: Course }>> {
+export async function createCourse(
+  token: string,
+  name: string,
+  professorName: string,
+  enrollmentKey: string | null,
+): Promise<ApiResult<{ course: Course }>> {
   void token;
   await delay(MOCK_DELAY_MS);
 
@@ -140,24 +179,36 @@ export async function createCourse(token: string, name: string): Promise<ApiResu
     code: generateCourseCode(),
     createdAt: new Date().toISOString(),
     studentIds: [],
+    professorName,
+    enrollmentKey,
   };
 
   mockCourses = [course, ...mockCourses];
   return { ok: true, data: { course } };
 }
 
-/** Mocks PATCH /api/instructor/courses/:id — currently only the name is editable. */
-export async function updateCourseName(token: string, courseId: string, name: string): Promise<ApiResult<{ course: Course }>> {
+/**
+ * Mocks PATCH /api/instructor/courses/:id — name and enrollmentKey together (one Save in
+ * EditCourseModal, one call). Renamed from the original updateCourseName now that it covers
+ * more than the name.
+ */
+export async function updateCourse(
+  token: string,
+  courseId: string,
+  updates: { name: string; enrollmentKey: string | null },
+): Promise<ApiResult<{ course: Course }>> {
   void token;
   await delay(MOCK_DELAY_MS);
 
-  if (!name.trim()) {
+  if (!updates.name.trim()) {
     return { ok: false, status: 400, error: 'Course name is required.' };
   }
   const found = findCourseOrError(courseId);
   if (!found.ok) return found;
 
-  mockCourses = mockCourses.map((c) => (c.id === courseId ? { ...c, name: name.trim() } : c));
+  mockCourses = mockCourses.map((c) =>
+    c.id === courseId ? { ...c, name: updates.name.trim(), enrollmentKey: updates.enrollmentKey } : c,
+  );
   return { ok: true, data: { course: mockCourses.find((c) => c.id === courseId)! } };
 }
 
@@ -174,6 +225,39 @@ export async function addStudentToCourse(token: string, courseId: string, studen
 
   mockCourses = mockCourses.map((c) => (c.id === courseId ? { ...c, studentIds: [...c.studentIds, studentId] } : c));
   return { ok: true, data: { course: mockCourses.find((c) => c.id === courseId)! } };
+}
+
+/**
+ * GitHub #242 (UI-2) + follow-up (enrollment key): mocks POST /api/courses/:id/join — a student
+ * joining a course themselves, by code/browsing rather than being added by an instructor.
+ * Validates enrollmentKey here, in the mock, purely so the UI's error path has something real
+ * to exercise — this comparison MUST move server-side in the real route (see this file's header
+ * and the SECURITY NOTE on Course.enrollmentKey); a real GET response should never have sent
+ * the key to the client in the first place, so there'd be nothing to compare against here.
+ *
+ * Delegates to addStudentToCourse for the actual studentIds mutation once the key checks out —
+ * kept as its own export because the real API-2 this stands in for is a genuinely different
+ * endpoint from addStudentToCourse's real counterpart: self-service, and — like every other
+ * student-facing route in this app — deriving the student from the caller's own token
+ * server-side, never a body param the way this mock still has to accept one.
+ */
+export async function joinCourse(
+  token: string,
+  courseId: string,
+  studentId: string,
+  enrollmentKey?: string,
+): Promise<ApiResult<{ course: Course }>> {
+  void token;
+  await delay(MOCK_DELAY_MS);
+
+  const found = findCourseOrError(courseId);
+  if (!found.ok) return found;
+
+  if (found.course.enrollmentKey && found.course.enrollmentKey !== (enrollmentKey ?? '').trim()) {
+    return { ok: false, status: 403, error: 'Incorrect enrollment key. Check with your instructor and try again.' };
+  }
+
+  return addStudentToCourse(token, courseId, studentId);
 }
 
 /** Mocks DELETE /api/instructor/courses/:id/students/:studentId. */

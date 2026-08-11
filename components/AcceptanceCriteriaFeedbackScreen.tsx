@@ -13,7 +13,8 @@ export function AcceptanceCriteriaFeedbackScreen({
   userStory: UserStoryPrompt;
   result: AcceptanceCriteriaResult;
 }) {
-  // 8/10 mirrors the Type A quiz's 80% pass threshold (lib/sessionRules.ts's PASS_RATIO).
+  // 8/10 is this activity's own pass bar, independent of the Type A quiz's PASS_RATIO
+  // (lib/sessionRules.ts) — the two are scored on different scales and are not coupled.
   const passed = result.score >= 8;
 
   return (

@@ -112,7 +112,7 @@ describe('GET /api/students/{studentId}/score', () => {
     ]);
   });
 
-  // A completed attempt below the 80% pass mark still contributes — passing is not the filter.
+  // A completed attempt below the 75% pass mark still contributes — passing is not the filter.
   it('counts a completed session that was not passed', async () => {
     queue('session_log', {
       data: [{ activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 1, cumulative_score: 50 }],
