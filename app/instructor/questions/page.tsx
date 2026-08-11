@@ -5,7 +5,7 @@ import { AppShell } from '../../../components/AppShell';
 import { QuestionFormModal } from '../../../components/QuestionFormModal';
 import { ACTIVITIES, getActivityByType } from '../../../lib/activityContent';
 import type { ActivityType } from '../../../lib/activityTypes';
-import { loadInstructorQuestions } from '../../../lib/sessionClient';
+import { createQuestion, loadInstructorQuestions, updateQuestion } from '../../../lib/sessionClient';
 import type { QuizQuestion } from '../../../lib/quizQuestionTypes';
 import { useRequireRole } from '../../../lib/useRequireRole';
 
@@ -26,10 +26,9 @@ function EditIcon() {
 type ModalState = { mode: 'add' } | { mode: 'edit'; question: QuizQuestion };
 
 /**
- * Read-only browse of the question bank (GitHub #170, fetched from GET /api/instructor/questions),
- * plus adding (GitHub #120) and editing (GitHub #158) a question — both through the same popup
- * form. The add/edit flow still only updates local React state; wiring it to the existing
- * POST /api/instructor/questions is a separate story.
+ * Browse of the question bank (GitHub #170, fetched from GET /api/instructor/questions), plus
+ * adding (GitHub #120, POST /api/instructor/questions) and editing (GitHub #158,
+ * PATCH /api/instructor/questions/{id}) a question — both through the same popup form.
  */
 export default function InstructorQuestionsPage() {
   const { token, loading, authorized } = useRequireRole('instructor');
@@ -68,28 +67,47 @@ export default function InstructorQuestionsPage() {
     return true;
   });
 
-  function handleSaveQuestion(question: QuizQuestion) {
-    // The id already existing in state is what tells an edit and a new question apart — the
-    // form itself doesn't need to report which one it was.
-    const isEdit = (questions ?? []).some((existing) => existing.id === question.id);
+  async function handleSaveQuestion(question: QuizQuestion): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (!token) return { ok: false, error: 'Your session has expired. Please sign in again.' };
+
+    // The modal's own mode (not an id lookup) is what tells an edit and a new question apart —
+    // a client-generated placeholder id could otherwise collide with nothing and look like "add".
+    const isEdit = modalState?.mode === 'edit';
+    const result = isEdit ? await updateQuestion(token, question) : await createQuestion(token, question);
+    if (!result.ok) return { ok: false, error: result.error };
+
+    // POST assigns real UUIDs server-side; the modal's placeholder ids (q-${Date.now()}, etc.)
+    // must not be kept, or a later edit would send ids the PATCH route has never seen.
+    const savedQuestion: QuizQuestion = isEdit
+      ? question
+      : {
+          ...question,
+          id: result.data.questionId,
+          answerOptions: question.answerOptions.map((option, index) => ({
+            ...option,
+            id: result.data.answerIds[index],
+          })),
+        };
 
     setQuestions((current) =>
       isEdit
-        ? (current ?? []).map((existing) => (existing.id === question.id ? question : existing))
-        : [question, ...(current ?? [])],
+        ? (current ?? []).map((existing) => (existing.id === savedQuestion.id ? savedQuestion : existing))
+        : [savedQuestion, ...(current ?? [])],
     );
 
     // Jump the view to wherever the question landed — otherwise a save that also moved the
     // question to a different quiz/level would look like it silently failed.
-    setActivityType(question.quizType);
-    setLevel(question.level);
-    setHighlight({ id: question.id, label: isEdit ? '✓ Updated' : '✓ Just added' });
+    setActivityType(savedQuestion.quizType);
+    setLevel(savedQuestion.level);
+    setHighlight({ id: savedQuestion.id, label: isEdit ? '✓ Updated' : '✓ Just added' });
 
-    const quizName = getActivityByType(question.quizType)?.name ?? question.quizType;
+    const quizName = getActivityByType(savedQuestion.quizType)?.name ?? savedQuestion.quizType;
     setToastMessage(isEdit ? `Changes saved to ${quizName}.` : `Question added to ${quizName}.`);
 
     window.setTimeout(() => setToastMessage(null), TOAST_MS);
     window.setTimeout(() => setHighlight(null), HIGHLIGHT_MS);
+
+    return { ok: true };
   }
 
   return (
