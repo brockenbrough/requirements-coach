@@ -2,14 +2,16 @@
 
 import { useState } from 'react';
 import { CopyCodeButton } from './CopyCodeButton';
-import { createCourse, type Course } from '../lib/mockCourses';
+import { createCourse, type Course } from '../lib/courseClient';
 
 /**
  * GitHub #241 (UI-1): create-a-course form + the resulting code, shown prominently for the
  * instructor to share with students. Submit-disabled-while-blank-or-in-flight follows the same
  * pattern as AcceptanceCriteriaWritingScreen (GitHub #149) and LLMProviderSettingsForm
  * (GitHub #150) — disabled until there's a non-blank name, label swaps to "Creating…" while the
- * (mock) request is in flight.
+ * request is in flight. Creation itself hits the real POST /api/instructor/courses
+ * (lib/courseClient.ts, REQ-DL-5); everything else on this page (the list, edit, roster) is
+ * still lib/mockCourses.ts — see that file's header.
  */
 export function CreateCourseForm({
   token,
@@ -17,7 +19,7 @@ export function CreateCourseForm({
   onCreated,
 }: {
   token: string;
-  /** The signed-in instructor's own display name — see lib/mockCourses.ts's createCourse docstring for why this comes from the caller instead of being looked up inside the mock. */
+  /** The signed-in instructor's own display name — see lib/courseClient.ts's createCourse docstring for why this comes from the caller instead of the server. */
   professorName: string;
   onCreated?: (course: Course) => void;
 }) {

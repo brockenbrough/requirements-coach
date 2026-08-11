@@ -1,22 +1,30 @@
 'use client';
 
 // GitHub #241 (UI-1, instructor create/manage) + #242 (UI-2, student browse/join): mock for
-// API-1/API-2 and friends — the courses backend, which doesn't exist yet (built separately, per
-// both issues). Same "mock now, swap later" shape as lib/acceptanceCriteriaClient.ts and
-// lib/instructorLlmConfigClient.ts: ApiResult<T>, a token parameter already threaded through
-// even though unused, and a simulated network delay so the UI's disabled/loading states are
-// exercised the same way they will be against the real calls.
+// API-1/API-2 and friends — the courses backend, most of which doesn't exist yet (built
+// separately, per both issues). Same "mock now, swap later" shape as
+// lib/acceptanceCriteriaClient.ts and lib/instructorLlmConfigClient.ts: ApiResult<T>, a token
+// parameter already threaded through even though unused, and a simulated network delay so the
+// UI's disabled/loading states are exercised the same way they will be against the real calls.
+//
+// POST /api/instructor/courses is real now (lib/courseClient.ts) — the `course`/`student_course`
+// tables landed in supabase/schema.sql under REQ-DL-5 with different column names than this file
+// originally guessed (course_name/course_code/creator_id, not name/code/instructor), and no
+// enrollmentKey column at all (a codeless course_code is the real design's equivalent of "no
+// self-serve join," not a separate key gate — see CreateCourseForm.tsx's enrollmentKey field,
+// which is therefore still mock-only: typed in, echoed back locally, never persisted).
+// CreateCourseForm.tsx now calls the real createCourse; every other export below still mocks
+// its route.
 //
 // Still missing for a real backend integration:
-//   - A `courses` table in supabase/schema.sql (course_id, name, code, instructor user_id,
-//     created_at), with a unique constraint on code, and a `course_student` join table
-//     (course_id, student user_id) instead of this file's studentIds: string[] array.
-//   - POST /api/instructor/courses, PATCH /api/instructor/courses/:id, GET .../courses,
-//     GET .../courses/:id — all behind requireInstructor() (lib/instructorAuth.ts), and scoped
-//     so an instructor only ever sees/edits their own courses. createCourse's professorName
-//     must come from the instructor's own "user" row server-side, never a client-supplied value.
-//   - POST/DELETE .../courses/:id/students — add/remove, with the search-by-name-or-email this
-//     mock's searchMockStudents stands in for actually querying "user" instead of a fixed list.
+//   - PATCH /api/instructor/courses/:id, GET .../courses, GET .../courses/:id — all behind
+//     requireInstructor() (lib/instructorAuth.ts), and scoped so an instructor only ever
+//     sees/edits their own courses (ix_course_creator_id is already there to back that filter).
+//     professorName must come from the instructor's own "user" row server-side once a GET
+//     exists, never a client-supplied value.
+//   - POST/DELETE .../courses/:id/students — add/remove, backed by the real student_course
+//     table, with the search-by-name-or-email this mock's searchMockStudents stands in for
+//     actually querying "user" instead of a fixed list.
 //   - POST /api/courses/:id/join (API-2) — student-facing, deriving the student from the
 //     caller's own token, never a body param the way joinCourse still has to accept one here.
 //     The enrollmentKey comparison MUST happen in this route, server-side — see the SECURITY
@@ -76,21 +84,9 @@ export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number; 
 
 const MOCK_DELAY_MS = 600;
 const SEARCH_DELAY_MS = 250;
-const CODE_LENGTH = 6;
-// No 0/O/1/I — a code an instructor reads out loud or a student retypes by hand shouldn't
-// hinge on telling those apart.
-const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function generateCourseCode(): string {
-  let code = '';
-  for (let i = 0; i < CODE_LENGTH; i++) {
-    code += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
-  }
-  return code;
 }
 
 // A fixed roster to add students from/display within a course — placeholder for a real
@@ -152,40 +148,11 @@ export async function loadCourse(token: string, courseId: string): Promise<ApiRe
   return { ok: true, data: { course: found.course } };
 }
 
-/**
- * Mocks POST /api/instructor/courses. Takes `token` (unused for now) so the call site already
- * matches every other client wrapper's request(url, init, token) convention — swapping this for
- * a real fetch later doesn't change the signature CreateCourseForm calls it with. professorName
- * is passed in by the caller (the real signed-in instructor's own name) rather than looked up
- * here — a real route would derive it server-side from the "user" row the token resolves to,
- * the same way it derives user_id everywhere else in this app, never trust a client-supplied name.
- */
-export async function createCourse(
-  token: string,
-  name: string,
-  professorName: string,
-  enrollmentKey: string | null,
-): Promise<ApiResult<{ course: Course }>> {
-  void token;
-  await delay(MOCK_DELAY_MS);
-
-  if (!name.trim()) {
-    return { ok: false, status: 400, error: 'Course name is required.' };
-  }
-
-  const course: Course = {
-    id: `mock-course-${Date.now()}`,
-    name: name.trim(),
-    code: generateCourseCode(),
-    createdAt: new Date().toISOString(),
-    studentIds: [],
-    professorName,
-    enrollmentKey,
-  };
-
-  mockCourses = [course, ...mockCourses];
-  return { ok: true, data: { course } };
-}
+// createCourse used to be mocked here (POST /api/instructor/courses) — it's real now, in
+// lib/courseClient.ts. This file's own mockCourses array is still the source of truth for
+// everything else below, including what CreateCourseForm's onCreated callback prepends a newly
+// created course onto (see app/instructor/courses/page.tsx), so newly created real courses show
+// up immediately but don't survive a reload — loadCourses still reads this array, not the DB.
 
 /**
  * Mocks PATCH /api/instructor/courses/:id — name and enrollmentKey together (one Save in
