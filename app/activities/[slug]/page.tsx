@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppShell } from "../../../components/AppShell";
+import { ResumeOrAbandonPrompt } from "../../../components/ResumeOrAbandonPrompt";
 import { getActivity } from "../../../lib/activityContent";
 import { START_DIFFICULTY_LEVEL } from "../../../lib/sessionRules";
 import {
@@ -119,14 +120,10 @@ export default function ActivityDetailPage({
   }
 
   async function handleAbandon() {
+    // Confirmation now lives in ResumeOrAbandonPrompt (GitHub #260) — onAbandon only fires
+    // after the student has already confirmed, so this is just the actual abandon call.
     const session = current?.session;
     if (!token || !session || abandoning) return;
-    if (
-      !confirm(
-        "Abandon this in-progress attempt? Your answers so far will be discarded.",
-      )
-    )
-      return;
 
     setAbandoning(true);
     setError(null);
@@ -193,42 +190,15 @@ export default function ActivityDetailPage({
           </p>
 
           {session ? (
-            <>
-              <p className="mb-4 text-sm font-bold text-[#FFD666]">
-                You have a previous attempt in progress.
-              </p>
-              <div className="mb-6 flex items-center gap-3">
-                <div className="h-2 flex-1 overflow-hidden rounded-full bg-[#241f52]">
-                  <span
-                    className="block h-full bg-[#2DD4BF]"
-                    style={{
-                      width:
-                        totalQuestions > 0
-                          ? `${(answeredCount / totalQuestions) * 100}%`
-                          : "0%",
-                    }}
-                  />
-                </div>
-                <span className="whitespace-nowrap text-sm font-extrabold text-[#A79FC9]">
-                  {answeredCount} / {totalQuestions} answered
-                </span>
-              </div>
-              <div className="flex flex-wrap gap-3">
-                <button
-                  onClick={handleResume}
-                  className="rounded-full bg-[#7C4DFF] px-6 py-3 text-sm font-extrabold text-white hover:bg-[#6234d1]"
-                >
-                  Resume
-                </button>
-                <button
-                  onClick={handleAbandon}
-                  disabled={abandoning}
-                  className="rounded-full border border-[#ff6b57]/40 bg-[#ff6b57]/10 px-6 py-3 text-sm font-extrabold text-[#ff8a75] disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {abandoning ? "Abandoning…" : "Abandon"}
-                </button>
-              </div>
-            </>
+            <ResumeOrAbandonPrompt
+              message="You have a previous attempt in progress."
+              progressLabel={`${answeredCount} / ${totalQuestions} answered`}
+              progressFraction={totalQuestions > 0 ? answeredCount / totalQuestions : 0}
+              onResume={handleResume}
+              onAbandon={handleAbandon}
+              abandoning={abandoning}
+              confirmMessage="Abandon this in-progress attempt? Your answers so far will be discarded."
+            />
           ) : (
             <button
               onClick={handleStart}

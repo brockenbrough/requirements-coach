@@ -1,42 +1,75 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../../components/AppShell';
 import { AcceptanceCriteriaFeedbackScreen } from '../../../components/AcceptanceCriteriaFeedbackScreen';
 import { AcceptanceCriteriaWritingScreen } from '../../../components/AcceptanceCriteriaWritingScreen';
 import { AcceptanceCriteriaWritingScreenSkeleton } from '../../../components/AcceptanceCriteriaWritingScreenSkeleton';
-import { loadUserStory, submitAcceptanceCriteria } from '../../../lib/acceptanceCriteriaClient';
+import { ResumeOrAbandonPrompt } from '../../../components/ResumeOrAbandonPrompt';
+import { drawSessionStories, submitAcceptanceCriteria } from '../../../lib/acceptanceCriteriaClient';
 import type { AcceptanceCriteriaResult, UserStoryPrompt } from '../../../lib/acceptanceCriteriaTypes';
+import {
+  answeredCount,
+  clearSession,
+  getInProgressSession,
+  isSessionComplete,
+  nextStoryIndex,
+  recordStoryResult,
+  startNewSession,
+  STORIES_PER_SESSION,
+  type AcceptanceCriteriaSession,
+} from '../../../lib/acceptanceCriteriaSessionStore';
 import { useRequireRole } from '../../../lib/useRequireRole';
+
+type Outcome = { userStory: UserStoryPrompt; result: AcceptanceCriteriaResult };
 
 export default function WriteAcceptanceCriteriaPage() {
   // Student-only, same as every other activity page (GitHub #82) — an instructor has no
   // "take the activity" capability.
   const { token, loading, authorized } = useRequireRole('student');
+  const router = useRouter();
 
-  const [userStory, setUserStory] = useState<UserStoryPrompt | null>(null);
+  const [session, setSession] = useState<AcceptanceCriteriaSession | null>(null);
+  const [showPrompt, setShowPrompt] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
 
-  const [outcome, setOutcome] = useState<AcceptanceCriteriaResult | null>(null);
+  const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [lastAttemptedText, setLastAttemptedText] = useState<string | null>(null);
 
-  // loadAttempt doubles as "fetch a fresh prompt" — bumped both by the failed-load Retry
-  // button and by "Write another" once feedback has been shown.
+  // GitHub #260: mirrors the Type A start/resume flow (app/activities/[slug]/page.tsx) — on
+  // mount, an in-progress local session (lib/acceptanceCriteriaSessionStore.ts) wins over
+  // starting fresh. loadAttempt doubles as "start a brand-new session", bumped by the
+  // failed-draw Retry button and by handleAbandon (after it clears the old session first, so
+  // the re-run below finds nothing in progress and draws a new one).
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
 
+    const existing = getInProgressSession();
+    if (existing) {
+      setSession(existing);
+      setShowPrompt(true);
+      setOutcome(null);
+      setSubmitError(null);
+      setIsLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
     setIsLoading(true);
     setLoadFailed(false);
+    setShowPrompt(false);
     setOutcome(null);
     setSubmitError(null);
 
-    loadUserStory(token).then((result) => {
+    drawSessionStories(token, STORIES_PER_SESSION).then((result) => {
       if (cancelled) return;
 
       if (!result.ok) {
@@ -45,7 +78,7 @@ export default function WriteAcceptanceCriteriaPage() {
         return;
       }
 
-      setUserStory(result.data);
+      setSession(startNewSession(result.data));
       setIsLoading(false);
     });
 
@@ -56,14 +89,27 @@ export default function WriteAcceptanceCriteriaPage() {
 
   if (loading || !authorized) return null;
 
+  function handleResume() {
+    setShowPrompt(false);
+  }
+
+  function handleAbandon() {
+    clearSession();
+    setSession(null);
+    setShowPrompt(false);
+    setLoadAttempt((count) => count + 1);
+  }
+
   async function handleSubmit(text: string) {
-    if (!token || !userStory || submitting) return;
+    if (!token || !session || submitting) return;
+    const slot = session.stories[nextStoryIndex(session)];
+    if (!slot) return;
 
     setSubmitting(true);
     setSubmitError(null);
     setLastAttemptedText(text);
 
-    const result = await submitAcceptanceCriteria(token, userStory.userStoryId, text);
+    const result = await submitAcceptanceCriteria(token, slot.userStoryId, text);
     setSubmitting(false);
 
     if (!result.ok) {
@@ -71,16 +117,36 @@ export default function WriteAcceptanceCriteriaPage() {
       return;
     }
 
-    setOutcome(result.data);
+    const updated = recordStoryResult(session, slot.userStoryId, result.data);
+    setSession(updated);
+    setOutcome({ userStory: { userStoryId: slot.userStoryId, description: slot.description }, result: result.data });
   }
 
   function handleRetrySubmit() {
     if (lastAttemptedText !== null) void handleSubmit(lastAttemptedText);
   }
 
-  function handleWriteAnother() {
-    setLoadAttempt((count) => count + 1);
+  function handleContinue() {
+    if (!session) return;
+    if (isSessionComplete(session)) {
+      clearSession();
+      router.push('/activities');
+      return;
+    }
+    setOutcome(null);
   }
+
+  const pendingSlot = session ? session.stories[nextStoryIndex(session)] : undefined;
+  const currentUserStory: UserStoryPrompt | null = outcome
+    ? outcome.userStory
+    : pendingSlot
+      ? { userStoryId: pendingSlot.userStoryId, description: pendingSlot.description }
+      : null;
+  const currentIndex = session && currentUserStory
+    ? session.stories.findIndex((story) => story.userStoryId === currentUserStory.userStoryId)
+    : -1;
+  const storyPosition = currentIndex >= 0 ? currentIndex + 1 : 0;
+  const isLastStory = session ? currentIndex === session.stories.length - 1 : false;
 
   return (
     <AppShell active="activities">
@@ -89,7 +155,14 @@ export default function WriteAcceptanceCriteriaPage() {
           ← Back to Activities
         </Link>
 
-        <h3 className="mb-5 text-lg font-extrabold">Write Acceptance Criteria</h3>
+        <div className="mb-5 flex items-center justify-between">
+          <h3 className="text-lg font-extrabold">Write Acceptance Criteria</h3>
+          {!isLoading && !loadFailed && !showPrompt && session ? (
+            <span className="text-sm font-extrabold text-gray-500">
+              Story {storyPosition} of {STORIES_PER_SESSION}
+            </span>
+          ) : null}
+        </div>
 
         {isLoading ? (
           <AcceptanceCriteriaWritingScreenSkeleton />
@@ -104,23 +177,36 @@ export default function WriteAcceptanceCriteriaPage() {
               Retry
             </button>
           </div>
-        ) : userStory ? (
+        ) : showPrompt && session ? (
+          <div className="rounded-brand-lg border border-brand-navy-border bg-brand-navy p-6">
+            <ResumeOrAbandonPrompt
+              message="You have a session in progress."
+              progressLabel={`${answeredCount(session)} / ${STORIES_PER_SESSION} answered`}
+              progressFraction={answeredCount(session) / STORIES_PER_SESSION}
+              resumeLabel="Continue"
+              onResume={handleResume}
+              abandonLabel="Abandon"
+              onAbandon={handleAbandon}
+              confirmMessage="Are you sure you want to abandon this session? Your current answers will be lost."
+            />
+          </div>
+        ) : currentUserStory ? (
           outcome ? (
             <>
-              <AcceptanceCriteriaFeedbackScreen userStory={userStory} result={outcome} />
+              <AcceptanceCriteriaFeedbackScreen userStory={outcome.userStory} result={outcome.result} />
               <div className="mt-5 flex justify-end">
                 <button
                   type="button"
-                  onClick={handleWriteAnother}
+                  onClick={handleContinue}
                   className="rounded-full bg-brand-purple px-6 py-3 text-sm font-extrabold text-white hover:bg-brand-purple-dark"
                 >
-                  Write another →
+                  {isLastStory ? 'Finish' : 'Next story →'}
                 </button>
               </div>
             </>
           ) : (
             <>
-              <AcceptanceCriteriaWritingScreen key={userStory.userStoryId} userStory={userStory} submitting={submitting} onSubmit={handleSubmit} />
+              <AcceptanceCriteriaWritingScreen key={currentUserStory.userStoryId} userStory={currentUserStory} submitting={submitting} onSubmit={handleSubmit} />
               {submitError ? (
                 <div className="mt-4 rounded-brand-md border border-brand-danger/40 bg-brand-danger/10 p-4 text-sm font-semibold text-brand-danger">
                   {submitError}
