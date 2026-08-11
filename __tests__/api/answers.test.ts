@@ -383,11 +383,11 @@ describe('POST /api/sessions/{sessionId}/answers', () => {
     expect(update.ended_at).toEqual(expect.any(String));
   });
 
-  // 75 of 100 is below the 80% threshold from the requirements.
-  it('completes without passing when the score stays under 80 percent', async () => {
-    queueSubmission({ alreadyAnswered: ['q-1', 'q-2', 'q-3'], submitted: 'q-4', cumulativeAfter: 75 });
+  // 50 of 100 is below the 75% threshold from the requirements.
+  it('completes without passing when the score stays under 75 percent', async () => {
+    queueSubmission({ alreadyAnswered: ['q-1', 'q-2', 'q-3'], submitted: 'q-4', cumulativeAfter: 50 });
     queue('session_log', {
-      data: sessionRow({ status: 'completed', cumulative_score: 75, passed: false }),
+      data: sessionRow({ status: 'completed', cumulative_score: 50, passed: false }),
       error: null,
     });
 
@@ -400,6 +400,25 @@ describe('POST /api/sessions/{sessionId}/answers', () => {
     const update = h.state.updates.find((u) => u.table === 'session_log')!
       .payload as Record<string, unknown>;
     expect(update.passed).toBe(false);
+  });
+
+  // isPassing is inclusive (>=), so landing exactly on the 75% threshold still passes.
+  it('passes when the score lands exactly on the 75 percent boundary', async () => {
+    queueSubmission({ alreadyAnswered: ['q-1', 'q-2', 'q-3'], submitted: 'q-4', cumulativeAfter: 75 });
+    queue('session_log', {
+      data: sessionRow({ status: 'completed', cumulative_score: 75, passed: true, ended_at: '2026-07-29T10:30:00.000Z' }),
+      error: null,
+    });
+
+    const response = await POST(req({ questionId: 'q-4', selectedOptionId: 'a-1-correct' }), ctx);
+    const body = await response.json();
+
+    expect(body.completed).toBe(true);
+    expect(body.session.passed).toBe(true);
+
+    const update = h.state.updates.find((u) => u.table === 'session_log')!
+      .payload as Record<string, unknown>;
+    expect(update).toMatchObject({ status: 'completed', passed: true });
   });
 
   it('does not complete the session while questions are left', async () => {

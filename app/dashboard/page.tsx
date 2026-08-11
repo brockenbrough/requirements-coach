@@ -283,7 +283,7 @@ export default function DashboardPage() {
                         </div>
                         {!earned ? (
                           <div className="text-xs font-semibold text-gray-400">
-                            Reach level {level} with 80%+
+                            Reach level {level} with 75%+
                           </div>
                         ) : null}
                       </div>

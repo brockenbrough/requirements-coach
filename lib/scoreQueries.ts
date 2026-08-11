@@ -13,7 +13,7 @@ type SessionRow = { activity_type: string; difficulty_level: number; cumulative_
  * Only a level's best attempt counts, so retaking one raises the total only by scoring higher;
  * a weaker retake changes nothing, and a level is never counted twice.
  *
- * Completed, not passed: an attempt that ended below the 80% threshold still earned its points
+ * Completed, not passed: an attempt that ended below the 75% threshold still earned its points
  * and contributes them. Only sessions that are still running or were abandoned stay out — their
  * cumulative_score is a partial tally of an attempt that was never finished.
  *
