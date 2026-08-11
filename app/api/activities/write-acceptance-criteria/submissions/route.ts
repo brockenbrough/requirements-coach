@@ -4,6 +4,8 @@ import {
   isLLMProviderName,
 } from "../../../../../lib/llm/factory";
 
+const STORIES_PER_SESSION = 4;
+
 type UserStoryRow = { user_story_id: string; story_text: string; creator_id: string };
 type LLMConfigRow = { provider: string; api_key: string; model: string };
 
@@ -32,9 +34,10 @@ export async function POST(request: Request) {
     return Response.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const { userStoryId, submittedText } = (body ?? {}) as {
+  const { userStoryId, submittedText, sessionId } = (body ?? {}) as {
     userStoryId?: unknown;
     submittedText?: unknown;
+    sessionId?: unknown;
   };
 
   if (typeof userStoryId !== "string" || userStoryId.trim() === "") {
@@ -69,6 +72,24 @@ export async function POST(request: Request) {
       { error: "Invalid or expired token." },
       { status: 401 },
     );
+
+  // If a sessionId is provided, validate it before doing any story or LLM work.
+  let resolvedSessionId: string | null = typeof sessionId === 'string' ? sessionId : null;
+
+  if (resolvedSessionId) {
+    const { data: session, error: sessionError } = await supabase
+      .from('ac_session')
+      .select('ac_session_id, status')
+      .eq('ac_session_id', resolvedSessionId)
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (sessionError) return Response.json({ error: sessionError.message }, { status: 500 });
+    if (!session) return Response.json({ error: 'Session not found.' }, { status: 404 });
+    if (session.status === 'completed') {
+      return Response.json({ error: 'This session is already completed.' }, { status: 409 });
+    }
+  }
 
   const { data: story, error: storyError } = await supabase
     .from("user_story")
@@ -126,6 +147,7 @@ export async function POST(request: Request) {
     user_id: user.id,
     user_story_id: userStoryId,
     submitted_text: submittedText,
+    ac_session_id: resolvedSessionId,
   });
 
   if (insertError)
@@ -156,8 +178,37 @@ export async function POST(request: Request) {
   if (updateError)
     return Response.json({ error: updateError.message }, { status: 500 });
 
+  // If this submission belongs to a session, check whether it's now complete.
+  let sessionCompleted = false;
+  let totalScore: number | null = null;
+  let averageScore: number | null = null;
+
+  if (resolvedSessionId) {
+    const { data: sessionSubmissions, error: countError } = await supabase
+      .from('submission')
+      .select('llm_score')
+      .eq('ac_session_id', resolvedSessionId);
+
+    if (!countError && sessionSubmissions) {
+      const count = sessionSubmissions.length;
+
+      if (count >= STORIES_PER_SESSION) {
+        const scores = sessionSubmissions.map((s) => s.llm_score ?? 0);
+        totalScore = scores.reduce((sum, s) => sum + s, 0);
+        averageScore = Math.round((totalScore / count) * 10) / 10;
+
+        await supabase
+          .from('ac_session')
+          .update({ status: 'completed', completed_at: new Date().toISOString(), total_score: totalScore })
+          .eq('ac_session_id', resolvedSessionId);
+
+        sessionCompleted = true;
+      }
+    }
+  }
+
   return Response.json(
-    { submissionId, score: rating.score, feedback: rating.feedback },
+    { submissionId, score: rating.score, feedback: rating.feedback, sessionCompleted, totalScore, averageScore },
     { status: 200 },
   );
 }
