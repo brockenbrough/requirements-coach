@@ -225,8 +225,18 @@ export function AppShell({
         <div onClick={closeDrawer} aria-hidden className="fixed inset-0 z-30 bg-black/60 lg:hidden" />
       ) : null}
 
+      {/*
+        GitHub #277: fixed at rest (mobile off-canvas drawer, unrelated to this change) below
+        `lg`, sticky at `lg` and up. `sticky` rather than `fixed` on desktop specifically because
+        the sidebar stays a normal flex sibling of <main> that way — no compensating
+        margin/padding on <main> is needed to avoid it jumping under a fixed sidebar (the layout-
+        shift bullet in the issue), which a `fixed` sidebar would require. `lg:h-screen` pins its
+        height to the viewport so `top-0` has something to stick *within*; the overflow-y-auto
+        already here (needed for the mobile drawer) doubles as the sidebar's own internal scroll
+        if its nav content ever exceeds one viewport height.
+      */}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 w-[80%] max-w-[280px] overflow-y-auto bg-[#1b1642] p-5 transition-transform duration-200 ease-out lg:static lg:z-auto lg:w-60 lg:max-w-none lg:flex-none lg:translate-x-0 lg:border-r lg:border-[#332b6b] ${
+        className={`fixed inset-y-0 left-0 z-40 w-[80%] max-w-[280px] overflow-y-auto bg-[#1b1642] p-5 transition-transform duration-200 ease-out lg:sticky lg:top-0 lg:z-auto lg:h-screen lg:w-60 lg:max-w-none lg:flex-none lg:translate-x-0 lg:border-r lg:border-[#332b6b] ${
           drawerOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >

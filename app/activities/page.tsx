@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { ActivityCard, type ActivityCardData } from '../../components/ActivityCard';
 import { ActivityCardSkeleton } from '../../components/ActivityCardSkeleton';
-import { answeredCount, getInProgressSession, STORIES_PER_SESSION } from '../../lib/acceptanceCriteriaSessionStore';
+import { answeredCount, getStoredSession, isSessionComplete, STORIES_PER_SESSION } from '../../lib/acceptanceCriteriaSessionStore';
 import { deriveActivityCardStatus, type ActivityCardStatus } from '../../lib/activityCardStatus';
 import { ACTIVITIES, Difficulty } from '../../lib/activityContent';
 import { loadCompletedAttempts, loadSessions, loadStudentTitles, type StudentTitle } from '../../lib/sessionClient';
@@ -118,7 +118,11 @@ export default function ActivitiesPage() {
       // which is the point: the card now says exactly what the student sees after clicking it.
       // Best score stays null — no student-facing endpoint lists their own graded submissions —
       // and activityType is null because there is no row in the titles response to look up.
-      const acSession = getInProgressSession();
+      // getStoredSession() (GitHub #263) also returns an already-complete session, kept around
+      // until the student dismisses its summary — not "in progress" for this card's purposes,
+      // so it's filtered out here the same way the old getInProgressSession() used to exclude it.
+      const stored = getStoredSession();
+      const acSession = stored && !isSessionComplete(stored) ? stored : null;
       const writeAcCard: CardData = {
         activity: WRITE_ACCEPTANCE_CRITERIA_CARD,
         activityType: null,
