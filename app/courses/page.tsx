@@ -10,8 +10,11 @@ import { useRequireRole } from '../../lib/useRequireRole';
 /**
  * GitHub #242 (UI-2): browse every available course and join one — the expanded version of
  * "Join Course" the issue asks for, a full page instead of a bare code-entry modal. Real now
- * (lib/studentCourseClient.ts, REQ-DL-5): GET /api/courses returns only courses with a code
- * (course_code IS NOT NULL) and each course's alreadyMember flag already scoped to this student.
+ * (lib/studentCourseClient.ts, REQ-DL-5): GET /api/courses lists courses with a code
+ * (course_code IS NOT NULL) but never the code itself — that's a secret the instructor hands
+ * out directly, so joining (StudentCourseCard) is a manual code-entry step, not a click on
+ * something already visible here. Each course's alreadyMember flag is already scoped to this
+ * student server-side.
  */
 export default function BrowseCoursesPage() {
   // Also redirects an instructor account away (GitHub #82) — joining a course as a student is
@@ -22,7 +25,6 @@ export default function BrowseCoursesPage() {
   const [loadFailed, setLoadFailed] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
 
-  const [codeQuery, setCodeQuery] = useState('');
   const [nameQuery, setNameQuery] = useState('');
   const [professorQuery, setProfessorQuery] = useState('');
 
@@ -43,22 +45,21 @@ export default function BrowseCoursesPage() {
     };
   }, [token, retryCount]);
 
-  // Three independent, always-combinable filters (AND, not OR) — matches the Activity Log's
+  // Two independent, always-combinable filters (AND, not OR) — matches the Activity Log's
   // filter row (components/ActivityFilters.tsx): each field narrows the list on its own,
-  // client-side, as soon as the course list is in hand.
+  // client-side, as soon as the course list is in hand. No code filter — the code is never in
+  // this response (see the file header), so there's nothing here to search it by.
   const filtered = useMemo(() => {
     if (!courses) return [];
-    const code = codeQuery.trim().toLowerCase();
     const name = nameQuery.trim().toLowerCase();
     const professor = professorQuery.trim().toLowerCase();
 
     return courses.filter(
       (course) =>
-        (!code || course.code.toLowerCase().includes(code)) &&
         (!name || course.name.toLowerCase().includes(name)) &&
         (!professor || course.professorName.toLowerCase().includes(professor)),
     );
-  }, [courses, codeQuery, nameQuery, professorQuery]);
+  }, [courses, nameQuery, professorQuery]);
 
   if (loading || !authorized) return null;
   if (!token || !profile) return null;
@@ -72,20 +73,10 @@ export default function BrowseCoursesPage() {
       <div className="mx-auto max-w-4xl">
         <h1 className="mb-1.5 text-2xl font-extrabold text-brand-navy">Courses</h1>
         <p className="mb-6 max-w-2xl text-sm font-semibold text-gray-500">
-          Find your professor&apos;s course by code, name, or their name, and join with one click.
+          Find your professor&apos;s course by name, then enter the code they gave you to join.
         </p>
 
         <div className="mb-5 flex flex-wrap gap-4">
-          <label className="block text-xs font-extrabold uppercase tracking-wide text-gray-400">
-            Course code
-            <input
-              type="text"
-              value={codeQuery}
-              onChange={(event) => setCodeQuery(event.target.value)}
-              placeholder="e.g. FALL26"
-              className="mt-1 block w-40 rounded-brand-md border border-gray-300 bg-white px-3.5 py-2 text-sm font-bold text-gray-600 outline-none transition focus:border-brand-purple"
-            />
-          </label>
           <label className="block text-xs font-extrabold uppercase tracking-wide text-gray-400">
             Course name
             <input

@@ -238,7 +238,6 @@ export async function unenrollStudent(supabase: SupabaseClient, params: { course
 export type JoinableCourseRecord = {
   course_id: string;
   course_name: string;
-  course_code: string;
   created_at: string;
   professor_name: string;
   student_count: number;
@@ -247,7 +246,9 @@ export type JoinableCourseRecord = {
 
 /**
  * Every course a student can self-enroll in by code (course_code IS NOT NULL — a codeless
- * course is instructor-assigned only, REQ-DL-5) plus a per-caller alreadyMember flag.
+ * course is instructor-assigned only, REQ-DL-5) plus a per-caller alreadyMember flag. The code
+ * itself is never selected, let alone returned — it's a secret the instructor hands out
+ * directly, and this query only needs to filter on it, never disclose its value.
  *
  * Two queries, merged in JS, rather than one filtered embed: student_course rows for every
  * *other* enrolled student are never fetched at all, only the caller's own — the response this
@@ -258,7 +259,7 @@ export type JoinableCourseRecord = {
 export async function listJoinableCourses(supabase: SupabaseClient, userId: string) {
   const { data, error } = await supabase
     .from('course')
-    .select('course_id, course_name, course_code, created_at, creator:creator_id(first_name, last_name, username), student_course(count)')
+    .select('course_id, course_name, created_at, creator:creator_id(first_name, last_name, username), student_course(count)')
     .not('course_code', 'is', null)
     .order('created_at', { ascending: false });
 
@@ -276,7 +277,6 @@ export async function listJoinableCourses(supabase: SupabaseClient, userId: stri
   type Row = {
     course_id: string;
     course_name: string;
-    course_code: string;
     created_at: string;
     creator: { first_name: string | null; last_name: string | null; username: string | null } | null;
     student_course: { count: number }[] | null;
@@ -287,7 +287,6 @@ export async function listJoinableCourses(supabase: SupabaseClient, userId: stri
     return {
       course_id: row.course_id,
       course_name: row.course_name,
-      course_code: row.course_code,
       created_at: row.created_at,
       professor_name: fullName || row.creator?.username || 'Unknown instructor',
       student_count: row.student_course?.[0]?.count ?? 0,

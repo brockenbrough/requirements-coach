@@ -49,7 +49,6 @@ function courseRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     course_id: 'course-1',
     course_name: 'Software Requirements',
-    course_code: 'ABCDEF',
     created_at: '2026-08-11T10:00:00',
     creator: { first_name: 'Ada', last_name: 'Brockenbrough', username: 'abrock' },
     student_course: [{ count: 2 }],
@@ -102,13 +101,21 @@ describe('GET /api/courses', () => {
       {
         id: 'course-1',
         name: 'Software Requirements',
-        code: 'ABCDEF',
         createdAt: '2026-08-11T10:00:00',
         professorName: 'Ada Brockenbrough',
         studentCount: 2,
         alreadyMember: false,
       },
     ]);
+  });
+
+  it('never includes the course code — a secret the instructor hands out directly, not this route', async () => {
+    queue('course', { data: [courseRow()], error: null });
+    queue('student_course', { data: [], error: null });
+
+    const res = await GET(getRequest());
+    const body = await res.json();
+    expect(body.courses[0]).not.toHaveProperty('code');
   });
 
   it('falls back to the creator username when first/last name are blank', async () => {
@@ -125,7 +132,7 @@ describe('GET /api/courses', () => {
 
   it('sets alreadyMember true only for courses the caller has joined, scoped to their own membership rows', async () => {
     queue('course', {
-      data: [courseRow(), courseRow({ course_id: 'course-2', course_code: 'GHIJKL' })],
+      data: [courseRow(), courseRow({ course_id: 'course-2' })],
       error: null,
     });
     // The caller (student-1, per the auth mock) is only in course-1.

@@ -18,10 +18,12 @@ function CheckIcon() {
  * bg-gray-50) but a distinct component rather than a shared one: this card's action is "join",
  * that one's is "go manage this course as its instructor" — different audiences, different data.
  *
- * Real now (lib/studentCourseClient.ts, REQ-DL-5) — join hits POST /api/courses/join with the
- * course's own code, no enrollment-key step: that concept has no column anywhere in the real
- * schema (course_code's nullability is REQ-DL-5's actual answer to open vs. instructor-assigned
- * enrollment), so there was never a real gate for a key to unlock.
+ * The join code is a secret the instructor hands out directly — this card never sees or
+ * displays it (JoinableCourse has no code field at all), only submits whatever the student
+ * types. POST /api/courses/join resolves the course purely from that code, server-side, so a
+ * successful join's onJoined(courseId) uses the id the *server* confirms, not necessarily this
+ * row's — a typo'd-but-still-valid code for a different course would otherwise silently mark
+ * the wrong card as joined.
  */
 export function StudentCourseCard({
   course,
@@ -34,30 +36,31 @@ export function StudentCourseCard({
 }) {
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState('');
+  const [codeInputOpen, setCodeInputOpen] = useState(false);
+  const [enteredCode, setEnteredCode] = useState('');
 
-  async function handleJoin() {
+  async function handleJoin(code: string) {
     if (joining) return;
 
     setJoining(true);
     setError('');
 
-    const result = await joinCourseByCode(token, course.code);
+    const result = await joinCourseByCode(token, code);
     setJoining(false);
 
     if (!result.ok) {
       setError(result.error);
-      return;
+      return; // input stays open so the student can immediately retry
     }
 
-    onJoined(course.id);
+    setCodeInputOpen(false);
+    setEnteredCode('');
+    onJoined(result.data.course.id);
   }
 
   return (
     <div className="rounded-brand-lg border border-gray-100 bg-gray-50 p-4">
       <span className="font-extrabold text-brand-navy">{course.name}</span>
-      <div className="mt-1 flex flex-wrap items-center gap-2">
-        <span className="text-xs font-semibold tracking-[0.15em] text-brand-purple">{course.code}</span>
-      </div>
       <p className="mt-1.5 text-xs font-semibold text-gray-500">
         {course.professorName} · {course.studentCount} student{course.studentCount === 1 ? '' : 's'}
       </p>
@@ -70,14 +73,50 @@ export function StudentCourseCard({
             <CheckIcon />
             Joined
           </span>
+        ) : codeInputOpen ? (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleJoin(enteredCode);
+            }}
+            className="flex flex-col gap-2 sm:flex-row sm:items-center"
+          >
+            <input
+              type="text"
+              value={enteredCode}
+              onChange={(event) => setEnteredCode(event.target.value)}
+              placeholder="Course code"
+              autoFocus
+              className="rounded-brand-md border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-700 outline-none transition focus:border-brand-purple"
+            />
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                disabled={!enteredCode.trim() || joining}
+                className="rounded-full bg-brand-purple px-5 py-2 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {joining ? 'Joining…' : 'Join'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCodeInputOpen(false);
+                  setEnteredCode('');
+                  setError('');
+                }}
+                className="rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-bold text-gray-600 transition hover:border-gray-300"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
         ) : (
           <button
             type="button"
-            onClick={handleJoin}
-            disabled={joining}
-            className="rounded-full bg-brand-purple px-5 py-2 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={() => setCodeInputOpen(true)}
+            className="rounded-full bg-brand-purple px-5 py-2 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark"
           >
-            {joining ? 'Joining…' : 'Join'}
+            Join
           </button>
         )}
       </div>

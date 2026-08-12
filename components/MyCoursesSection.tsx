@@ -48,12 +48,9 @@ export function MyCoursesSection({ token }: { token: string }) {
       ) : (
         <ul className="mt-3 space-y-2">
           {courses.map((course) => (
-            <li key={course.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-2.5">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-bold text-brand-navy">{course.name}</p>
-                <p className="text-xs font-semibold text-gray-500">{course.professorName}</p>
-              </div>
-              <span className="flex-none text-xs font-extrabold tracking-[0.1em] text-brand-purple">{course.code}</span>
+            <li key={course.id} className="rounded-xl border border-gray-200 bg-white px-4 py-2.5">
+              <p className="truncate text-sm font-bold text-brand-navy">{course.name}</p>
+              <p className="text-xs font-semibold text-gray-500">{course.professorName}</p>
             </li>
           ))}
         </ul>
