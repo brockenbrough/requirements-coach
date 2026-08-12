@@ -4,296 +4,190 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../../components/AppShell';
-import { AcceptanceCriteriaFeedbackScreen } from '../../../components/AcceptanceCriteriaFeedbackScreen';
-import { AcceptanceCriteriaWritingScreen } from '../../../components/AcceptanceCriteriaWritingScreen';
-import { AcceptanceCriteriaWritingScreenSkeleton } from '../../../components/AcceptanceCriteriaWritingScreenSkeleton';
+import { CompletedAttemptsTable } from '../../../components/CompletedAttemptsTable';
 import { ResumeOrAbandonPrompt } from '../../../components/ResumeOrAbandonPrompt';
-import { SessionProgressDots, type ProgressDotStatus } from '../../../components/SessionProgressDots';
-import { SessionSummaryScreen, type SessionSummaryItem } from '../../../components/SessionSummaryScreen';
-import { drawSessionStories, submitAcceptanceCriteria } from '../../../lib/acceptanceCriteriaClient';
 import {
-  AC_PASS_SCORE,
-  answeredCount,
-  clearSession,
-  getStoredSession,
-  isSessionComplete,
-  nextStoryIndex,
-  recordStoryResult,
-  startNewSession,
-  STORIES_PER_SESSION,
-  summarizeSession,
-  type AcceptanceCriteriaSession,
-} from '../../../lib/acceptanceCriteriaSessionStore';
-import type { AcceptanceCriteriaResult, UserStoryPrompt } from '../../../lib/acceptanceCriteriaTypes';
-import { deriveStoryTitle } from '../../../lib/storyMarkdown';
+  type CurrentAcSessionResult,
+  loadCurrentAcceptanceCriteriaSession,
+  startOrResumeAcceptanceCriteriaSession,
+} from '../../../lib/acceptanceCriteriaClient';
+import { STORIES_PER_SESSION } from '../../../lib/acceptanceCriteriaRules';
+import { getActivity } from '../../../lib/activityContent';
+import { abandonSession, loadActivityLog, loadCompletedAttempts, type CompletedAttempt } from '../../../lib/sessionClient';
 import { useRequireRole } from '../../../lib/useRequireRole';
 
-type Outcome = { userStory: UserStoryPrompt; result: AcceptanceCriteriaResult };
+const ACTIVITY = getActivity('write-acceptance-criteria')!;
 
-export default function WriteAcceptanceCriteriaPage() {
-  // Student-only, same as every other activity page (GitHub #82) — an instructor has no
-  // "take the activity" capability.
-  const { token, loading, authorized } = useRequireRole('student');
+/**
+ * Landing page for Write Acceptance Criteria — Start / Resume-Abandon / previous-attempts, the
+ * AC equivalent of app/activities/[slug]/page.tsx. Split from the writing/feedback/summary UI
+ * (now app/activities/write-acceptance-criteria/play/page.tsx) so abandon has a real page to
+ * land on instead of resetting the session in place (the bug this split fixes).
+ */
+export default function WriteAcceptanceCriteriaLandingPage() {
   const router = useRouter();
+  // Also redirects an instructor account away (GitHub #82) — starting/resuming/abandoning this
+  // activity is exactly the "quiz durchführen" capability instructors must not have.
+  const { token, profile, loading, authorized } = useRequireRole('student');
 
-  const [session, setSession] = useState<AcceptanceCriteriaSession | null>(null);
-  const [showPrompt, setShowPrompt] = useState(false);
-  const [showSummary, setShowSummary] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadFailed, setLoadFailed] = useState(false);
-  const [loadAttempt, setLoadAttempt] = useState(0);
+  // The server is the only source of "does this activity have a run in progress" — there is no
+  // local/mock notion of progress any more. null means "not checked yet or nothing running".
+  const [current, setCurrent] = useState<CurrentAcSessionResult | null>(null);
+  const [attempts, setAttempts] = useState<CompletedAttempt[] | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [abandoning, setAbandoning] = useState(false);
+  const [error, setError] = useState<{ message: string; needsProfile: boolean } | null>(null);
 
-  const [outcome, setOutcome] = useState<Outcome | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-  const [lastAttemptedText, setLastAttemptedText] = useState<string | null>(null);
-
-  // GitHub #260: mirrors the Type A start/resume flow (app/activities/[slug]/page.tsx) — on
-  // mount, a stored local session (lib/acceptanceCriteriaSessionStore.ts) wins over starting
-  // fresh. loadAttempt doubles as "start a brand-new session", bumped by the failed-draw Retry
-  // button and by handleAbandon (after it clears the old session first, so the re-run below
-  // finds nothing stored and draws a new one).
-  //
-  // GitHub #263 bug fix: a stored session that's already complete is routed straight to the
-  // summary, not treated as "nothing to resume" — getStoredSession() no longer discards it (see
-  // that function's own comment for why the old behavior silently lost a finished session if
-  // the effect re-ran — e.g. a reload — before the student clicked past the summary).
+  // Both reads in one pass, because this page re-runs them on every return from /play: the
+  // running session decides Start vs. Resume/Abandon, the finished ones fill the history below.
   useEffect(() => {
-    if (!token) return;
+    if (!token || !profile?.user_id) return;
     let cancelled = false;
 
-    const stored = getStoredSession();
-    if (stored) {
-      setSession(stored);
-      setOutcome(null);
-      setSubmitError(null);
-      setIsLoading(false);
-      if (isSessionComplete(stored)) {
-        setShowPrompt(false);
-        setShowSummary(true);
-      } else {
-        setShowPrompt(true);
-        setShowSummary(false);
-      }
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    setIsLoading(true);
-    setLoadFailed(false);
-    setShowPrompt(false);
-    setShowSummary(false);
-    setOutcome(null);
-    setSubmitError(null);
-
-    drawSessionStories(token, STORIES_PER_SESSION).then((result) => {
+    Promise.all([
+      loadCurrentAcceptanceCriteriaSession(token),
+      loadCompletedAttempts(token, profile.user_id, 'WRITE_ACCEPTANCE_CRITERIA'),
+    ]).then(([currentResult, completed]) => {
       if (cancelled) return;
-
-      if (!result.ok) {
-        setLoadFailed(true);
-        setIsLoading(false);
-        return;
-      }
-
-      setSession(startNewSession(result.data));
-      setIsLoading(false);
+      if (currentResult.ok) setCurrent(currentResult.data);
+      if (completed.ok) setAttempts(completed.data.attempts);
     });
 
     return () => {
       cancelled = true;
     };
-  }, [token, loadAttempt]);
+  }, [token, profile?.user_id]);
 
   if (loading || !authorized) return null;
 
+  async function handleStart() {
+    if (!token || starting) return;
+
+    setStarting(true);
+    setError(null);
+
+    const result = await startOrResumeAcceptanceCriteriaSession(token);
+
+    if (result.ok) {
+      // A fresh (or resumed) session now shows up in the activity log too.
+      if (profile?.user_id) {
+        void loadActivityLog(token, profile.user_id, { forceRefresh: true });
+      }
+      router.push('/activities/write-acceptance-criteria/play');
+      return;
+    }
+
+    setStarting(false);
+
+    if (result.status === 401) {
+      router.push('/login');
+      return;
+    }
+
+    // 409: authenticated, but no row in "user" yet — registration does not create one, and
+    // session_log.user_id references it.
+    setError({ message: result.error, needsProfile: result.status === 409 });
+  }
+
   function handleResume() {
-    setShowPrompt(false);
+    // The whole point of a running session is that it is already in hand server-side — resuming
+    // is just navigating there, not another start/resume network round trip.
+    router.push('/activities/write-acceptance-criteria/play');
   }
 
-  function handleAbandon() {
-    clearSession();
-    setSession(null);
-    setShowPrompt(false);
-    setShowSummary(false);
-    setLoadAttempt((count) => count + 1);
-  }
+  async function handleAbandon() {
+    // Confirmation lives in ResumeOrAbandonPrompt — onAbandon only fires after the student has
+    // already confirmed, so this is just the actual abandon call.
+    const session = current?.session;
+    if (!token || !session || abandoning) return;
 
-  async function handleSubmit(text: string) {
-    if (!token || !session || submitting) return;
-    const slot = session.stories[nextStoryIndex(session)];
-    if (!slot) return;
+    setAbandoning(true);
+    setError(null);
 
-    setSubmitting(true);
-    setSubmitError(null);
-    setLastAttemptedText(text);
+    const result = await abandonSession(token, session.session_id);
 
-    const result = await submitAcceptanceCriteria(token, slot.userStoryId, text);
-    setSubmitting(false);
+    setAbandoning(false);
 
     if (!result.ok) {
-      setSubmitError(result.error);
+      if (result.status === 401) {
+        router.push('/login');
+        return;
+      }
+      // 409: the session already left in-progress by some other route (finished, or already
+      // abandoned elsewhere) — treat it the same as a successful abandon rather than reporting
+      // a conflict the student cannot act on.
+      if (result.status === 409) {
+        setCurrent(null);
+        return;
+      }
+      setError({ message: result.error, needsProfile: false });
       return;
     }
 
-    const updated = recordStoryResult(session, slot.userStoryId, result.data);
-    setSession(updated);
-    setOutcome({ userStory: { userStoryId: slot.userStoryId, description: slot.description }, result: result.data });
-  }
-
-  function handleRetrySubmit() {
-    if (lastAttemptedText !== null) void handleSubmit(lastAttemptedText);
-  }
-
-  function handleContinue() {
-    if (!session) return;
-    if (isSessionComplete(session)) {
-      // GitHub #263: the fourth story's feedback is still what "Finish" closes — the summary
-      // is a separate screen the student explicitly moves on from via handleFinishSummary,
-      // not something that flashes past on the way out.
-      setOutcome(null);
-      setShowSummary(true);
-      return;
+    // The abandoned session's status just changed — the activity log's cached copy hasn't.
+    if (profile?.user_id) {
+      void loadActivityLog(token, profile.user_id, { forceRefresh: true });
     }
-    setOutcome(null);
+    setCurrent(null);
   }
 
-  function handleFinishSummary() {
-    clearSession();
-    router.push('/activities');
-  }
-
-  const pendingSlot = session ? session.stories[nextStoryIndex(session)] : undefined;
-  const currentUserStory: UserStoryPrompt | null = outcome
-    ? outcome.userStory
-    : pendingSlot
-      ? { userStoryId: pendingSlot.userStoryId, description: pendingSlot.description }
-      : null;
-  const currentIndex = session && currentUserStory
-    ? session.stories.findIndex((story) => story.userStoryId === currentUserStory.userStoryId)
-    : -1;
-  const storyPosition = currentIndex >= 0 ? currentIndex + 1 : 0;
-  const isLastStory = session ? currentIndex === session.stories.length - 1 : false;
-
-  // GitHub #261: mirrors Type A's dot row (app/activities/[slug]/play/page.tsx, GitHub #236),
-  // but a submitted story only ever reaches "done" — there is no immediate right/wrong here,
-  // grading is an async LLM call (GitHub #149), so no dot is ever "correct"/"incorrect". Once
-  // the last story's result lands, every dot flips to "done" in the same render — including
-  // while its own feedback is still on screen — so the indicator reads as "session finished"
-  // before the student even clicks Finish, per the issue's explicit completion requirement.
-  const allStoriesComplete = session ? isSessionComplete(session) : false;
-  const dotStatuses: ProgressDotStatus[] = session
-    ? session.stories.map((story, i) => {
-        if (allStoriesComplete) return 'done';
-        if (i === currentIndex) return 'current';
-        return story.result !== null ? 'done' : 'upcoming';
-      })
-    : [];
-
-  // GitHub #263: SessionSummaryScreen is generic (score/message/items), so this page is the one
-  // that maps its own LLM-graded, 1-10-per-story session into that shape — see the component's
-  // own comment for why it doesn't know about stories/LLM scores itself.
-  const summary = session && allStoriesComplete ? summarizeSession(session) : null;
-  const summaryItems: SessionSummaryItem[] = session
-    ? session.stories.map((story) => ({
-        key: story.userStoryId,
-        label: deriveStoryTitle(story.description),
-        scoreLabel: story.result ? `${story.result.score} / 10` : '—',
-        passed: (story.result?.score ?? 0) >= AC_PASS_SCORE,
-      }))
-    : [];
-  const summaryMessage = summary
-    ? summary.storyCount === 0
-      ? 'No stories were graded in this session.'
-      : summary.passedCount === summary.storyCount
-        ? `Great job — all ${summary.storyCount} stories passed!`
-        : summary.passedCount === 0
-          ? `Keep practicing — none of the ${summary.storyCount} stories passed this time.`
-          : `Nice progress — ${summary.passedCount} of ${summary.storyCount} stories passed.`
-    : '';
+  const session = current?.session ?? null;
+  const totalStories = current?.stories.length ?? STORIES_PER_SESSION;
+  const answeredCount = current?.answeredCount ?? 0;
 
   return (
     <AppShell active="activities">
-      <div className="mx-auto max-w-xl">
-        <Link href="/activities" className="mb-5 inline-flex items-center gap-1 text-sm font-bold text-gray-500 hover:text-brand-navy">
+      <div className="mx-auto max-w-lg">
+        <Link
+          href="/activities"
+          className="mb-5 inline-flex items-center gap-1 text-sm font-bold text-gray-500 hover:text-brand-navy"
+        >
           ← Back to Activities
         </Link>
 
-        <h3 className="mb-5 text-lg font-extrabold">Write Acceptance Criteria</h3>
-
-        {!isLoading && !loadFailed && !showPrompt && !showSummary && session ? (
-          <div className="mb-5 flex items-center justify-between">
-            <SessionProgressDots statuses={dotStatuses} />
-            <span className="text-sm font-bold text-gray-500">
-              {allStoriesComplete
-                ? `${STORIES_PER_SESSION} of ${STORIES_PER_SESSION} complete`
-                : `Story ${storyPosition} of ${STORIES_PER_SESSION}`}
+        <div className="rounded-brand-lg border border-brand-navy-border bg-brand-navy p-8 text-brand-ink">
+          <div className="mb-4 flex flex-wrap gap-2">
+            <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-bold text-brand-ink-muted">
+              {ACTIVITY.category}
             </span>
           </div>
-        ) : null}
+          <h2 className="mb-2 text-2xl font-extrabold text-white">{ACTIVITY.name}</h2>
+          <p className="mb-6 text-sm font-semibold text-brand-ink-muted">{ACTIVITY.instructions}</p>
 
-        {isLoading ? (
-          <AcceptanceCriteriaWritingScreenSkeleton />
-        ) : loadFailed ? (
-          <div className="rounded-brand-lg border border-brand-danger/40 bg-brand-danger/10 p-6 text-center">
-            <p className="mb-4 text-sm font-semibold text-brand-danger">Failed to load a writing prompt.</p>
-            <button
-              type="button"
-              onClick={() => setLoadAttempt((count) => count + 1)}
-              className="rounded-full bg-brand-purple px-5 py-2 text-sm font-extrabold text-white hover:bg-brand-purple-dark"
-            >
-              Retry
-            </button>
-          </div>
-        ) : showPrompt && session ? (
-          <div className="rounded-brand-lg border border-brand-navy-border bg-brand-navy p-6">
+          {session ? (
             <ResumeOrAbandonPrompt
               message="You have a session in progress."
-              progressLabel={`${answeredCount(session)} / ${STORIES_PER_SESSION} answered`}
-              progressFraction={answeredCount(session) / STORIES_PER_SESSION}
+              progressLabel={`${answeredCount} / ${totalStories} answered`}
+              progressFraction={totalStories > 0 ? answeredCount / totalStories : 0}
               resumeLabel="Continue"
               onResume={handleResume}
-              abandonLabel="Abandon"
               onAbandon={handleAbandon}
-              confirmMessage="Are you sure you want to abandon this session? Your current answers will be lost."
+              abandoning={abandoning}
+              confirmMessage="Abandon this in-progress attempt? Your answers so far will be discarded."
             />
-          </div>
-        ) : showSummary && summary ? (
-          <SessionSummaryScreen
-            scoreValue={summary.totalScore}
-            scoreMax={summary.maxScore}
-            message={summaryMessage}
-            items={summaryItems}
-            onDone={handleFinishSummary}
-          />
-        ) : currentUserStory ? (
-          outcome ? (
-            <>
-              <AcceptanceCriteriaFeedbackScreen userStory={outcome.userStory} result={outcome.result} />
-              <div className="mt-5 flex justify-end">
-                <button
-                  type="button"
-                  onClick={handleContinue}
-                  className="rounded-full bg-brand-purple px-6 py-3 text-sm font-extrabold text-white hover:bg-brand-purple-dark"
-                >
-                  {isLastStory ? 'Finish' : 'Next story →'}
-                </button>
-              </div>
-            </>
           ) : (
-            <>
-              <AcceptanceCriteriaWritingScreen key={currentUserStory.userStoryId} userStory={currentUserStory} submitting={submitting} onSubmit={handleSubmit} />
-              {submitError ? (
-                <div className="mt-4 rounded-brand-md border border-brand-danger/40 bg-brand-danger/10 p-4 text-sm font-semibold text-brand-danger">
-                  {submitError}
-                  <button type="button" onClick={handleRetrySubmit} className="ml-2 underline hover:text-white">
-                    Retry
-                  </button>
-                </div>
+            <button
+              onClick={handleStart}
+              disabled={starting}
+              className="rounded-full bg-brand-purple px-6 py-3 text-sm font-extrabold text-white hover:bg-brand-purple-dark disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {starting ? 'Starting…' : 'Start'}
+            </button>
+          )}
+
+          {error ? (
+            <div className="mt-4 rounded-brand-md border border-brand-danger/40 bg-brand-danger/10 p-4 text-sm font-semibold text-brand-danger-light">
+              {error.message}
+              {error.needsProfile ? (
+                <Link href="/profile" className="ml-1 underline hover:text-white">
+                  Go to your profile
+                </Link>
               ) : null}
-            </>
-          )
-        ) : null}
+            </div>
+          ) : null}
+        </div>
+
+        <CompletedAttemptsTable attempts={attempts} showLevel={false} />
       </div>
     </AppShell>
   );

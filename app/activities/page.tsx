@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { ActivityCard, type ActivityCardData } from '../../components/ActivityCard';
 import { ActivityCardSkeleton } from '../../components/ActivityCardSkeleton';
-import { answeredCount, getStoredSession, isSessionComplete, STORIES_PER_SESSION } from '../../lib/acceptanceCriteriaSessionStore';
 import { deriveActivityCardStatus, type ActivityCardStatus } from '../../lib/activityCardStatus';
 import { ACTIVITIES, Difficulty } from '../../lib/activityContent';
 import { loadCompletedAttempts, loadSessions, loadStudentTitles, type StudentTitle } from '../../lib/sessionClient';
@@ -33,24 +32,6 @@ function earnedTitle(titles: StudentTitle[] | null, activityType: string | null)
   if (!entry || entry.difficultyLevel === null) return null;
   return entry.title;
 }
-
-/**
- * The Type B "Write Acceptance Criteria" activity (GitHub #149, REQ-FU-2) — not in ACTIVITIES
- * because it has no question bank/activity_type/session_log row, but rendered by the exact same
- * ActivityCard below and run through the same getActivityState/getTitle calls as the two Type A
- * cards, so there is no per-activity special case in this page's render logic. Unlike the Type A
- * cards, its bestScore/hasInProgress can't come from loadCompletedAttempts/loadSessions — there
- * is no real activity_type or session_log row for it to query — so both stay honestly fixed
- * (null / false) until a real backend for this activity exists.
- */
-const WRITE_ACCEPTANCE_CRITERIA_CARD: ActivityCardData = {
-  slug: 'write-acceptance-criteria',
-  name: 'Write Acceptance Criteria',
-  category: 'Write Acceptance Criteria',
-};
-
-/** Every card's slug, in display order — used for the loading skeleton's placeholder count. */
-const CARD_SLUGS: ActivityCardData[] = [...ACTIVITIES, WRITE_ACCEPTANCE_CRITERIA_CARD];
 
 export default function ActivitiesPage() {
   const { token, profile, loading, authorized } = useRequireRole('student');
@@ -95,7 +76,12 @@ export default function ActivitiesPage() {
       // "In progress · 1 of 4" line, and difficulty_level the level pill.
       const runningByType = new Map(sessionsResult.data.sessions.map((session) => [session.activity_type, session]));
 
-      const typeACards: CardData[] = ACTIVITIES.map((activity, i) => {
+      // Write Acceptance Criteria (GitHub #149, REQ-FU-2) is one of ACTIVITIES like the two
+      // Type A entries now that it has a real session_log row — loadSessions/loadCompletedAttempts
+      // both key on activity_type, so it needs no special case here any more (it used to read a
+      // local-only mock, which is what produced a second, separately-built card for the same
+      // activity — see the "Write Acceptance Criteria sessions" note in CLAUDE.md).
+      const cards: CardData[] = ACTIVITIES.map((activity, i) => {
         const attemptsResult = attemptResults[i];
         const attempts = attemptsResult.ok ? attemptsResult.data.attempts : [];
         const best = attempts.length === 0 ? null : attempts.reduce((b, a) => (a.score > b.score ? a : b), attempts[0]);
@@ -111,29 +97,7 @@ export default function ActivitiesPage() {
         };
       });
 
-      // Type B (GitHub #149, REQ-FU-2): no session_log row is ever created for this activity —
-      // see app/activities/write-acceptance-criteria/page.tsx — so it can't join the
-      // loadCompletedAttempts/loadSessions calls above. Its progress comes from the same
-      // localStorage session the activity's own page trusts (lib/acceptanceCriteriaSessionStore.ts),
-      // which is the point: the card now says exactly what the student sees after clicking it.
-      // Best score stays null — no student-facing endpoint lists their own graded submissions —
-      // and activityType is null because there is no row in the titles response to look up.
-      // getStoredSession() (GitHub #263) also returns an already-complete session, kept around
-      // until the student dismisses its summary — not "in progress" for this card's purposes,
-      // so it's filtered out here the same way the old getInProgressSession() used to exclude it.
-      const stored = getStoredSession();
-      const acSession = stored && !isSessionComplete(stored) ? stored : null;
-      const writeAcCard: CardData = {
-        activity: WRITE_ACCEPTANCE_CRITERIA_CARD,
-        activityType: null,
-        level: START_DIFFICULTY_LEVEL,
-        status: deriveActivityCardStatus(
-          acSession ? { answeredCount: answeredCount(acSession), questionCount: STORIES_PER_SESSION } : null,
-          null,
-        ),
-      };
-
-      setCards([...typeACards, writeAcCard]);
+      setCards(cards);
       setIsLoading(false);
     });
 
@@ -167,7 +131,7 @@ export default function ActivitiesPage() {
 
       {isLoading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2" role="status" aria-label="Loading activities">
-          {CARD_SLUGS.map((activity) => (
+          {ACTIVITIES.map((activity) => (
             <ActivityCardSkeleton key={activity.slug} />
           ))}
         </div>

@@ -1,4 +1,4 @@
-import { AC_PASS_SCORE } from './acceptanceCriteriaSessionStore';
+import { AC_PASS_SCORE } from './acceptanceCriteriaRules';
 import type { InstructorACSubmission } from './acceptanceCriteriaClient';
 import { getActivityByType } from './activityContent';
 import type { ActivityType } from './activityTypes';

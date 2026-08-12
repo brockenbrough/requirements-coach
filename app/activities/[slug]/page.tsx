@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppShell } from "../../../components/AppShell";
+import { CompletedAttemptsTable } from "../../../components/CompletedAttemptsTable";
 import { ResumeOrAbandonPrompt } from "../../../components/ResumeOrAbandonPrompt";
 import { getActivity } from "../../../lib/activityContent";
 import { START_DIFFICULTY_LEVEL } from "../../../lib/sessionRules";
@@ -224,92 +225,7 @@ export default function ActivityDetailPage({
           ) : null}
         </div>
 
-        {/* Completed attempts, newest first — the "list of prior results for the activity"
-            the opening page is meant to show. Still loading (null) shows a skeleton in the
-            same shape as the real table (GitHub #80) instead of popping in abruptly once the
-            request resolves. */}
-        <div className="mt-6">
-          <h3 className="mb-3 text-sm font-extrabold text-gray-500">
-            Previous attempts
-          </h3>
-
-          {attempts === null ? (
-            <div className="overflow-x-auto rounded-2xl border border-[#332b6b]">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-[#1b1642] text-[#A79FC9]">
-                    <th className="px-4 py-2.5 text-left font-bold">Date</th>
-                    <th className="px-4 py-2.5 text-left font-bold">Level</th>
-                    <th className="px-4 py-2.5 text-left font-bold">Score</th>
-                    <th className="px-4 py-2.5 text-left font-bold">Result</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[0, 1, 2].map((i) => (
-                    <tr
-                      key={i}
-                      className="border-t border-[#332b6b] bg-[#241f52]"
-                    >
-                      <td className="px-4 py-3">
-                        <span className="block h-3 w-16 animate-pulse rounded-full bg-white/10" />
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="block h-3 w-20 animate-pulse rounded-full bg-white/10" />
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="block h-3 w-14 animate-pulse rounded-full bg-white/10" />
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="block h-3 w-24 animate-pulse rounded-full bg-white/10" />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : attempts.length === 0 ? (
-            <p className="rounded-brand-lg border border-gray-100 bg-gray-50 p-4 text-sm font-semibold text-gray-500">
-              You haven&apos;t completed this activity yet.
-            </p>
-          ) : (
-            <div className="overflow-x-auto rounded-2xl border border-[#332b6b]">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-[#1b1642] text-[#A79FC9]">
-                    <th className="px-4 py-2.5 text-left font-bold">Date</th>
-                    <th className="px-4 py-2.5 text-left font-bold">Level</th>
-                    <th className="px-4 py-2.5 text-left font-bold">Score</th>
-                    <th className="px-4 py-2.5 text-left font-bold">Result</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {attempts.map((attempt) => (
-                    <tr
-                      key={attempt.sessionId}
-                      className="border-t border-[#332b6b] bg-[#241f52] text-[#F3F1FF]"
-                    >
-                      <td className="px-4 py-2.5">
-                        {attempt.completedAt
-                          ? new Date(attempt.completedAt).toLocaleDateString()
-                          : "—"}
-                      </td>
-                      <td className="px-4 py-2.5">
-                        {DIFFICULTY_LABEL[attempt.difficultyLevel] ?? "Level"} ·{" "}
-                        {attempt.difficultyLevel}
-                      </td>
-                      <td className="px-4 py-2.5 tabular-nums">
-                        {attempt.score} / {attempt.maxScore}
-                      </td>
-                      <td className="px-4 py-2.5">
-                        {attempt.passed ? "Passed" : "Not passed"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+        <CompletedAttemptsTable attempts={attempts} />
       </div>
     </AppShell>
   );

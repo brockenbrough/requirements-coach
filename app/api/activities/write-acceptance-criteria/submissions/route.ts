@@ -1,10 +1,19 @@
 import { getSupabaseClient } from "../../../../../lib/supabase";
 import { getLLMProvider, isLLMProviderName } from "../../../../../lib/llm/factory";
-import { STORIES_PER_SESSION } from "../../../../../lib/acSessionConfig";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { SESSION_COLUMNS, isPassing } from "../../../../../lib/sessionRules";
+import {
+  loadSessionStories,
+  loadSessionSubmissions,
+  nextUnansweredStoryPosition,
+  type SessionStorySlot,
+} from "../../../../../lib/acceptanceCriteriaQueries";
+import type { SupabaseClient } from "../../../../../lib/sessionQueries";
 
 type UserStoryRow = { user_story_id: string; story_text: string; creator_id: string };
 type LLMConfigRow = { provider: string; api_key: string; model: string };
+type SessionRow = { session_id: string; status: string; cumulative_score: number; max_score: number };
+
+const UNIQUE_VIOLATION = "23505";
 
 /**
  * Hard cap on submittedText, enforced before any DB write or LLM call. Without this, a caller
@@ -19,58 +28,24 @@ function getToken(request: Request): string | null {
 }
 
 /**
- * Returns the next unanswered story in the session (id + position), or null if all have
- * been submitted. Extracted here because the submissions route needs it twice: once to
- * enforce sequential order before the LLM call, and once to tell the client what comes
- * next after a successful submission.
- */
-async function findNextStory(
-  supabase: SupabaseClient,
-  sessionId: string,
-): Promise<{ next: { userStoryId: string; position: number } | null; error: string | null }> {
-  const { data: sessionStories, error: storiesError } = await supabase
-    .from("ac_session_story")
-    .select("position, user_story_id")
-    .eq("ac_session_id", sessionId)
-    .order("position", { ascending: true });
-
-  if (storiesError) return { next: null, error: storiesError.message };
-
-  const { data: submissions, error: subError } = await supabase
-    .from("submission")
-    .select("user_story_id")
-    .eq("ac_session_id", sessionId);
-
-  if (subError) return { next: null, error: subError.message };
-
-  const submittedIds = new Set((submissions ?? []).map((s) => s.user_story_id));
-  const next = (sessionStories ?? []).find((s) => !submittedIds.has(s.user_story_id));
-
-  return {
-    next: next ? { userStoryId: next.user_story_id, position: next.position } : null,
-    error: null,
-  };
-}
-
-/**
  * POST /api/activities/write-acceptance-criteria/submissions — grades one free-text
  * acceptance-criteria submission against a given user story (REQ-FU-2).
  *
- * Write-before-disclose: the submission row is committed with grading columns null, then
- * the LLM call runs, then the row is updated. A crash between insert and update leaves an
- * ungraded row rather than a graded answer that was never recorded.
+ * Write-before-disclose: the submission row is committed with grading columns null, then the
+ * LLM call runs, then the row is updated — a crash between insert and update leaves an ungraded
+ * row rather than a graded answer that was never recorded.
  *
- * sessionId is required (GitHub #256, cost/abuse fix): every graded submission must belong to
- * a real, validated session, so this route can never be reduced to "auth check + unthrottled
- * LLM call". The session checks below always run:
+ * sessionId is required (GitHub #256, cost/abuse fix): every graded submission must belong to a
+ * real, in-progress session_log row (the same table and abandon route Type A uses — see
+ * lib/acceptanceCriteriaQueries.ts), so this route can never be reduced to "auth check +
+ * unthrottled LLM call". A session only ever admits STORIES_PER_SESSION graded submissions (one
+ * per story, ever), which is what actually bounds LLM spend per session:
  *   - Validates the session is in-progress and belongs to this student.
- *   - Enforces sequential order: only the next unanswered story may be submitted. Attempting
- *     a story the student hasn't reached yet returns 409.
- *   - After grading, checks whether all four stories are now answered. If so, marks the
- *     session completed and returns sessionCompleted: true with the totals.
- * A session only ever admits STORIES_PER_SESSION graded submissions (one per story, ever —
- * uq_submission_session_user_story-equivalent enforcement via the sequential-order check plus
- * "already completed" 409), which is what actually bounds LLM spend per session.
+ *   - Enforces sequential order: only the next unanswered story may be submitted. Attempting a
+ *     story the student hasn't reached yet — or one outside this session's drawn set — is
+ *     rejected.
+ *   - After grading, checks whether every story is now answered. If so, marks the session
+ *     completed and returns sessionCompleted: true with the totals.
  */
 export async function POST(request: Request) {
   const token = getToken(request);
@@ -116,31 +91,51 @@ export async function POST(request: Request) {
   if (authError || !user)
     return Response.json({ error: "Invalid or expired token." }, { status: 401 });
 
-  // Validate the session belongs to this student and is still open.
+  // Scoping by user_id + activity_type is what keeps one student out of another's session (and
+  // out of a Type A session id entirely) — a foreign or wrong-activity session id is
+  // indistinguishable from a non-existent one.
   const { data: session, error: sessionError } = await supabase
-    .from("ac_session")
-    .select("ac_session_id, status")
-    .eq("ac_session_id", sessionId)
+    .from("session_log")
+    .select(SESSION_COLUMNS)
+    .eq("session_id", sessionId)
     .eq("user_id", user.id)
+    .eq("activity_type", "WRITE_ACCEPTANCE_CRITERIA")
     .maybeSingle();
 
   if (sessionError) return Response.json({ error: sessionError.message }, { status: 500 });
   if (!session) return Response.json({ error: "Session not found." }, { status: 404 });
-  if (session.status === "completed") {
-    return Response.json({ error: "This session is already completed." }, { status: 409 });
-  }
-
-  // Reject out-of-order submissions — the student must work through stories 1→4.
-  const { next: currentStory, error: nextError } = await findNextStory(supabase, sessionId);
-  if (nextError) return Response.json({ error: nextError }, { status: 500 });
-
-  if (!currentStory) {
-    return Response.json({ error: "This session is already completed." }, { status: 409 });
-  }
-
-  if (userStoryId !== currentStory.userStoryId) {
+  if ((session as SessionRow).status !== "in-progress") {
     return Response.json(
-      { error: `You must submit story ${currentStory.position} before moving on.` },
+      { error: `Session is ${(session as SessionRow).status}.`, session },
+      { status: 409 },
+    );
+  }
+
+  const { stories, error: storiesError } = await loadSessionStories(supabase, sessionId);
+  if (storiesError) return Response.json({ error: storiesError.message }, { status: 500 });
+
+  const asked = (stories ?? []).find((story) => story.userStoryId === userStoryId);
+  if (!asked) {
+    return Response.json({ error: "This story does not belong to this session." }, { status: 400 });
+  }
+
+  const { submissions: existingSubmissions, error: submissionsError } = await loadSessionSubmissions(
+    supabase,
+    sessionId,
+  );
+  if (submissionsError) return Response.json({ error: submissionsError.message }, { status: 500 });
+
+  const submittedStoryIds = new Set((existingSubmissions ?? []).map((submission) => submission.userStoryId));
+  const nextPosition = nextUnansweredStoryPosition(stories ?? [], submittedStoryIds);
+
+  if (nextPosition === null) {
+    return Response.json({ error: "This session is already completed." }, { status: 409 });
+  }
+
+  if (asked.position !== nextPosition) {
+    const currentStory = (stories ?? []).find((story) => story.position === nextPosition);
+    return Response.json(
+      { error: `You must submit story ${(currentStory?.position ?? 0) + 1} before moving on.` },
       { status: 409 },
     );
   }
@@ -184,10 +179,16 @@ export async function POST(request: Request) {
     user_id: user.id,
     user_story_id: userStoryId,
     submitted_text: submittedText,
-    ac_session_id: sessionId,
+    session_id: sessionId,
   });
 
-  if (insertError) return Response.json({ error: insertError.message }, { status: 500 });
+  if (insertError) {
+    // uq_submission_session_user_story: this story was already submitted in this session.
+    if (insertError.code === UNIQUE_VIOLATION) {
+      return Response.json({ error: "This story has already been submitted." }, { status: 409 });
+    }
+    return Response.json({ error: insertError.message }, { status: 500 });
+  }
 
   let rating;
   try {
@@ -200,58 +201,84 @@ export async function POST(request: Request) {
     return Response.json({ error: message }, { status: 502 });
   }
 
+  const gradedAt = new Date().toISOString();
+
   const { error: updateError } = await supabase
     .from("submission")
     .update({
       llm_score: rating.score,
       llm_feedback: rating.feedback,
       llm_provider: providerName,
-      graded_at: new Date().toISOString(),
+      graded_at: gradedAt,
     })
     .eq("submission_id", submissionId);
 
   if (updateError) return Response.json({ error: updateError.message }, { status: 500 });
 
-  // Session completion check and next-story pointer.
-  let sessionCompleted = false;
-  let nextStoryId: string | null = null;
-  let totalScore: number | null = null;
-  let averageScore: number | null = null;
+  // Re-read rather than compute locally: cumulative_score was raised by trg_submission_score,
+  // and a parallel submission from another device may have raised it further.
+  const progress = await loadProgress(supabase, sessionId, stories ?? []);
+  if (progress.error) return Response.json({ error: progress.error }, { status: 500 });
 
-  const { data: allSubmissions, error: countError } = await supabase
-    .from("submission")
-    .select("llm_score, user_story_id")
-    .eq("ac_session_id", sessionId);
+  const finished = progress.nextPosition === null
+    ? await completeAcSession(supabase, sessionId, progress.session as SessionRow)
+    : progress.session;
 
-  if (!countError && allSubmissions) {
-    const count = allSubmissions.length;
-
-    if (count >= STORIES_PER_SESSION) {
-      const scores = allSubmissions.map((s) => s.llm_score ?? 0);
-      totalScore = scores.reduce((sum, s) => sum + s, 0);
-      averageScore = Math.round(((totalScore ?? 0) / count) * 10) / 10;
-
-      await supabase
-        .from("ac_session")
-        .update({
-          status: "completed",
-          completed_at: new Date().toISOString(),
-          total_score: totalScore,
-        })
-        .eq("ac_session_id", sessionId);
-
-      sessionCompleted = true;
-    } else {
-      // Reuse the helper to avoid repeating the "find next" query logic.
-      const { next } = await findNextStory(supabase, sessionId);
-      nextStoryId = next?.userStoryId ?? null;
-    }
-  }
-
-  // sessionId is required (checked above), so these fields are always present now — no more
-  // conditional shape depending on whether a session was involved.
   return Response.json(
-    { submissionId, score: rating.score, feedback: rating.feedback, sessionCompleted, nextStoryId, totalScore, averageScore },
+    {
+      submission: {
+        submissionId,
+        userStoryId,
+        submittedText,
+        score: rating.score,
+        feedback: rating.feedback,
+        submittedAt: gradedAt,
+      },
+      session: finished,
+      answeredCount: progress.answeredCount,
+      nextPosition: progress.nextPosition,
+      completed: progress.nextPosition === null,
+    },
     { status: 200 },
   );
+}
+
+/** Current session state plus the next unsubmitted position — the AC equivalent of the Type A answers route's loadProgress. */
+async function loadProgress(supabase: SupabaseClient, sessionId: string, stories: SessionStorySlot[]) {
+  const [{ data: session, error: sessionError }, { submissions, error: submissionsError }] = await Promise.all([
+    supabase.from("session_log").select(SESSION_COLUMNS).eq("session_id", sessionId).maybeSingle(),
+    loadSessionSubmissions(supabase, sessionId),
+  ]);
+
+  const error = sessionError?.message ?? submissionsError?.message ?? null;
+  const submittedStoryIds = new Set((submissions ?? []).map((submission) => submission.userStoryId));
+
+  return {
+    session,
+    answeredCount: submittedStoryIds.size,
+    nextPosition: nextUnansweredStoryPosition(stories, submittedStoryIds),
+    error,
+  };
+}
+
+/**
+ * Closes out the session after the last story is graded. status and passed are decided here,
+ * never by the client. The status guard keeps a parallel request from completing it twice.
+ */
+async function completeAcSession(supabase: SupabaseClient, sessionId: string, session: SessionRow) {
+  const { data, error } = await supabase
+    .from("session_log")
+    .update({
+      status: "completed",
+      ended_at: new Date().toISOString(),
+      passed: isPassing(session.cumulative_score, session.max_score),
+    })
+    .eq("session_id", sessionId)
+    .eq("status", "in-progress")
+    .select(SESSION_COLUMNS)
+    .maybeSingle();
+
+  // No row came back because someone else completed it first — their version is authoritative.
+  if (error || !data) return session;
+  return data;
 }

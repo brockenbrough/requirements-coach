@@ -1,13 +1,17 @@
 "use client";
 
 // GitHub #149: client for the "Write Acceptance Criteria" activity (REQ-FU-2). Same role as
-// lib/sessionClient.ts for the Type A flow: the one place the UI talks to these two routes, so
-// no component hand-rolls the Authorization header or picks apart an error body.
+// lib/sessionClient.ts for the Type A flow: the one place the UI talks to these routes, so no
+// component hand-rolls the Authorization header or picks apart an error body. The session-start/
+// resume/current routes this now talks to are the AC equivalents of POST /api/sessions and
+// GET /api/sessions/current — same session_log table, same abandon route (lib/sessionClient.ts's
+// abandonSession/loadCompletedAttempts are reused directly for this activity, unmodified).
 
 import type {
   AcceptanceCriteriaResult,
   UserStoryPrompt,
 } from "./acceptanceCriteriaTypes";
+import type { SessionRecord } from "./sessionTypes";
 import { toInstant } from "./dateTime";
 
 export type ApiResult<T> =
@@ -46,49 +50,71 @@ async function request<T>(
   return { ok: true, data: body as T };
 }
 
-/** GET .../user-story: draws one random story for the student to write criteria for. */
-export function loadUserStory(
+function postJson(payload: unknown): RequestInit {
+  return {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  };
+}
+
+/** One drawn story in a session, in presentation order — the AC equivalent of SessionQuestion. */
+export type AcSessionStory = { position: number } & UserStoryPrompt;
+
+/** One submission already made in a session — the AC equivalent of SessionAnswer. */
+export type AcSessionSubmission = {
+  submissionId: string;
+  userStoryId: string;
+  submittedText: string;
+  score: number | null;
+  feedback: string | null;
+  submittedAt: string;
+  gradedAt: string | null;
+};
+
+export type StartAcSessionResult = {
+  session: SessionRecord;
+  stories: AcSessionStory[];
+  resumed: boolean;
+};
+
+export type CurrentAcSessionResult = {
+  session: SessionRecord | null;
+  stories: AcSessionStory[];
+  submissions: AcSessionSubmission[];
+  answeredCount: number;
+  nextPosition: number | null;
+  completed?: boolean;
+};
+
+/**
+ * Starts the activity, or picks up the session already running — the AC equivalent of
+ * sessionClient.ts's startSession. uq_session_log_one_active makes "start" and "resume" the
+ * same call here too: 201 for a fresh draw, 200 with resumed: true for the existing one.
+ */
+export function startOrResumeAcceptanceCriteriaSession(
   token: string,
-): Promise<ApiResult<UserStoryPrompt>> {
-  return request<UserStoryPrompt>(
-    "/api/activities/write-acceptance-criteria/user-story",
-    { method: "GET" },
+): Promise<ApiResult<StartAcSessionResult>> {
+  return request<StartAcSessionResult>(
+    "/api/activities/write-acceptance-criteria/sessions",
+    postJson({}),
     token,
   );
 }
 
 /**
- * GitHub #260: draws `count` *distinct* stories for a new local session
- * (lib/acceptanceCriteriaSessionStore.ts) — the Type A equivalent of the four questions
- * POST /api/sessions draws in one server-side call, but GET .../user-story has no batch or
- * exclude-list form, so this calls it repeatedly and de-duplicates client-side instead.
- *
- * Falls back to allowing a repeat once the retry budget is used up, rather than failing the
- * whole session, in case the story bank has fewer than `count` rows.
+ * The running session with its stories and the submissions made so far.
+ * session: null (with a 200) means nothing is in progress — not an error, the AC equivalent of
+ * sessionClient.ts's loadCurrentSession.
  */
-export async function drawSessionStories(
+export function loadCurrentAcceptanceCriteriaSession(
   token: string,
-  count: number,
-): Promise<ApiResult<UserStoryPrompt[]>> {
-  const stories: UserStoryPrompt[] = [];
-  const seen = new Set<string>();
-  const maxAttempts = count * 4;
-
-  for (let attempt = 0; attempt < maxAttempts && stories.length < count; attempt++) {
-    const result = await loadUserStory(token);
-    if (!result.ok) return result;
-    if (seen.has(result.data.userStoryId)) continue;
-    seen.add(result.data.userStoryId);
-    stories.push(result.data);
-  }
-
-  while (stories.length < count) {
-    const result = await loadUserStory(token);
-    if (!result.ok) return result;
-    stories.push(result.data);
-  }
-
-  return { ok: true, data: stories };
+): Promise<ApiResult<CurrentAcSessionResult>> {
+  return request<CurrentAcSessionResult>(
+    "/api/activities/write-acceptance-criteria/sessions/current",
+    { method: "GET" },
+    token,
+  );
 }
 
 export type InstructorACSubmission = {
@@ -130,32 +156,59 @@ export function loadInstructorACSubmissions(
   });
 }
 
+export type SubmitAcceptanceCriteriaResult = AcceptanceCriteriaResult & {
+  session: SessionRecord;
+  answeredCount: number;
+  nextPosition: number | null;
+  completed: boolean;
+};
+
 /**
- * POST .../submissions: commits the answer, then returns the LLM's grading of it.
+ * POST .../submissions: commits the answer, then returns the LLM's grading of it plus the
+ * session's updated progress — the play page updates its local state from this response rather
+ * than making a second round trip to sessions/current.
  *
- * The route does not echo submittedText back — it is folded in here from what was actually
- * sent, so the feedback screen can show the student's own answer without a second round trip.
+ * sessionId is required (GitHub #256, cost/abuse fix) — every graded submission must belong to
+ * a real, in-progress session_log row.
  */
 export async function submitAcceptanceCriteria(
   token: string,
+  sessionId: string,
   userStoryId: string,
   submittedText: string,
-): Promise<ApiResult<AcceptanceCriteriaResult>> {
+): Promise<ApiResult<SubmitAcceptanceCriteriaResult>> {
   const result = await request<{
-    submissionId: string;
-    score: number;
-    feedback: string;
+    submission: {
+      submissionId: string;
+      userStoryId: string;
+      submittedText: string;
+      score: number;
+      feedback: string;
+      submittedAt: string;
+    };
+    session: SessionRecord;
+    answeredCount: number;
+    nextPosition: number | null;
+    completed: boolean;
   }>(
     "/api/activities/write-acceptance-criteria/submissions",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userStoryId, submittedText }),
-    },
+    postJson({ userStoryId, submittedText, sessionId }),
     token,
   );
 
   if (!result.ok) return result;
 
-  return { ok: true, data: { ...result.data, submittedText } };
+  return {
+    ok: true,
+    data: {
+      submissionId: result.data.submission.submissionId,
+      submittedText: result.data.submission.submittedText,
+      score: result.data.submission.score,
+      feedback: result.data.submission.feedback,
+      session: result.data.session,
+      answeredCount: result.data.answeredCount,
+      nextPosition: result.data.nextPosition,
+      completed: result.data.completed,
+    },
+  };
 }

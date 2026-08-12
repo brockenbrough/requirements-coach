@@ -1,4 +1,4 @@
-import { AC_PASS_SCORE } from '../lib/acceptanceCriteriaSessionStore';
+import { AC_PASS_SCORE } from '../lib/acceptanceCriteriaRules';
 import type { AcceptanceCriteriaResult, UserStoryPrompt } from '../lib/acceptanceCriteriaTypes';
 import { StoryDisplayCard } from './StoryDisplayCard';
 

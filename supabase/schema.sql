@@ -120,15 +120,15 @@ CREATE TABLE user_story (
 --
 -- session_id ties a submission to the practice session it was made in (which of the 4
 -- session_to_user_story rows it answers), the same relationship answered_question_log has to
--- session_log/session_to_question. Nullable for now: the write-acceptance-criteria route
--- doesn't create/reuse a session_log row yet (see session_to_user_story), so it has nothing to
--- put here until that wiring lands — same "column exists ahead of the code that populates it"
--- reasoning as question.user_id / user_story.creator_id. Once a session_id is set,
--- uq_submission_session_user_story below stops a second submission for the same story in the
--- same session from being anything other than rejected: the original is kept, never overwritten.
--- The next story to work on is derived the same way nextUnansweredPosition derives the next
--- question — the lowest session_to_user_story.position with no matching submission — not stored
--- as an index anywhere.
+-- session_log/session_to_question — POST .../write-acceptance-criteria/submissions now requires
+-- and populates it, mirroring the Type A answers route exactly (lib/acceptanceCriteriaQueries.ts).
+-- Still nullable: rows submitted before this wiring landed have no session to point at, and
+-- nothing forces every future submission through this column at the database level, only the
+-- route layer. Once a session_id is set, uq_submission_session_user_story below stops a second
+-- submission for the same story in the same session from being anything other than rejected: the
+-- original is kept, never overwritten. The next story to work on is derived the same way
+-- nextUnansweredPosition derives the next question — the lowest session_to_user_story.position
+-- with no matching submission — not stored as an index anywhere.
 -- ---------------------------------------------------------------------
 CREATE TABLE submission (
     submission_id  uuid        NOT NULL,
@@ -258,11 +258,9 @@ CREATE TABLE session_to_question (
 -- reasoning as session_to_question above: draw once at session start,
 -- persist the set and its order (position, 0..3) so a resumed session
 -- shows the same 4 stories in the same order rather than drawing again.
--- Currently unused by any route — GET .../user-story
--- (app/api/activities/write-acceptance-criteria/user-story/route.ts)
--- still draws one random story per call with no session tied to it;
--- wiring that route (or a new one) to write/read through this table is
--- a follow-up story.
+-- Written by POST /api/activities/write-acceptance-criteria/sessions and read by
+-- lib/acceptanceCriteriaQueries.ts's loadSessionStories, the same role session_to_question plays
+-- for Type A — see that route and lib/acceptanceCriteriaQueries.ts.
 -- ---------------------------------------------------------------------
 CREATE TABLE session_to_user_story (
     session_to_user_story_id SERIAL NOT NULL,
@@ -468,6 +466,26 @@ CREATE TRIGGER trg_answered_question_log_score
   AFTER INSERT ON answered_question_log
   FOR EACH ROW EXECUTE FUNCTION bump_session_score();
 
+-- submission is write-before-disclose (llm_score starts NULL, a later UPDATE fills it in once
+-- grading finishes — see submission's own header comment), so the roll-up fires on that UPDATE
+-- instead of on INSERT the way answered_question_log's does. The OLD.llm_score IS NULL guard
+-- keeps a later, unrelated UPDATE of an already-graded row (there isn't one today, but nothing
+-- stops a future one) from double-counting the score.
+CREATE FUNCTION bump_session_score_from_submission() RETURNS trigger AS $$
+BEGIN
+  IF NEW.session_id IS NOT NULL AND NEW.llm_score IS NOT NULL AND OLD.llm_score IS NULL THEN
+    UPDATE session_log
+       SET cumulative_score = cumulative_score + NEW.llm_score
+     WHERE session_id = NEW.session_id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_submission_score
+  AFTER UPDATE OF llm_score ON submission
+  FOR EACH ROW EXECUTE FUNCTION bump_session_score_from_submission();
+
 
 -- =====================================================================
 -- Row Level Security
@@ -563,6 +581,7 @@ CREATE POLICY own_submissions_insert ON submission
 --                        user_story, submission, instructor_llm_config,
 --                        student_course, course CASCADE;
 --   DROP FUNCTION IF EXISTS bump_session_score() CASCADE;
+--   DROP FUNCTION IF EXISTS bump_session_score_from_submission() CASCADE;
 --
 -- Leaving "user" out of that list keeps the profiles.
 
@@ -683,3 +702,15 @@ CREATE POLICY own_submissions_insert ON submission
 -- and user_story to already exist. If your database has everything above and you only need this
 -- table, run just its CREATE TABLE, both FKs, uq_session_to_user_story_position,
 -- uq_session_to_user_story_story, and RLS statements from this script.
+
+-- Write Acceptance Criteria sessions: if your database already has session_to_user_story and
+-- submission.session_id from an earlier run of this script but predates their being wired up to
+-- real session_log rows (GitHub #260-ish "abandon doesn't persist" fix), the only two statements
+-- you need are the missing activity_type lookup row (session_log.activity_type is FK-constrained
+-- against it, so starting a session 500s without this) and the score roll-up trigger:
+--
+--   INSERT INTO activity_type (activity_type) VALUES ('WRITE_ACCEPTANCE_CRITERIA')
+--     ON CONFLICT DO NOTHING;
+--
+--   -- then the bump_session_score_from_submission() function and trg_submission_score trigger
+--   -- defined above, under "Score roll-up".
