@@ -17,7 +17,12 @@ type SessionRow = { activity_type: string; difficulty_level: number; cumulative_
  * and contributes them. Only sessions that are still running or were abandoned stay out — their
  * cumulative_score is a partial tally of an attempt that was never finished.
  *
- * A student with no completed sessions gets 0.
+ * sessionsCompleted (GitHub #39) is the row count behind that same query — every completed
+ * session counts once here, unlike the score sum, which only keeps each level's best attempt.
+ * Returned alongside score rather than via a second query, since it's already the row set the
+ * score is computed from.
+ *
+ * A student with no completed sessions gets score 0 and sessionsCompleted 0.
  */
 export async function computeStudentScore(supabase: SupabaseClient, userId: string) {
   const { data, error } = await supabase
@@ -26,10 +31,12 @@ export async function computeStudentScore(supabase: SupabaseClient, userId: stri
     .eq('user_id', userId)
     .eq('status', 'completed');
 
-  if (error) return { score: null, error };
+  if (error) return { score: null, sessionsCompleted: null, error };
+
+  const sessions = (data ?? []) as SessionRow[];
 
   const bestByKey = new Map<string, number>();
-  for (const row of (data ?? []) as SessionRow[]) {
+  for (const row of sessions) {
     const key = `${row.activity_type}:${row.difficulty_level}`;
     const current = bestByKey.get(key) ?? 0;
     if (row.cumulative_score > current) bestByKey.set(key, row.cumulative_score);
@@ -37,5 +44,5 @@ export async function computeStudentScore(supabase: SupabaseClient, userId: stri
 
   const score = [...bestByKey.values()].reduce((sum, value) => sum + value, 0);
 
-  return { score, error: null };
+  return { score, sessionsCompleted: sessions.length, error: null };
 }

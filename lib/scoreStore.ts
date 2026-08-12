@@ -2,9 +2,18 @@
 // AppShell doesn't have to hit the network on every page navigation. Same shape as
 // lib/activityStore.ts's storage helpers: a versioned key, an SSR-guarded read/write pair,
 // and only typed getter/setter functions exported — never the raw store.
-const STORAGE_KEY = 'rc_score_v1';
+//
+// GitHub #39: bumped v1 -> v2 when the cached value's shape changed from a plain number to
+// { score, sessionsCompleted }. A browser with a pre-existing v1 entry would otherwise have
+// getCachedScore() return that raw number *typed* as CachedScore, so `result.data.score` reads
+// as undefined and AppShell's `score.toLocaleString()` throws. The version bump makes readStore()
+// simply miss on old data (real number, wrong shape) instead of mis-parsing it.
+const STORAGE_KEY = 'rc_score_v2';
 
-type ScoreStore = Partial<Record<string, number>>;
+/** GitHub #39: sessionsCompleted travels with score so a cache hit still has both fields. */
+export type CachedScore = { score: number; sessionsCompleted: number };
+
+type ScoreStore = Partial<Record<string, CachedScore>>;
 
 function readStore(): ScoreStore {
   if (typeof window === 'undefined') return {};
@@ -21,14 +30,14 @@ function writeStore(store: ScoreStore) {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
 }
 
-export function getCachedScore(studentId: string): number | null {
+export function getCachedScore(studentId: string): CachedScore | null {
   const store = readStore();
   return store[studentId] ?? null;
 }
 
-export function setCachedScore(studentId: string, score: number): void {
+export function setCachedScore(studentId: string, value: CachedScore): void {
   const store = readStore();
-  store[studentId] = score;
+  store[studentId] = value;
   writeStore(store);
 }
 

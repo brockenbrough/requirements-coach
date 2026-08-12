@@ -15,6 +15,10 @@ function getToken(request: Request): string | null {
  * and a level is never counted twice. Passing is not required: a finished attempt keeps the
  * points it earned. A student with no completed sessions gets 0.
  *
+ * sessionsCompleted (GitHub #39, the profile page's "sessions completed" summary stat) is the
+ * count of completed sessions behind that same sum — every one counts once here, unlike the
+ * score, which only keeps each level's best attempt.
+ *
  * studentId must match the authenticated user — there is no instructor exception on this route.
  */
 export async function GET(request: Request, { params }: { params: { studentId: string } }) {
@@ -31,8 +35,8 @@ export async function GET(request: Request, { params }: { params: { studentId: s
     return Response.json({ error: 'Forbidden.' }, { status: 403 });
   }
 
-  const { score, error } = await computeStudentScore(supabase, user.id);
+  const { score, sessionsCompleted, error } = await computeStudentScore(supabase, user.id);
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
-  return Response.json({ score }, { status: 200 });
+  return Response.json({ score, sessionsCompleted }, { status: 200 });
 }

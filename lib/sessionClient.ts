@@ -281,12 +281,17 @@ export function loadCompletedAttempts(
 }
 
 /**
- * The student's cumulative score: the sum of their best passing score at each difficulty level
- * of each activity type (REQ-GAM-DL-1). Cached in localStorage (lib/scoreStore.ts) keyed by
- * studentId, since it otherwise gets refetched on every AppShell mount i.e. every navigation.
- * A plain call is served from the cache when present; pass forceRefresh to bypass it and
- * re-cache the server's answer — the play flow does this once a session completes, since
- * that's the only thing that actually changes the score.
+ * The student's cumulative score: the sum of their best score at each completed difficulty
+ * level of each activity type (REQ-GAM-DL-1 — completed, not passed; see computeStudentScore's
+ * own comment). Cached in localStorage (lib/scoreStore.ts) keyed by studentId, since it
+ * otherwise gets refetched on every AppShell mount i.e. every navigation. A plain call is
+ * served from the cache when present; pass forceRefresh to bypass it and re-cache the server's
+ * answer — the play flow does this once a session completes, since that's the only thing that
+ * actually changes the score.
+ *
+ * sessionsCompleted (GitHub #39) rides along with score in both the network response and the
+ * cache — the profile page's completed-sessions summary reads it off the same call rather than
+ * a second request.
  *
  * studentId has to be the authenticated student; the route answers 403 for anyone else.
  */
@@ -298,17 +303,17 @@ export function loadStudentScore(
   if (!options.forceRefresh) {
     const cached = getCachedScore(studentId);
     if (cached !== null) {
-      return Promise.resolve<ApiResult<{ score: number }>>({ ok: true, data: { score: cached } });
+      return Promise.resolve<ApiResult<{ score: number; sessionsCompleted: number }>>({ ok: true, data: cached });
     }
   }
 
-  return request<{ score: number }>(
+  return request<{ score: number; sessionsCompleted: number }>(
     `/api/students/${encodeURIComponent(studentId)}/score`,
     { method: 'GET' },
     token,
   ).then((result) => {
     if (result.ok) {
-      setCachedScore(studentId, result.data.score);
+      setCachedScore(studentId, result.data);
     }
     return result;
   });
