@@ -2,12 +2,17 @@
 
 import { useState } from 'react';
 import type { UserStoryPrompt } from '../lib/acceptanceCriteriaTypes';
+import { StoryDisplayCard } from './StoryDisplayCard';
 
 /**
  * GitHub #149: the input phase of the "Write Acceptance Criteria" activity (REQ-FU-2) — the
  * free-text counterpart to QuestionCard. Submit is disabled while the textarea is blank (after
  * trimming whitespace-only input) or while a submission is already in flight, with the same
  * "Submitting…" label swap QuestionCard uses for the equivalent state.
+ *
+ * GitHub #262: the story itself now renders via StoryDisplayCard as its own card, separate from
+ * this form — the story isn't part of what the student is filling in, so it shouldn't share a
+ * card with the input.
  */
 export function AcceptanceCriteriaWritingScreen({
   userStory,
@@ -28,32 +33,34 @@ export function AcceptanceCriteriaWritingScreen({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="rounded-brand-lg border border-brand-navy-border bg-brand-navy p-6">
-      <p className="mb-5 text-base font-extrabold leading-snug text-white">{userStory.description}</p>
+    <>
+      <StoryDisplayCard description={userStory.description} className="mb-5" />
 
-      <label className="mb-1.5 block text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted" htmlFor="acceptance-criteria-input">
-        Your acceptance criteria
-      </label>
-      <textarea
-        id="acceptance-criteria-input"
-        value={text}
-        onChange={(event) => setText(event.target.value)}
-        disabled={submitting}
-        rows={8}
-        placeholder="Given ..., when ..., then ..."
-        className="block w-full resize-y rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm leading-relaxed text-brand-ink outline-none transition focus:border-brand-purple disabled:cursor-not-allowed disabled:opacity-60"
-      />
-      <p className="mb-5 mt-1.5 text-xs font-semibold text-brand-ink-muted">
-        Write one or more Given/When/Then criteria. Aim for criteria that are specific, testable, and clearly connected to the story above.
-      </p>
+      <form onSubmit={handleSubmit} className="rounded-brand-lg border border-brand-navy-border bg-brand-navy p-6">
+        <label className="mb-1.5 block text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted" htmlFor="acceptance-criteria-input">
+          Your acceptance criteria
+        </label>
+        <textarea
+          id="acceptance-criteria-input"
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          disabled={submitting}
+          rows={8}
+          placeholder="Given ..., when ..., then ..."
+          className="block w-full resize-y rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm leading-relaxed text-brand-ink outline-none transition focus:border-brand-purple disabled:cursor-not-allowed disabled:opacity-60"
+        />
+        <p className="mb-5 mt-1.5 text-xs font-semibold text-brand-ink-muted">
+          Write one or more Given/When/Then criteria. Aim for criteria that are specific, testable, and clearly connected to the story above.
+        </p>
 
-      <button
-        type="submit"
-        disabled={isBlank || submitting}
-        className="w-full rounded-brand-md bg-brand-purple py-3 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        {submitting ? 'Submitting…' : 'Submit'}
-      </button>
-    </form>
+        <button
+          type="submit"
+          disabled={isBlank || submitting}
+          className="w-full rounded-brand-md bg-brand-purple py-3 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {submitting ? 'Submitting…' : 'Submit'}
+        </button>
+      </form>
+    </>
   );
 }
