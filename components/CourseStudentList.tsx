@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import type { MockCourseStudent } from '../lib/mockCourses';
+import type { CourseStudent } from '../lib/courseClient';
 
 function TrashIcon() {
   return (
@@ -25,8 +25,8 @@ export function CourseStudentList({
   students,
   onRemove,
 }: {
-  students: MockCourseStudent[];
-  onRemove: (student: MockCourseStudent) => void;
+  students: CourseStudent[];
+  onRemove: (student: CourseStudent) => void;
 }) {
   if (students.length === 0) {
     return (

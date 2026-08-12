@@ -4,21 +4,20 @@ import { useEffect, useState } from 'react';
 import { AppShell } from '../../../components/AppShell';
 import { CourseCard } from '../../../components/CourseCard';
 import { CreateCourseForm } from '../../../components/CreateCourseForm';
-import { loadCourses, type Course } from '../../../lib/mockCourses';
+import { loadCourses, type CourseSummary } from '../../../lib/courseClient';
 import { useRequireRole } from '../../../lib/useRequireRole';
 
 /**
  * GitHub #241 (UI-1) + follow-up: instructor "Courses" overview — every course the instructor
- * has created, plus the create-course form. Backend (API-1 and friends) doesn't exist yet, so
- * this runs on lib/mockCourses.ts; see that file's header for exactly what a real integration
- * needs to swap in.
+ * has created, plus the create-course form. Real now (lib/courseClient.ts, REQ-DL-5) — GET
+ * /api/instructor/courses backs this list, scoped to the caller's own courses server-side.
  */
 export default function InstructorCoursesPage() {
   // Same guard as every other /instructor/* page (GitHub #82/#169) — a student hitting this
   // URL directly is redirected, never shown the courses list or create form.
   const { token, profile, loading, authorized } = useRequireRole('instructor');
 
-  const [courses, setCourses] = useState<Course[] | null>(null);
+  const [courses, setCourses] = useState<CourseSummary[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
 
@@ -41,8 +40,6 @@ export default function InstructorCoursesPage() {
 
   if (loading || !authorized) return null;
   if (!token || !profile) return null;
-
-  const professorName = `${profile.first_name} ${profile.last_name}`.trim() || profile.username;
 
   return (
     <AppShell active="instructor-courses">
@@ -82,7 +79,6 @@ export default function InstructorCoursesPage() {
         <p className="mb-3 text-xs font-extrabold uppercase tracking-wide text-gray-400">Create a course</p>
         <CreateCourseForm
           token={token}
-          professorName={professorName}
           onCreated={(course) => setCourses((current) => [course, ...(current ?? [])])}
         />
       </div>
