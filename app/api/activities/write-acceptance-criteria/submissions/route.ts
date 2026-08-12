@@ -12,34 +12,37 @@ function getToken(request: Request): string | null {
 }
 
 /**
- * Returns the user_story_id of the next unanswered story in the session, or null if all
- * have been submitted. Extracted here because the submissions route needs it twice: once
- * to enforce sequential order before the LLM call, and once to tell the client what comes
+ * Returns the next unanswered story in the session (id + position), or null if all have
+ * been submitted. Extracted here because the submissions route needs it twice: once to
+ * enforce sequential order before the LLM call, and once to tell the client what comes
  * next after a successful submission.
  */
-async function findNextStoryId(
+async function findNextStory(
   supabase: SupabaseClient,
   sessionId: string,
-): Promise<{ nextStoryId: string | null; error: string | null }> {
+): Promise<{ next: { userStoryId: string; position: number } | null; error: string | null }> {
   const { data: sessionStories, error: storiesError } = await supabase
     .from("ac_session_story")
     .select("position, user_story_id")
     .eq("ac_session_id", sessionId)
     .order("position", { ascending: true });
 
-  if (storiesError) return { nextStoryId: null, error: storiesError.message };
+  if (storiesError) return { next: null, error: storiesError.message };
 
   const { data: submissions, error: subError } = await supabase
     .from("submission")
     .select("user_story_id")
     .eq("ac_session_id", sessionId);
 
-  if (subError) return { nextStoryId: null, error: subError.message };
+  if (subError) return { next: null, error: subError.message };
 
   const submittedIds = new Set((submissions ?? []).map((s) => s.user_story_id));
   const next = (sessionStories ?? []).find((s) => !submittedIds.has(s.user_story_id));
 
-  return { nextStoryId: next?.user_story_id ?? null, error: null };
+  return {
+    next: next ? { userStoryId: next.user_story_id, position: next.position } : null,
+    error: null,
+  };
 }
 
 /**
@@ -50,13 +53,12 @@ async function findNextStoryId(
  * the LLM call runs, then the row is updated. A crash between insert and update leaves an
  * ungraded row rather than a graded answer that was never recorded.
  *
- * When sessionId is provided (GitHub #256/#257):
+ * When sessionId is provided (GitHub #256):
  *   - Validates the session is in-progress and belongs to this student.
- *   - Enforces sequential order: only the current unanswered story may be submitted.
- *     Attempting a story the student hasn't reached yet returns 409.
- *   - After grading, checks whether all STORIES_PER_SESSION stories are now answered.
- *     If so, marks the session completed and returns sessionCompleted: true with totals.
- *   - Returns nextStoryId so the client can advance without a separate GET.
+ *   - Enforces sequential order: only the next unanswered story may be submitted. Attempting
+ *     a story the student hasn't reached yet returns 409.
+ *   - After grading, checks whether all four stories are now answered. If so, marks the
+ *     session completed and returns sessionCompleted: true with the totals.
  */
 export async function POST(request: Request) {
   const token = getToken(request);
@@ -94,6 +96,7 @@ export async function POST(request: Request) {
   const resolvedSessionId: string | null = typeof sessionId === "string" ? sessionId : null;
 
   if (resolvedSessionId) {
+    // Validate the session belongs to this student and is still open.
     const { data: session, error: sessionError } = await supabase
       .from("ac_session")
       .select("ac_session_id, status")
@@ -108,16 +111,16 @@ export async function POST(request: Request) {
     }
 
     // Reject out-of-order submissions — the student must work through stories 1→4.
-    const { nextStoryId: currentStoryId, error: nextError } = await findNextStoryId(supabase, resolvedSessionId);
+    const { next: currentStory, error: nextError } = await findNextStory(supabase, resolvedSessionId);
     if (nextError) return Response.json({ error: nextError }, { status: 500 });
 
-    if (!currentStoryId) {
+    if (!currentStory) {
       return Response.json({ error: "This session is already completed." }, { status: 409 });
     }
 
-    if (userStoryId !== currentStoryId) {
+    if (userStoryId !== currentStory.userStoryId) {
       return Response.json(
-        { error: "You must complete the current story before moving to the next one." },
+        { error: `You must submit story ${currentStory.position} before moving on.` },
         { status: 409 },
       );
     }
@@ -190,6 +193,7 @@ export async function POST(request: Request) {
 
   if (updateError) return Response.json({ error: updateError.message }, { status: 500 });
 
+  // Session completion check and next-story pointer.
   let sessionCompleted = false;
   let nextStoryId: string | null = null;
   let totalScore: number | null = null;
@@ -202,10 +206,12 @@ export async function POST(request: Request) {
       .eq("ac_session_id", resolvedSessionId);
 
     if (!countError && allSubmissions) {
-      if (allSubmissions.length >= STORIES_PER_SESSION) {
+      const count = allSubmissions.length;
+
+      if (count >= STORIES_PER_SESSION) {
         const scores = allSubmissions.map((s) => s.llm_score ?? 0);
         totalScore = scores.reduce((sum, s) => sum + s, 0);
-        averageScore = Math.round(((totalScore ?? 0) / allSubmissions.length) * 10) / 10;
+        averageScore = Math.round(((totalScore ?? 0) / count) * 10) / 10;
 
         await supabase
           .from("ac_session")
@@ -219,8 +225,8 @@ export async function POST(request: Request) {
         sessionCompleted = true;
       } else {
         // Reuse the helper to avoid repeating the "find next" query logic.
-        const { nextStoryId: next, error: nextError } = await findNextStoryId(supabase, resolvedSessionId);
-        if (!nextError) nextStoryId = next;
+        const { next } = await findNextStory(supabase, resolvedSessionId);
+        nextStoryId = next?.userStoryId ?? null;
       }
     }
   }

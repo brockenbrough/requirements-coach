@@ -45,13 +45,12 @@ export default function AllStudentsPage() {
   const [sort, setSort] = useState<SortOrder>('needs-attention');
   const [page, setPage] = useState(1);
 
-  // Same class-wide fetch as the dashboard, made independently rather than shared: this list is
-  // uncached (see loadInstructorActivities), and the two pages are separate entry points.
+  // Cache-first: shares the rc_instructor_activity_v1 cache with the dashboard (GitHub #176).
   useEffect(() => {
-    if (!token) return;
+    if (!token || !profile?.user_id) return;
     let cancelled = false;
 
-    loadInstructorActivities(token).then((result) => {
+    loadInstructorActivities(token, profile.user_id).then((result) => {
       if (cancelled) return;
       if (result.ok) {
         setEntries(result.data.sessions.map((session: InstructorActivityEntry) => toStudentActivitySummary(session)));
@@ -63,7 +62,7 @@ export default function AllStudentsPage() {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, profile?.user_id]);
 
   useEffect(() => {
     if (!token || !profile?.user_id) return;

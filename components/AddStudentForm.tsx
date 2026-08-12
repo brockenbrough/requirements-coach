@@ -1,61 +1,82 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { addStudentToCourse, searchMockStudents, type Course, type MockCourseStudent } from '../lib/mockCourses';
+import { addStudentToCourse, type CourseStudent } from '../lib/courseClient';
+import { loadInstructorStudents, type StudentSummary } from '../lib/sessionClient';
+
+function studentDisplayName(student: StudentSummary): string {
+  const fullName = [student.firstName, student.lastName].filter(Boolean).join(' ').trim();
+  return fullName || student.username;
+}
 
 /**
- * GitHub #241 follow-up: search-and-add form for a course's roster. Suggestions already exclude
- * students currently enrolled (enrolledIds), which is what actually prevents adding a duplicate
- * in practice; the submit handler still checks again before calling the API, since
+ * GitHub #241 follow-up: search-and-add form for a course's roster. Fully real
+ * (lib/courseClient.ts, REQ-DL-5) — there is no dedicated "search students" endpoint, so this
+ * fetches the whole class roster via loadInstructorStudents (lib/sessionClient.ts, already real
+ * and cached — GET /api/instructor/students) once and filters it client-side by name/username
+ * substring, the same way it always filtered out already-enrolled ids. Suggestions already
+ * exclude students currently enrolled (enrolledIds), which is what actually prevents adding a
+ * duplicate in practice; the submit handler still checks again before calling the API, since
  * addStudentToCourse is the real validation boundary, not this component's own filtering.
  */
 export function AddStudentForm({
   token,
-  course,
+  instructorId,
+  courseId,
   enrolledIds,
   onAdded,
 }: {
   token: string;
-  course: Course;
+  instructorId: string;
+  courseId: string;
   enrolledIds: string[];
-  onAdded: (course: Course) => void;
+  onAdded: (student: CourseStudent) => void;
 }) {
   const [query, setQuery] = useState('');
-  const [suggestions, setSuggestions] = useState<MockCourseStudent[]>([]);
-  const [selected, setSelected] = useState<MockCourseStudent | null>(null);
+  const [roster, setRoster] = useState<StudentSummary[]>([]);
+  const [suggestions, setSuggestions] = useState<StudentSummary[]>([]);
+  const [selected, setSelected] = useState<StudentSummary | null>(null);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState('');
   const latestQueryRef = useRef('');
 
   useEffect(() => {
+    let cancelled = false;
+    loadInstructorStudents(token, instructorId).then((result) => {
+      if (!cancelled && result.ok) setRoster(result.data.students);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, instructorId]);
+
+  useEffect(() => {
     latestQueryRef.current = query;
 
-    if (!query.trim() || (selected && selected.name === query)) {
+    const displayName = selected ? studentDisplayName(selected) : null;
+    if (!query.trim() || (selected && displayName === query)) {
       setSuggestions([]);
       return;
     }
 
-    let cancelled = false;
-    searchMockStudents(token, query).then((result) => {
-      if (cancelled || latestQueryRef.current !== query) return; // superseded by newer typing
-      if (result.ok) setSuggestions(result.data.students.filter((s) => !enrolledIds.includes(s.id)));
-    });
+    const q = query.trim().toLowerCase();
+    setSuggestions(
+      roster.filter(
+        (s) => !enrolledIds.includes(s.userId) && (studentDisplayName(s).toLowerCase().includes(q) || s.username.toLowerCase().includes(q)),
+      ),
+    );
+  }, [query, roster, enrolledIds, selected]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [query, token, enrolledIds, selected]);
-
-  function handleSelect(student: MockCourseStudent) {
+  function handleSelect(student: StudentSummary) {
     setSelected(student);
-    setQuery(student.name);
+    setQuery(studentDisplayName(student));
     setSuggestions([]);
   }
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (!selected || adding) return;
-    if (enrolledIds.includes(selected.id)) {
+    if (enrolledIds.includes(selected.userId)) {
       setError('This student is already in the course.');
       return;
     }
@@ -63,7 +84,7 @@ export function AddStudentForm({
     setAdding(true);
     setError('');
 
-    const result = await addStudentToCourse(token, course.id, selected.id);
+    const result = await addStudentToCourse(token, courseId, selected.userId);
     setAdding(false);
 
     if (!result.ok) {
@@ -71,7 +92,7 @@ export function AddStudentForm({
       return;
     }
 
-    onAdded(result.data.course);
+    onAdded(result.data.student);
     setQuery('');
     setSelected(null);
   }
@@ -95,12 +116,12 @@ export function AddStudentForm({
             <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-brand-md border border-gray-200 bg-white shadow-lg">
               {suggestions.map((student) => (
                 <button
-                  key={student.id}
+                  key={student.userId}
                   type="button"
                   onClick={() => handleSelect(student)}
                   className="block w-full px-3.5 py-2.5 text-left text-sm font-semibold text-gray-700 hover:bg-gray-50"
                 >
-                  {student.name}
+                  {studentDisplayName(student)}
                 </button>
               ))}
             </div>

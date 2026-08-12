@@ -17,6 +17,7 @@ import { getCachedActivityLog, setCachedActivityLog } from './activityLogStore';
 import { getCachedCompletedSessions, setCachedCompletedSessions } from './completedSessionsStore';
 import { getCachedScore, setCachedScore } from './scoreStore';
 import { getCachedInstructorStudents, setCachedInstructorStudents } from './instructorStudentsStore';
+import { getCachedInstructorActivities, setCachedInstructorActivities } from './instructorActivityStore';
 import { getCachedInstructorQuestions, setCachedInstructorQuestions } from './instructorQuestionsStore';
 import {
   getCachedAcceptanceCriteriaSubmissions,
@@ -355,17 +356,38 @@ export function loadActivityLog(
 /**
  * Every student's attempts across the class (GET /api/instructor/activities, GitHub #171) —
  * what the Instructor Dashboard renders. The route answers 403 for anyone who isn't a
- * confirmed instructor, so there is no studentId to pass: the whole class is the scope.
+ * confirmed instructor.
  *
- * Deliberately **not** cached in localStorage, unlike loadStudentScore/loadSessions('completed')
- * /loadActivityLog. Those four caches are keyed by studentId and hold the student's own data,
- * which only that student's own actions change — so the page that causes a change can
- * forceRefresh it. This list changes whenever *any* student in the class answers, starts or
- * abandons something, and this tab never learns about it, so a cache here would just show
- * an instructor stale results with no invalidation point to fix it.
+ * Cache-first: returns the stored list on a hit, calls the network only on a miss or when
+ * forceRefresh is true (GitHub #176). Keyed by instructorId so the cache is not shared
+ * between different instructor accounts on the same device. Students write the data, so
+ * staleness is bounded by mount and the explicit Refresh control on the dashboard.
  */
-export function loadInstructorActivities(token: string) {
-  return request<{ sessions: InstructorActivityEntry[] }>('/api/instructor/activities', { method: 'GET' }, token);
+export function loadInstructorActivities(
+  token: string,
+  instructorId: string,
+  options: { forceRefresh?: boolean } = {},
+) {
+  if (!options.forceRefresh) {
+    const cached = getCachedInstructorActivities(instructorId);
+    if (cached !== null) {
+      return Promise.resolve<ApiResult<{ sessions: InstructorActivityEntry[] }>>({
+        ok: true,
+        data: { sessions: cached },
+      });
+    }
+  }
+
+  return request<{ sessions: InstructorActivityEntry[] }>(
+    '/api/instructor/activities',
+    { method: 'GET' },
+    token,
+  ).then((result) => {
+    if (result.ok) {
+      setCachedInstructorActivities(instructorId, result.data.sessions);
+    }
+    return result;
+  });
 }
 
 /**

@@ -10,14 +10,14 @@ function getToken(request: Request): string | null {
 /**
  * GET /api/activities/write-acceptance-criteria/sessions — returns the student's current
  * session with full progress: all four stories, which have a submission, and which comes
- * next (GitHub #255/#257).
+ * next (GitHub #255).
  *
- * Prefers an in-progress session; falls back to the most recently completed one so a
- * student who just finished their last story still sees their results on the same request.
- * Returns { session: null } when no session exists — not an error.
+ * Checks in-progress first, then the most recently completed session, so a student who
+ * just finished their last story still sees their results. Returns { session: null } when
+ * no session exists at all — not an error, just means they haven't started yet.
  *
- * nextStoryId / nextPosition are null when all four stories are answered or the session
- * is already marked completed.
+ * stories is ordered by position (1–4). nextStoryId is null when all four are answered
+ * or the session is completed.
  */
 export async function GET(request: Request) {
   const supabase = getSupabaseClient();
@@ -29,6 +29,8 @@ export async function GET(request: Request) {
   const { data: { user }, error: authError } = await supabase.auth.getUser(token);
   if (authError || !user) return Response.json({ error: 'Invalid or expired token.' }, { status: 401 });
 
+  // Prefer in-progress; fall back to the most recently completed session so a student who
+  // just finished can still see their results on the same request.
   const { data: session, error: sessionError } = await supabase
     .from('ac_session')
     .select('ac_session_id, status, started_at, completed_at, total_score')
@@ -57,15 +59,17 @@ export async function GET(request: Request) {
 
   if (submissionsError) return Response.json({ error: submissionsError.message }, { status: 500 });
 
-  const submittedIds = new Set((submissions ?? []).map((s) => s.user_story_id));
+  const submittedStoryIds = new Set((submissions ?? []).map((s) => s.user_story_id));
 
   const stories = (sessionStories ?? []).map((row) => ({
     position: row.position,
     userStoryId: row.user_story_id,
-    submitted: submittedIds.has(row.user_story_id),
+    submitted: submittedStoryIds.has(row.user_story_id),
   }));
 
   const nextStory = stories.find((s) => !s.submitted) ?? null;
+  const nextPosition = nextStory?.position ?? null;
+  const nextStoryId = nextStory?.userStoryId ?? null;
 
   return Response.json({
     session: {
@@ -74,27 +78,29 @@ export async function GET(request: Request) {
       startedAt: session.started_at,
       completedAt: session.completed_at ?? null,
       totalScore: session.total_score ?? null,
-      submittedCount: submittedIds.size,
+      submittedCount: submittedStoryIds.size,
       storiesPerSession: STORIES_PER_SESSION,
       stories,
-      nextPosition: nextStory?.position ?? null,
-      nextStoryId: nextStory?.userStoryId ?? null,
+      nextPosition,
+      nextStoryId,
     },
   }, { status: 200 });
 }
 
 /**
  * POST /api/activities/write-acceptance-criteria/sessions — starts a new AC session or
- * resumes the one already in progress (GitHub #254/#257).
+ * resumes the one already in progress (GitHub #254).
  *
- * On start: shuffles the full story pool and pins STORIES_PER_SESSION of them in
- * ac_session_story (positions 1–N) so every route in this session works from the same
- * fixed set rather than drawing randomly each time. Returns 503 when the pool is too
- * small to fill a session.
+ * On start: selects STORIES_PER_SESSION random user stories and records them in
+ * ac_session_story (positions 1–4) so every subsequent request in this session works from
+ * the same fixed set. Returns 503 when the story pool is too small to fill a session.
  *
- * On resume: returns the existing session and its stories unchanged, with resumed: true.
- * The 200 vs 201 distinction lets the client show "continuing where you left off" instead
- * of "session started".
+ * On resume: returns the existing in-progress session unchanged with resumed: true. A 200
+ * here is not an error — the client uses resumed to decide whether to show a "continuing
+ * where you left off" message rather than a "session started" one.
+ *
+ * Returns 201 { sessionId, storyIds, resumed: false } on start.
+ * Returns 200 { sessionId, storyIds, resumed: true } on resume.
  */
 export async function POST(request: Request) {
   const supabase = getSupabaseClient();
@@ -106,6 +112,7 @@ export async function POST(request: Request) {
   const { data: { user }, error: authError } = await supabase.auth.getUser(token);
   if (authError || !user) return Response.json({ error: 'Invalid or expired token.' }, { status: 401 });
 
+  // Resume path: return the existing in-progress session with its stories.
   const { data: existing, error: existingError } = await supabase
     .from('ac_session')
     .select('ac_session_id')
@@ -118,7 +125,7 @@ export async function POST(request: Request) {
   if (existing) {
     const { data: sessionStories, error: storiesError } = await supabase
       .from('ac_session_story')
-      .select('user_story_id')
+      .select('user_story_id, position')
       .eq('ac_session_id', existing.ac_session_id)
       .order('position', { ascending: true });
 
@@ -128,6 +135,7 @@ export async function POST(request: Request) {
     return Response.json({ sessionId: existing.ac_session_id, storyIds, resumed: true }, { status: 200 });
   }
 
+  // Start path: need at least STORIES_PER_SESSION stories in the pool.
   const { data: allStories, error: storiesError } = await supabase
     .from('user_story')
     .select('user_story_id');
@@ -152,6 +160,7 @@ export async function POST(request: Request) {
   if (sessionError) return Response.json({ error: sessionError.message }, { status: 500 });
 
   const sessionId = session.ac_session_id;
+
   const storyRows = selected.map((s, i) => ({
     ac_session_id: sessionId,
     user_story_id: s.user_story_id,
@@ -161,6 +170,7 @@ export async function POST(request: Request) {
   const { error: linkError } = await supabase.from('ac_session_story').insert(storyRows);
 
   if (linkError) {
+    // Clean up the orphaned session so the student can try again.
     await supabase.from('ac_session').delete().eq('ac_session_id', sessionId);
     return Response.json({ error: linkError.message }, { status: 500 });
   }
