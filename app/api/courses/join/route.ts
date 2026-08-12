@@ -59,7 +59,7 @@ export async function POST(request: Request) {
 
   const { course, error: lookupError } = await findCourseByCode(supabase, normalizedCode);
   if (lookupError) return Response.json({ error: lookupError.message }, { status: 500 });
-  if (!course) return Response.json({ error: 'No course matches that code.' }, { status: 404 });
+  if (!course) return Response.json({ error: 'Incorrect course code. Check the code and try again.' }, { status: 404 });
 
   const { alreadyMember, error: enrollError } = await enrollStudentInCourse(supabase, {
     userId: user.id,

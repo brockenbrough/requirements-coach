@@ -122,11 +122,13 @@ describe('POST /api/courses/join', () => {
     expect(h.state.tables).not.toContain('course');
   });
 
-  it('returns 404 for an unknown code', async () => {
+  it('returns 404 for an unknown code, with a message identifying it as the wrong code', async () => {
     queue('course', { data: null, error: null });
 
     const res = await POST(postRequest({ code: 'NOPE99' }));
     expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error).toMatch(/incorrect course code/i);
     expect(h.state.inserts.some((i) => i.table === 'student_course')).toBe(false);
   });
 
