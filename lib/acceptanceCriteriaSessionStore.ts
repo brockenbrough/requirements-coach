@@ -16,6 +16,9 @@ import type { AcceptanceCriteriaResult, UserStoryPrompt } from './acceptanceCrit
  */
 export const STORIES_PER_SESSION = 4;
 
+/** 8/10 is this activity's own pass bar — see AcceptanceCriteriaFeedbackScreen's comment. */
+export const AC_PASS_SCORE = 8;
+
 const STORAGE_KEY = 'rc_ac_writing_session_v1';
 
 export type SessionStorySlot = {
@@ -96,4 +99,29 @@ export function recordStoryResult(
 export function clearSession(): void {
   if (typeof window === 'undefined') return;
   window.localStorage.removeItem(STORAGE_KEY);
+}
+
+export type SessionSummary = {
+  totalScore: number;
+  maxScore: number;
+  passedCount: number;
+  storyCount: number;
+};
+
+/**
+ * GitHub #263: the whole-session totals for SessionSummaryScreen, derived from the same
+ * per-story results this store already tracks — counts only graded stories, so calling this
+ * before the session is complete just yields a partial (rather than wrong) total.
+ */
+export function summarizeSession(session: AcceptanceCriteriaSession): SessionSummary {
+  const graded = session.stories.filter(
+    (story): story is SessionStorySlot & { result: AcceptanceCriteriaResult } => story.result !== null,
+  );
+
+  return {
+    totalScore: graded.reduce((sum, story) => sum + story.result.score, 0),
+    maxScore: graded.length * 10,
+    passedCount: graded.filter((story) => story.result.score >= AC_PASS_SCORE).length,
+    storyCount: graded.length,
+  };
 }

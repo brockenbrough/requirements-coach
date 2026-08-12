@@ -1,3 +1,4 @@
+import { AC_PASS_SCORE } from '../lib/acceptanceCriteriaSessionStore';
 import type { AcceptanceCriteriaResult, UserStoryPrompt } from '../lib/acceptanceCriteriaTypes';
 import { StoryDisplayCard } from './StoryDisplayCard';
 
@@ -18,9 +19,10 @@ export function AcceptanceCriteriaFeedbackScreen({
   userStory: UserStoryPrompt;
   result: AcceptanceCriteriaResult;
 }) {
-  // 8/10 is this activity's own pass bar, independent of the Type A quiz's PASS_RATIO
-  // (lib/sessionRules.ts) — the two are scored on different scales and are not coupled.
-  const passed = result.score >= 8;
+  // AC_PASS_SCORE (8/10) is this activity's own pass bar, independent of the Type A quiz's
+  // PASS_RATIO (lib/sessionRules.ts) — the two are scored on different scales and are not
+  // coupled. Shared with SessionSummaryScreen so the two screens can't drift apart.
+  const passed = result.score >= AC_PASS_SCORE;
 
   return (
     <>

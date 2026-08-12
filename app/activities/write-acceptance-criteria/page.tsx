@@ -9,6 +9,7 @@ import { AcceptanceCriteriaWritingScreen } from '../../../components/AcceptanceC
 import { AcceptanceCriteriaWritingScreenSkeleton } from '../../../components/AcceptanceCriteriaWritingScreenSkeleton';
 import { ResumeOrAbandonPrompt } from '../../../components/ResumeOrAbandonPrompt';
 import { SessionProgressDots, type ProgressDotStatus } from '../../../components/SessionProgressDots';
+import { SessionSummaryScreen } from '../../../components/SessionSummaryScreen';
 import { drawSessionStories, submitAcceptanceCriteria } from '../../../lib/acceptanceCriteriaClient';
 import type { AcceptanceCriteriaResult, UserStoryPrompt } from '../../../lib/acceptanceCriteriaTypes';
 import {
@@ -34,6 +35,7 @@ export default function WriteAcceptanceCriteriaPage() {
 
   const [session, setSession] = useState<AcceptanceCriteriaSession | null>(null);
   const [showPrompt, setShowPrompt] = useState(false);
+  const [showSummary, setShowSummary] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -56,6 +58,7 @@ export default function WriteAcceptanceCriteriaPage() {
     if (existing) {
       setSession(existing);
       setShowPrompt(true);
+      setShowSummary(false);
       setOutcome(null);
       setSubmitError(null);
       setIsLoading(false);
@@ -67,6 +70,7 @@ export default function WriteAcceptanceCriteriaPage() {
     setIsLoading(true);
     setLoadFailed(false);
     setShowPrompt(false);
+    setShowSummary(false);
     setOutcome(null);
     setSubmitError(null);
 
@@ -98,6 +102,7 @@ export default function WriteAcceptanceCriteriaPage() {
     clearSession();
     setSession(null);
     setShowPrompt(false);
+    setShowSummary(false);
     setLoadAttempt((count) => count + 1);
   }
 
@@ -130,11 +135,19 @@ export default function WriteAcceptanceCriteriaPage() {
   function handleContinue() {
     if (!session) return;
     if (isSessionComplete(session)) {
-      clearSession();
-      router.push('/activities');
+      // GitHub #263: the fourth story's feedback is still what "Finish" closes — the summary
+      // is a separate screen the student explicitly moves on from via handleFinishSummary,
+      // not something that flashes past on the way out.
+      setOutcome(null);
+      setShowSummary(true);
       return;
     }
     setOutcome(null);
+  }
+
+  function handleFinishSummary() {
+    clearSession();
+    router.push('/activities');
   }
 
   const pendingSlot = session ? session.stories[nextStoryIndex(session)] : undefined;
@@ -173,7 +186,7 @@ export default function WriteAcceptanceCriteriaPage() {
 
         <h3 className="mb-5 text-lg font-extrabold">Write Acceptance Criteria</h3>
 
-        {!isLoading && !loadFailed && !showPrompt && session ? (
+        {!isLoading && !loadFailed && !showPrompt && !showSummary && session ? (
           <div className="mb-5 flex items-center justify-between">
             <SessionProgressDots statuses={dotStatuses} />
             <span className="text-sm font-bold text-gray-500">
@@ -210,6 +223,8 @@ export default function WriteAcceptanceCriteriaPage() {
               confirmMessage="Are you sure you want to abandon this session? Your current answers will be lost."
             />
           </div>
+        ) : showSummary && session ? (
+          <SessionSummaryScreen session={session} onDone={handleFinishSummary} />
         ) : currentUserStory ? (
           outcome ? (
             <>
