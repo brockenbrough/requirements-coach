@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { activityCardStatusLabel, type ActivityCardStatus } from '../lib/activityCardStatus';
 import type { ActivitySlug, Difficulty } from '../lib/activityContent';
 
 const DIFFICULTY_LABEL: Record<Difficulty, string> = { 1: 'Easy', 2: 'Medium', 3: 'Hard' };
@@ -52,14 +53,17 @@ export function ActivityCard({
   activity,
   level,
   title,
-  bestScore,
-  hasInProgress,
+  status,
 }: {
   activity: ActivityCardData;
   level: Difficulty;
-  title: string;
-  bestScore: { score: number; maxScore: number } | null;
-  hasInProgress: boolean;
+  /**
+   * The student's earned mastery title for this activity, or null when they have not passed a
+   * level yet. Null renders nothing at all — see lib/activityCardStatus.ts's header for why this
+   * slot must never hold a placeholder (GitHub #272).
+   */
+  title: string | null;
+  status: ActivityCardStatus;
 }) {
   const badgeBg = activity.category === 'Acceptance Criteria' || activity.category === 'Write Acceptance Criteria' ? 'bg-[#2DD4BF]/15' : 'bg-[#7C4DFF]/15';
 
@@ -76,15 +80,9 @@ export function ActivityCard({
         <span className={`rounded-full px-2.5 py-1 text-xs font-extrabold ${DIFFICULTY_CLASSES[level]}`}>
           {DIFFICULTY_LABEL[level]} · Level {level}
         </span>
-        <span className="text-xs font-bold text-[#A79FC9]">{title}</span>
+        {title && <span className="text-xs font-bold text-[#A79FC9]">{title}</span>}
       </div>
-      <p className="text-sm font-bold text-[#A79FC9]">
-        {hasInProgress
-          ? 'In progress'
-          : bestScore
-            ? `Best score: ${bestScore.score} / ${bestScore.maxScore}`
-            : 'Not started yet'}
-      </p>
+      <p className="text-sm font-bold text-[#A79FC9]">{activityCardStatusLabel(status)}</p>
     </Link>
   );
 }

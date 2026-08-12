@@ -4,18 +4,35 @@ import { useEffect, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { ActivityCard, type ActivityCardData } from '../../components/ActivityCard';
 import { ActivityCardSkeleton } from '../../components/ActivityCardSkeleton';
+import { answeredCount, getInProgressSession, STORIES_PER_SESSION } from '../../lib/acceptanceCriteriaSessionStore';
+import { deriveActivityCardStatus, type ActivityCardStatus } from '../../lib/activityCardStatus';
 import { ACTIVITIES, Difficulty } from '../../lib/activityContent';
-import { getActivityState, getTitle } from '../../lib/activityStore';
-import { loadCompletedAttempts, loadSessions } from '../../lib/sessionClient';
+import { loadCompletedAttempts, loadSessions, loadStudentTitles, type StudentTitle } from '../../lib/sessionClient';
+import { START_DIFFICULTY_LEVEL } from '../../lib/sessionRules';
 import { useRequireRole } from '../../lib/useRequireRole';
 
 type CardData = {
   activity: ActivityCardData;
+  /** The activity_type this card's title is looked up by; null for Type B, which has none. */
+  activityType: string | null;
   level: Difficulty;
-  title: string;
-  bestScore: { score: number; maxScore: number } | null;
-  hasInProgress: boolean;
+  status: ActivityCardStatus;
 };
+
+/**
+ * The student's earned title for one activity, or null when they haven't passed a level yet.
+ *
+ * Keyed off difficultyLevel rather than the title string: GET /api/students/{id}/titles fills
+ * `title` with the literal "Not yet started" for an attempted-but-never-passed activity
+ * (lib/titleQueries.ts), and rendering that next to a real score is exactly what GitHub #272
+ * reported. difficultyLevel === null is the same fact without the string matching.
+ */
+function earnedTitle(titles: StudentTitle[] | null, activityType: string | null): string | null {
+  if (!titles || !activityType) return null;
+  const entry = titles.find((candidate) => candidate.activityType === activityType);
+  if (!entry || entry.difficultyLevel === null) return null;
+  return entry.title;
+}
 
 /**
  * The Type B "Write Acceptance Criteria" activity (GitHub #149, REQ-FU-2) — not in ACTIVITIES
@@ -38,15 +55,22 @@ const CARD_SLUGS: ActivityCardData[] = [...ACTIVITIES, WRITE_ACCEPTANCE_CRITERIA
 export default function ActivitiesPage() {
   const { token, profile, loading, authorized } = useRequireRole('student');
   const [cards, setCards] = useState<CardData[] | null>(null);
+  // Fetched separately from the cards (same shape as app/dashboard/page.tsx's titles effect) so a
+  // failing titles call costs a title, not the whole activity list — the cards are the page.
+  const [titles, setTitles] = useState<StudentTitle[] | null>(null);
   // GitHub #108: explicit loading state rather than inferring it from cards === null — the
   // retry button needs to distinguish "haven't loaded yet" from "loaded, then failed".
   const [isLoading, setIsLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
 
-  // hasInProgress comes from loadSessions('in-progress'); bestScore for each Type A activity
-  // comes from loadCompletedAttempts, fetched in parallel, once per activity. level/title are
-  // still derived from the localStorage mock (activityStore) — see CLAUDE.md's migration notes.
+  // Every value on a Type A card is server-derived now (GitHub #272): the running session comes
+  // from loadSessions('in-progress') — which already carries answeredCount/questionCount, so the
+  // card can say how far along it is — and the best score from loadCompletedAttempts, fetched in
+  // parallel, once per activity. The title arrives from loadStudentTitles in the effect below.
+  // Nothing here reads lib/activityStore.ts any more: nothing writes to that mock since the play
+  // flow moved to the API, so its level was frozen at 1 and its title at "Not yet started"
+  // forever — the actual bug behind #272, not just its wording.
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
@@ -67,31 +91,42 @@ export default function ActivitiesPage() {
         return;
       }
 
-      const inProgressTypes = new Set(sessionsResult.data.sessions.map((session) => session.activity_type));
+      // The whole session, not just its activity_type: answeredCount/questionCount drive the
+      // "In progress · 1 of 4" line, and difficulty_level the level pill.
+      const runningByType = new Map(sessionsResult.data.sessions.map((session) => [session.activity_type, session]));
 
       const typeACards: CardData[] = ACTIVITIES.map((activity, i) => {
         const attemptsResult = attemptResults[i];
         const attempts = attemptsResult.ok ? attemptsResult.data.attempts : [];
         const best = attempts.length === 0 ? null : attempts.reduce((b, a) => (a.score > b.score ? a : b), attempts[0]);
+        const running = runningByType.get(activity.activityType) ?? null;
         return {
           activity,
-          level: getActivityState(activity.slug).level,
-          title: getTitle(activity.slug),
-          bestScore: best ? { score: best.score, maxScore: best.maxScore } : null,
-          hasInProgress: inProgressTypes.has(activity.activityType),
+          activityType: activity.activityType,
+          // Same derivation as app/activities/[slug]/page.tsx's displayLevel, so the card and the
+          // page it links to can't disagree: the running session's level, else the level clicking
+          // Start would actually produce. (Server-side level progression doesn't exist yet.)
+          level: (running?.difficulty_level ?? START_DIFFICULTY_LEVEL) as Difficulty,
+          status: deriveActivityCardStatus(running, best ? { score: best.score, maxScore: best.maxScore } : null),
         };
       });
 
       // Type B (GitHub #149, REQ-FU-2): no session_log row is ever created for this activity —
-      // see app/activities/write-acceptance-criteria/page.tsx — so it can't be included in the
-      // loadCompletedAttempts/inProgressTypes calls above; bestScore/hasInProgress are honestly
-      // fixed rather than special-cased into those fetches. Same CardData shape as the Type A cards.
+      // see app/activities/write-acceptance-criteria/page.tsx — so it can't join the
+      // loadCompletedAttempts/loadSessions calls above. Its progress comes from the same
+      // localStorage session the activity's own page trusts (lib/acceptanceCriteriaSessionStore.ts),
+      // which is the point: the card now says exactly what the student sees after clicking it.
+      // Best score stays null — no student-facing endpoint lists their own graded submissions —
+      // and activityType is null because there is no row in the titles response to look up.
+      const acSession = getInProgressSession();
       const writeAcCard: CardData = {
         activity: WRITE_ACCEPTANCE_CRITERIA_CARD,
-        level: getActivityState(WRITE_ACCEPTANCE_CRITERIA_CARD.slug).level,
-        title: getTitle(WRITE_ACCEPTANCE_CRITERIA_CARD.slug),
-        bestScore: null,
-        hasInProgress: false,
+        activityType: null,
+        level: START_DIFFICULTY_LEVEL,
+        status: deriveActivityCardStatus(
+          acSession ? { answeredCount: answeredCount(acSession), questionCount: STORIES_PER_SESSION } : null,
+          null,
+        ),
       };
 
       setCards([...typeACards, writeAcCard]);
@@ -102,6 +137,23 @@ export default function ActivitiesPage() {
       cancelled = true;
     };
   }, [token, profile, retryCount]);
+
+  // REQ-GAM-BL-1: the earned mastery title per activity type, computed server-side from passed
+  // sessions. Not cached (see loadStudentTitles) — a title the student just earned must show up.
+  // A failed call leaves titles null, which simply renders no title, same as not having one.
+  useEffect(() => {
+    if (!token || !profile?.user_id) return;
+    let cancelled = false;
+
+    loadStudentTitles(token, profile.user_id).then((result) => {
+      if (cancelled) return;
+      if (result.ok) setTitles(result.data.titles);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, profile?.user_id, retryCount]);
 
   if (loading || !authorized) return null;
 
@@ -133,9 +185,8 @@ export default function ActivitiesPage() {
               key={card.activity.slug}
               activity={card.activity}
               level={card.level}
-              title={card.title}
-              bestScore={card.bestScore}
-              hasInProgress={card.hasInProgress}
+              title={earnedTitle(titles, card.activityType)}
+              status={card.status}
             />
           ))}
         </div>
