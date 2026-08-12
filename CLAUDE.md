@@ -19,6 +19,8 @@ There is no lint or typecheck script; `npm run build` is the type check.
 
 Copy `.env.example` to `.env.local` and fill in your Supabase credentials. Then, in the Supabase SQL editor, run `supabase/schema.sql` followed by `supabase/seed.sql` (the question bank — without it every session start returns 400), and create a **public** Storage bucket named `avatars` for profile images. (README.md's mention of a `myapp_profile` table is stale — the profile table is `"user"`.)
 
+`INSTRUCTOR_SIGNUP_CODE` (the invite code that grants the instructor role at registration, see "Auth flow" below) must be set to a real, random, per-deployment value — generate one yourself (e.g. `openssl rand -base64 24`) and set it only in each deployment's own environment (`.env.local` locally, Vercel Environment Variables in production, etc.). It must never be committed to the repo, in `.env.example` or anywhere else.
+
 `lib/supabase.ts` accepts either `SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_URL` and exposes three factories, each returning `null` when its key is missing so routes can answer 500 instead of a confusing Supabase error:
 
 - `getSupabaseClient()` — service-role key preferred, anon fallback. Used by every data route; it bypasses RLS, which is why those routes must derive `user_id` from the token themselves.
@@ -68,7 +70,7 @@ Session renewal is deliberately two-pronged and there is **no guest/placeholder 
 
 Pages gate on role via `lib/useRequireRole.ts` (`useRequireRole('student' | 'instructor')`, GitHub #82). Callers must return `null` while `!authorized` — the redirect happens in an effect, so rendering early flashes the wrong page. The two roles are asymmetric about a missing profile row (normal right after registration): `'student'` lets it through, `'instructor'` does not and redirects to `/profile`. Treat a page's required role as load-bearing — it's what keeps a student off `/instructor/*` and an instructor out of the quiz-taking flow under `/activities/*`.
 
-Instructor role assignment happens in `app/api/auth/register/route.ts`: a hardcoded `INSTRUCTOR_SIGNUP_CODE` compared **server-side only**, written into the auth user's metadata (the `"user"` profile row doesn't exist until the profile form is submitted, where `app/api/profile/route.ts` reads the role back out).
+Instructor role assignment happens in `app/api/auth/register/route.ts`: the request's `instructorCode` is compared **server-side only** against the `INSTRUCTOR_SIGNUP_CODE` environment variable, written into the auth user's metadata (the `"user"` profile row doesn't exist until the profile form is submitted, where `app/api/profile/route.ts` reads the role back out). `INSTRUCTOR_SIGNUP_CODE` must never be hardcoded or committed (GitHub #280) — an unset, empty, or `CHANGE-ME`-prefixed value makes any instructor signup attempt fail with a 500 rather than silently falling back to a built-in default.
 
 Every protected API route then repeats its own preamble: read `Authorization: Bearer …`, `supabase.auth.getUser(token)`, and derive `user_id` from the result — **never** from the body, query string, or path. The `/api/students/{studentId}/*` routes compare the path param against the token's user and 403 on mismatch (no instructor exception on any of them today).
 
