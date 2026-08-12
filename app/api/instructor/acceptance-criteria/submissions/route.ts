@@ -15,7 +15,7 @@ type SubmissionRow = {
   submitted_at: string;
   graded_at: string | null;
   student: { user_id: string; first_name: string | null; last_name: string | null; username: string | null; role: string };
-  story: { story_text: string };
+  story: { story_text: string; difficulty_level: number };
 };
 
 function studentDisplayName(student: SubmissionRow['student']): string {
@@ -30,6 +30,10 @@ function studentDisplayName(student: SubmissionRow['student']): string {
  * Gated by requireInstructor; uses the service-role client to bypass RLS. The own_submissions_select
  * policy restricts students to their own rows, so a student cannot reach this route at all — but
  * requireInstructor is the explicit gate, not RLS.
+ *
+ * difficultyLevel (GitHub #276) comes along with the story join so the combined instructor
+ * dashboard's Level filter has something real to filter these rows on, the same way it already
+ * does for quiz attempts via session_log.difficulty_level.
  *
  * An empty list is a 200.
  */
@@ -51,7 +55,9 @@ export async function GET(request: Request) {
 
   let query = supabase
     .from('submission')
-    .select('submission_id, submitted_text, llm_score, llm_feedback, submitted_at, graded_at, student:user!inner(user_id, first_name, last_name, username, role), story:user_story!inner(story_text)')
+    .select(
+      'submission_id, submitted_text, llm_score, llm_feedback, submitted_at, graded_at, student:user!inner(user_id, first_name, last_name, username, role), story:user_story!inner(story_text, difficulty_level)',
+    )
     .eq('student.role', 'student')
     .order('submitted_at', { ascending: false });
 
@@ -68,6 +74,7 @@ export async function GET(request: Request) {
       studentId: r.student.user_id,
       studentName: studentDisplayName(r.student),
       userStoryDescription: r.story.story_text,
+      difficultyLevel: r.story.difficulty_level,
       submittedText: r.submitted_text,
       llmScore: r.llm_score,
       llmFeedback: r.llm_feedback,

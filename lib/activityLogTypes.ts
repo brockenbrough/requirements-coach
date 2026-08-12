@@ -1,3 +1,5 @@
+import { AC_PASS_SCORE } from './acceptanceCriteriaSessionStore';
+import type { InstructorACSubmission } from './acceptanceCriteriaClient';
 import { getActivityByType } from './activityContent';
 import type { ActivityType } from './activityTypes';
 import { toInstant } from './dateTime';
@@ -139,5 +141,63 @@ export function toActivityLogEntry(session: SessionListEntry): ActivityLogEntry 
     maxScore: session.max_score,
     totalQuestions: session.questionCount,
     answeredQuestions: session.answeredCount,
+  };
+}
+
+/**
+ * GitHub #276: the combined Instructor Dashboard table's row type — a quiz attempt
+ * (IDENTIFY_WEAK_USER_STORIES / IDENTIFY_WEAK_ACCEPTANCE_CRITERIA session) or a Write Acceptance
+ * Criteria submission, discriminated by `kind` so ActivityLogRow's expand panel knows which
+ * detail component to render (QuizAttemptDetails vs AcSubmissionDetails) without re-deriving it
+ * from activityType. Both members still extend ActivityLogEntry, so everything that already
+ * consumes that shape (ActivityLogTable's columns, InstructorActivityStats' per-activity
+ * averages, resultStateOf) keeps working unchanged on either kind of row.
+ */
+export type QuizAttemptRow = StudentActivitySummary & { kind: 'quiz' };
+
+export type AcSubmissionRow = ActivityLogEntry & {
+  kind: 'ac-submission';
+  studentId: string;
+  studentName: string;
+  userStoryDescription: string;
+  submittedText: string;
+  llmFeedback: string | null;
+};
+
+export type ActivityRow = QuizAttemptRow | AcSubmissionRow;
+
+export function toQuizAttemptRow(session: InstructorActivityEntry): QuizAttemptRow {
+  return { ...toStudentActivitySummary(session), kind: 'quiz' };
+}
+
+/**
+ * A submission has no session concept to ask "how far did they get" — it is graded in one shot
+ * (POST .../submissions grades synchronously) or, in the rare crash-between-insert-and-update
+ * case the schema's own comment describes, sits ungraded. That maps onto the same
+ * status/answeredQuestions/totalQuestions fields ActivityLogRow already reads: 'completed' with
+ * a real score once graded, 'in-progress' (0 of 1 "answered") while it isn't — never 'abandoned',
+ * since nothing about submitting criteria can be abandoned the way a multi-question session can.
+ */
+export function toAcSubmissionRow(submission: InstructorACSubmission): AcSubmissionRow {
+  const graded = submission.llmScore !== null;
+
+  return {
+    kind: 'ac-submission',
+    id: submission.submissionId,
+    studentId: submission.studentId,
+    studentName: submission.studentName,
+    activityType: 'WRITE_ACCEPTANCE_CRITERIA',
+    activityName: getActivityByType('WRITE_ACCEPTANCE_CRITERIA')?.name ?? 'Write Acceptance Criteria',
+    level: submission.difficultyLevel,
+    dateTime: submission.submittedAt,
+    status: graded ? 'completed' : 'in-progress',
+    passed: graded && submission.llmScore! >= AC_PASS_SCORE,
+    score: submission.llmScore ?? 0,
+    maxScore: 10,
+    totalQuestions: 1,
+    answeredQuestions: graded ? 1 : 0,
+    userStoryDescription: submission.userStoryDescription,
+    submittedText: submission.submittedText,
+    llmFeedback: submission.llmFeedback,
   };
 }

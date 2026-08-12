@@ -150,6 +150,80 @@ export async function loadQuestionOptions(supabase: SupabaseClient, questionId: 
   return { options, error: null };
 }
 
+// Unlike SESSION_QUESTION_COLUMNS, this discloses is_correct/explanation directly — safe here
+// because loadInstructorSessionQuestions is only ever called from an instructor route, gated by
+// requireInstructor, inspecting a session that already isn't the caller's own to "solve".
+const INSTRUCTOR_SESSION_QUESTION_COLUMNS = `
+  position,
+  question:question_id (
+    question_id,
+    question_prompt,
+    question_to_answer (
+      answer:answer_id ( answer_id, option_text, is_correct, explanation )
+    )
+  )
+`;
+
+type InstructorQuestionRow = {
+  position: number;
+  question: {
+    question_id: string;
+    question_prompt: string;
+    question_to_answer: { answer: QuestionOption | null }[] | null;
+  } | null;
+};
+
+export type InstructorQuestionDetail = {
+  position: number;
+  questionId: string;
+  prompt: string;
+  options: QuestionOption[];
+  selectedAnswerId: string | null;
+};
+
+/**
+ * GitHub #276: one session's questions, every option's correctness, and which option the
+ * student picked — what the combined Instructor Dashboard's expanded quiz-attempt row shows.
+ * Nothing else in this file discloses is_correct/explanation before an answer exists (see
+ * loadSessionQuestions/loadQuestionOptions's own comments) because a student could otherwise
+ * probe for the right answer; an instructor looking at a student's already-submitted attempt
+ * has no such use for it, so both are included unconditionally here.
+ *
+ * Two queries regardless of question count, same reasoning as loadProgressForSessions: a
+ * per-question round trip would turn one expand click into N+1 requests.
+ */
+export async function loadInstructorSessionQuestions(supabase: SupabaseClient, sessionId: string) {
+  const [{ data: questionRows, error: questionError }, { data: answerRows, error: answerError }] = await Promise.all([
+    supabase
+      .from('session_to_question')
+      .select(INSTRUCTOR_SESSION_QUESTION_COLUMNS)
+      .eq('session_id', sessionId)
+      .order('position', { ascending: true }),
+    supabase.from('answered_question_log').select('question_id, submitted_option').eq('session_id', sessionId),
+  ]);
+
+  const error = questionError ?? answerError;
+  if (error) return { questions: null, error };
+
+  const selectedByQuestion = new Map(
+    ((answerRows ?? []) as { question_id: string; submitted_option: string }[]).map((row) => [row.question_id, row.submitted_option]),
+  );
+
+  const questions: InstructorQuestionDetail[] = ((questionRows ?? []) as unknown as InstructorQuestionRow[])
+    .filter((row) => row.question !== null)
+    .map((row) => ({
+      position: row.position,
+      questionId: row.question!.question_id,
+      prompt: row.question!.question_prompt,
+      options: (row.question!.question_to_answer ?? [])
+        .map((link) => link.answer)
+        .filter((answer): answer is QuestionOption => answer !== null),
+      selectedAnswerId: selectedByQuestion.get(row.question!.question_id) ?? null,
+    }));
+
+  return { questions, error: null };
+}
+
 /** Answers already submitted, including the feedback they have already earned. */
 export async function loadSessionAnswers(supabase: SupabaseClient, sessionId: string) {
   const { data, error } = await supabase
