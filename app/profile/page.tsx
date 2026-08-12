@@ -7,6 +7,7 @@ import { AppShell } from '../../components/AppShell';
 import { ChangePasswordForm } from '../../components/ChangePasswordForm';
 import { EditableField } from '../../components/EditableField';
 import { ImageCropModal } from '../../components/ImageCropModal';
+import { MasteryProgressSection } from '../../components/MasteryProgressSection';
 import { MyCoursesSection } from '../../components/MyCoursesSection';
 import { useUser } from '../../components/UserProvider';
 import {
@@ -498,6 +499,11 @@ export default function ProfilePage() {
                 </button>
               )}
             </div>
+
+            {/* GitHub #39: cumulative score and mastery titles are a student concept, same as
+                the sidebar's score pill (AppShell.tsx) already being instructor-only — an
+                instructor has no sessions of their own to have a score or title from. */}
+            {!isInstructor ? <MasteryProgressSection token={token} studentId={profile.user_id} /> : null}
 
             {/* GitHub #242 (UI-2): a course concept only exists for students right now — an
                 instructor manages courses from /instructor/courses instead, so this doesn't
