@@ -73,13 +73,27 @@ export type StudentAggregate = {
  * All Students page (GitHub #82) both answer "who", leaving "what happened" to ActivityLogTable.
  * Sorted needs-attention first (the whole point of surfacing this at all), then alphabetically,
  * so the order is stable and predictable rather than shuffling by score.
+ *
+ * Pass `roster` (GET /api/instructor/students, GitHub #175) to include students with no attempts
+ * at all: deriving the list from `entries` alone silently drops every enrolled student who never
+ * started an activity. They come out with attempts 0 and averageScore null, which compareByScore
+ * already sorts to the end in both directions. Callers that deliberately want the attempts-only
+ * view — the dashboard's roster preview — just omit it.
  */
-export function summarizeStudents(entries: StudentActivitySummary[]): StudentAggregate[] {
+export function summarizeStudents(
+  entries: StudentActivitySummary[],
+  roster: { studentId: string; studentName: string }[] = [],
+): StudentAggregate[] {
   const byStudent = new Map<string, StudentActivitySummary[]>();
+  // Names come from both sides now, and a student in `roster` may have no entry to read one from.
+  const nameById = new Map(roster.map((student) => [student.studentId, student.studentName]));
+  for (const student of roster) byStudent.set(student.studentId, []);
+
   for (const entry of entries) {
     const list = byStudent.get(entry.studentId) ?? [];
     list.push(entry);
     byStudent.set(entry.studentId, list);
+    nameById.set(entry.studentId, entry.studentName);
   }
 
   return [...byStudent.entries()]
@@ -93,7 +107,7 @@ export function summarizeStudents(entries: StudentActivitySummary[]): StudentAgg
 
       return {
         studentId,
-        studentName: list[0].studentName,
+        studentName: nameById.get(studentId) ?? 'Unknown student',
         attempts: list.length,
         averageScore,
         abandonedCount,
