@@ -17,6 +17,9 @@ const SIZES = {
   sm: 'h-9 w-9 text-[11px] border-2',
   md: 'h-14 w-14 text-lg border-[3px]',
   lg: 'h-16 w-16 text-base border-[3px]',
+  // Matches the 24x24 avatar app/profile/page.tsx uses for the signed-in student, so a peer's
+  // profile header sits at the same scale as your own.
+  xl: 'h-24 w-24 text-2xl border-4',
 } as const;
 
 export function Avatar({

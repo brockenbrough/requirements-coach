@@ -17,7 +17,13 @@
 // a zero-point student who is enrolled but has never finished an activity, and enough rows to
 // force a second page.
 
-import type { LeaderboardCourse, LeaderboardEntry } from './leaderboardTypes';
+import { ACTIVITIES } from './activityContent';
+import type {
+  LeaderboardCourse,
+  LeaderboardEntry,
+  PublicStudentProfile,
+  PublicStudentTitle,
+} from './leaderboardTypes';
 
 /**
  * A tiny inline SVG avatar, so the <img> branch is actually exercised offline — real avatars are
@@ -51,10 +57,14 @@ const REQUIREMENTS_ENGINEERING: LeaderboardEntry[] = [
   { rank: 14, studentId: 'mock-stu-14', username: 'newcomer', avatarUrl: null, points: 0, rankChange: null },
 ];
 
+// A student's points are their cumulative score across every activity type (REQ-GAM-DL-1), not
+// something earned per course — so a student in two courses carries the SAME number into both
+// leaderboards, and only the field of competitors changes. These three rows therefore repeat the
+// points from the course above rather than inventing second, smaller totals.
 const SOFTWARE_ARCHITECTURE: LeaderboardEntry[] = [
-  { rank: 1, studentId: 'mock-stu-06', username: 'sofia_r', avatarUrl: null, points: 620, rankChange: 3 },
-  { rank: 2, studentId: 'mock-stu-12', username: 'you', avatarUrl: null, points: 480, rankChange: 1 },
-  { rank: 3, studentId: 'mock-stu-01', username: 'mkellner', avatarUrl: mockAvatar('#7c4dff', 'MK'), points: 300, rankChange: -2 },
+  { rank: 1, studentId: 'mock-stu-01', username: 'mkellner', avatarUrl: mockAvatar('#7c4dff', 'MK'), points: 1450, rankChange: -2 },
+  { rank: 2, studentId: 'mock-stu-06', username: 'sofia_r', avatarUrl: null, points: 980, rankChange: 3 },
+  { rank: 3, studentId: 'mock-stu-12', username: 'you', avatarUrl: null, points: 410, rankChange: 1 },
 ];
 
 /** A course with a roster but no completed activity yet — exercises the table's empty state. */
@@ -90,4 +100,90 @@ export function getMockLeaderboard(courseId: string, currentStudentId?: string):
   return entries.map((entry) =>
     entry.studentId === 'mock-stu-12' ? { ...entry, studentId: currentStudentId } : entry,
   );
+}
+
+/**
+ * Levels passed per activity type, in the fixed ACTIVITIES order, turned into the title rows
+ * GET /api/students/{id}/titles would return. null means the activity type was never passed, and
+ * such an entry is left out entirely — the real route only returns rows for activity types the
+ * student has actually passed (REQ-GAM-BL-1.1), and buildMasteryTitleEntries fills in the rest.
+ *
+ * Title names come from ACTIVITIES rather than being typed out here, so the mock can't drift
+ * from the strings the rest of the app shows.
+ */
+function titlesFor(levels: (number | null)[]): PublicStudentTitle[] {
+  return ACTIVITIES.flatMap((activity, index) => {
+    const level = levels[index] ?? null;
+    if (level === null) return [];
+    return [
+      {
+        activityType: activity.activityType,
+        difficultyLevel: level,
+        title: activity.titles[level as 1 | 2 | 3],
+      },
+    ];
+  });
+}
+
+/**
+ * The parts of a public profile that aren't already on the leaderboard row. username, avatarUrl
+ * and score are NOT repeated here — getMockPublicProfile reads them off the leaderboard entry so
+ * a profile can't contradict the table it was reached from.
+ *
+ * Deliberate edge cases: 'mock-stu-04' has an empty biography, and 'mock-stu-14' has passed
+ * nothing at all, so the page's "no biography" and "no mastery titles yet" states are both
+ * reachable by clicking a real row.
+ */
+const PROFILE_BIOS_AND_LEVELS: Record<string, { biography: string; levels: (number | null)[] }> = {
+  'mock-stu-01': { biography: 'Fifth semester, mostly interested in how requirements go wrong before anyone writes code.', levels: [3, 3, 2] },
+  'mock-stu-02': { biography: 'Trying to get through all three activities before the exam.', levels: [3, 2, 2] },
+  'mock-stu-03': { biography: 'Working student, practising in the evenings.', levels: [2, 3, 1] },
+  'mock-stu-04': { biography: '', levels: [2, 2, 2] },
+  'mock-stu-05': { biography: 'Exchange semester. Requirements engineering is new to me.', levels: [3, 1, 2] },
+  'mock-stu-06': { biography: 'I like the acceptance-criteria activities best.', levels: [2, 2, 1] },
+  'mock-stu-07': { biography: 'Second attempt at this course. Going better this time.', levels: [2, 1, 2] },
+  'mock-stu-08': { biography: 'Aiming for all three master titles.', levels: [2, 2, null] },
+  'mock-stu-09': { biography: 'Just here to pass.', levels: [1, 2, 1] },
+  'mock-stu-10': { biography: 'Interested in the AI feedback side of the app.', levels: [2, 1, 1] },
+  'mock-stu-11': { biography: 'Part-time student, slow but steady.', levels: [1, 1, 1] },
+  // Reachable only if someone else views this row — the signed-in student's own click is
+  // answered by the page's "this is you" branch, which uses their real profile instead.
+  'mock-stu-12': { biography: 'Placeholder biography for the signed-in student.', levels: [1, 1, null] },
+  'mock-stu-13': { biography: 'Started late in the semester.', levels: [1, null, null] },
+  'mock-stu-14': { biography: 'Just joined the course.', levels: [null, null, null] },
+};
+
+/** Every leaderboard row across all courses, first match wins — a student's identity and score
+ *  are the same wherever they appear (see the SOFTWARE_ARCHITECTURE comment above). */
+function findLeaderboardEntry(studentId: string): LeaderboardEntry | null {
+  for (const entries of Object.values(BY_COURSE)) {
+    const match = entries.find((entry) => entry.studentId === studentId);
+    if (match) return match;
+  }
+  return null;
+}
+
+/**
+ * One student's public profile, or null when no such student exists — which is what drives the
+ * page's "Student not found" state.
+ *
+ * Never called with the signed-in student's own id in practice: getMockLeaderboard rewrites that
+ * row's id to their real Supabase uuid, and the page answers that case from useUser() before it
+ * gets here. The real GET /api/students/{id}/public-profile has no such split — it returns real
+ * ids throughout, and the page's own-profile branch becomes a pure display choice rather than a
+ * workaround for hardcoded ids.
+ */
+export function getMockPublicProfile(studentId: string): PublicStudentProfile | null {
+  const extras = PROFILE_BIOS_AND_LEVELS[studentId];
+  const entry = findLeaderboardEntry(studentId);
+  if (!extras || !entry) return null;
+
+  return {
+    studentId,
+    username: entry.username,
+    avatarUrl: entry.avatarUrl,
+    biography: extras.biography,
+    score: entry.points,
+    titles: titlesFor(extras.levels),
+  };
 }

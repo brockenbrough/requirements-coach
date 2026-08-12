@@ -36,3 +36,39 @@ export type LeaderboardCourse = {
   courseId: string;
   courseName: string;
 };
+
+/**
+ * One mastery title, in exactly the shape GET /api/students/{id}/titles already returns.
+ *
+ * Re-declared here rather than imported from lib/sessionClient.ts, which is 'use client' — this
+ * file has to stay importable from a server route. lib/masteryTitles.ts's StudentTitle is the
+ * same three fields, so buildMasteryTitleEntries takes this without a cast.
+ */
+export type PublicStudentTitle = {
+  activityType: string;
+  difficultyLevel: number | null;
+  title: string | null;
+};
+
+/**
+ * Everything a student may see about a classmate, and nothing else.
+ *
+ * This type is the privacy contract in code form: US-5's
+ * GET /api/students/{id}/public-profile must return these fields and no others. Notably absent,
+ * and deliberately so, are first_name/last_name, age, semester, email, the student's courses,
+ * and anything about individual answers or attempts — all of which exist on the "user" row or a
+ * join away from it, and none of which a peer has a reason to see.
+ *
+ * titles stays in the raw API shape rather than a pre-built MasteryTitleEntry[] so that
+ * lib/masteryTitles.ts remains the single place that reconciles titles against ACTIVITIES.
+ */
+export type PublicStudentProfile = {
+  studentId: string;
+  username: string;
+  avatarUrl: string | null;
+  /** May be empty — "user".biography is NOT NULL but nothing forces it non-blank. */
+  biography: string;
+  /** Cumulative score, same definition as computeStudentScore (lib/scoreQueries.ts). */
+  score: number;
+  titles: PublicStudentTitle[];
+};
