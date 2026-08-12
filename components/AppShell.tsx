@@ -4,8 +4,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { getHighestTitleOverall } from '../lib/activityStore';
-import { getInitials } from '../lib/initials';
 import { loadStudentScore } from '../lib/sessionClient';
+import { Avatar } from './Avatar';
 import { LLMProviderSettingsModal } from './LLMProviderSettingsModal';
 import { useUser } from './UserProvider';
 
@@ -13,6 +13,7 @@ type NavKey =
   | 'dashboard'
   | 'activities'
   | 'courses'
+  | 'leaderboard'
   | 'profile'
   | 'instructor'
   | 'instructor-questions'
@@ -22,10 +23,15 @@ type NavKey =
 // GitHub #242 (UI-2): 'courses' here is the student-facing browse/join page (app/courses/page.tsx)
 // — a distinct NavKey/route from the instructor's 'instructor-courses' (create/manage), same
 // split as every other instructor-vs-student pair in this sidebar.
+//
+// 'leaderboard' is student-only and has no instructor counterpart: it ranks a course's students
+// against each other, which is not a view an instructor account has a place in. It sits next to
+// 'courses' because it is scoped to one course at a time.
 const STUDENT_NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
   { key: 'dashboard', label: 'Dashboard', href: '/dashboard' },
   { key: 'activities', label: 'Activities', href: '/activities' },
   { key: 'courses', label: 'Courses', href: '/courses' },
+  { key: 'leaderboard', label: 'Leaderboard', href: '/leaderboard' },
   { key: 'profile', label: 'Profile', href: '/profile' },
 ];
 
@@ -108,6 +114,18 @@ function GraduationCapIcon() {
   );
 }
 
+function TrophyIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8 4h8v6a4 4 0 0 1-8 0V4Z" />
+      <path d="M8 6H5v1.5A3.5 3.5 0 0 0 8.5 11" />
+      <path d="M16 6h3v1.5a3.5 3.5 0 0 1-3.5 3.5" />
+      <path d="M12 14v4" />
+      <path d="M9 21h6" />
+    </svg>
+  );
+}
+
 function GearIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -147,6 +165,7 @@ const NAV_ICONS: Record<NavKey, () => JSX.Element> = {
   dashboard: GridIcon,
   activities: ListIcon,
   courses: GraduationCapIcon,
+  leaderboard: TrophyIcon,
   profile: UserIcon,
   instructor: UsersIcon,
   'instructor-courses': GraduationCapIcon,
@@ -257,17 +276,18 @@ export function AppShell({
             covering both "still fetching" and "authenticated but no profile row yet", neither
             of which should imply an unauthenticated fallback identity.
           */}
-          <div
-            className={`mx-auto mb-2 flex h-16 w-16 items-center justify-center overflow-hidden rounded-full border-[3px] border-brand-gold bg-brand-navy-2 font-extrabold text-brand-gold transition-opacity duration-300 ${
+          {/* Passing no name at all while the profile is loading is what keeps the circle empty:
+              Avatar only falls back to initials when it has something to build them from. */}
+          <Avatar
+            avatarUrl={profile?.avatar_url}
+            firstName={profile?.first_name}
+            lastName={profile?.last_name}
+            fallbackName={profile?.username}
+            size="lg"
+            className={`mx-auto mb-2 transition-opacity duration-300 ${
               profile ? 'opacity-100' : 'animate-pulse opacity-60'
             }`}
-          >
-            {profile?.avatar_url ? (
-              <img src={profile.avatar_url} alt="" className="h-full w-full object-cover" />
-            ) : profile ? (
-              <span>{getInitials(profile.first_name, profile.last_name, profile.username)}</span>
-            ) : null}
-          </div>
+          />
           <div
             className={`text-sm font-extrabold text-white transition-opacity duration-300 ${profile ? 'opacity-100' : 'opacity-0'}`}
           >
