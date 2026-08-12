@@ -21,6 +21,14 @@ export type LeaderboardEntry = {
   /** Cumulative score, same definition as computeStudentScore (lib/scoreQueries.ts). */
   points: number;
   /**
+   * Current daily streak in days, same definition as computeStudentStreak
+   * (lib/streakQueries.ts, GitHub #307) — consecutive calendar days (UTC) with at least one
+   * completed, passed session_log row, allowing up to a 36h gap between two chronologically
+   * consecutive passed activities. 0 means no active streak; StreakBadge renders nothing for it
+   * rather than a flame with a "0".
+   */
+  streak: number;
+  /**
    * Ranks gained since this student last viewed the leaderboard: positive = moved up,
    * negative = moved down, 0 = unchanged, null = no previous ranking on record.
    *

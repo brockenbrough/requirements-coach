@@ -5,6 +5,7 @@ import { useMemo } from 'react';
 import { Avatar } from './Avatar';
 import { LeaderboardRankBadge } from './LeaderboardRankBadge';
 import { RankChangeIndicator } from './RankChangeIndicator';
+import { StreakBadge } from './StreakBadge';
 import { getMockCourses, getMockLeaderboard } from '../lib/mockLeaderboard';
 import type { LeaderboardEntry } from '../lib/leaderboardTypes';
 
@@ -26,6 +27,7 @@ function PreviewRow({ entry, isCurrentUser }: { entry: LeaderboardEntry; isCurre
         {entry.username}
         {isCurrentUser ? <span className="ml-2 text-xs font-extrabold text-brand-purple">You</span> : null}
       </Link>
+      <StreakBadge streak={entry.streak} />
       <span className="whitespace-nowrap text-sm font-bold tabular-nums text-brand-ink">
         {entry.points.toLocaleString()}
       </span>
