@@ -231,8 +231,15 @@ export async function POST(request: Request) {
     }
   }
 
-  return Response.json(
-    { submissionId, score: rating.score, feedback: rating.feedback, sessionCompleted, nextStoryId, totalScore, averageScore },
-    { status: 200 },
-  );
+  const responseBody: Record<string, unknown> = {
+    submissionId,
+    score: rating.score,
+    feedback: rating.feedback,
+  };
+
+  if (resolvedSessionId) {
+    Object.assign(responseBody, { sessionCompleted, nextStoryId, totalScore, averageScore });
+  }
+
+  return Response.json(responseBody, { status: 200 });
 }
