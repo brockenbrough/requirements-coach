@@ -96,6 +96,8 @@ export type InstructorACSubmission = {
   studentId: string;
   studentName: string;
   userStoryDescription: string;
+  /** GitHub #276: user_story.difficulty_level, so the combined dashboard's Level filter applies here too. */
+  difficultyLevel: 1 | 2 | 3;
   submittedText: string;
   llmScore: number | null;
   llmFeedback: string | null;
@@ -117,7 +119,7 @@ export function loadInstructorACSubmissions(
     if (!result.ok) return result;
 
     // submission.submitted_at/graded_at are zone-less like session_log's timestamps — pinned to
-    // UTC here so AcceptanceCriteriaSubmissionRow renders the right local date.
+    // UTC here so the combined Instructor Dashboard (GitHub #276) renders the right local date.
     const submissions = result.data.submissions.map((submission) => ({
       ...submission,
       submittedAt: toInstant(submission.submittedAt),
