@@ -390,6 +390,61 @@ export function loadInstructorActivities(
   });
 }
 
+export type InstructorQuestionOption = {
+  answerId: string;
+  optionText: string;
+  isCorrect: boolean;
+  explanation: string | null;
+};
+
+export type InstructorQuestionDetail = {
+  position: number;
+  questionId: string;
+  prompt: string;
+  options: InstructorQuestionOption[];
+  selectedAnswerId: string | null;
+};
+
+/** The wire shape of GET /api/instructor/sessions/:sessionId/answers, before camelCasing options. */
+type RawInstructorQuestionDetail = {
+  position: number;
+  questionId: string;
+  prompt: string;
+  options: { answer_id: string; option_text: string; is_correct: boolean; explanation: string | null }[];
+  selectedAnswerId: string | null;
+};
+
+/**
+ * GET /api/instructor/sessions/:sessionId/answers (GitHub #276) — one quiz session's questions,
+ * every option's correctness, and which one the student picked. Not cached: only fetched when a
+ * quiz-attempt row on the combined Instructor Dashboard is expanded, so there is one request per
+ * row actually opened rather than one per row in the list.
+ */
+export function loadInstructorSessionAnswers(token: string, sessionId: string) {
+  return request<{ questions: RawInstructorQuestionDetail[] }>(
+    `/api/instructor/sessions/${encodeURIComponent(sessionId)}/answers`,
+    { method: 'GET' },
+    token,
+  ).then((result) => {
+    if (!result.ok) return result;
+
+    const questions: InstructorQuestionDetail[] = result.data.questions.map((question) => ({
+      position: question.position,
+      questionId: question.questionId,
+      prompt: question.prompt,
+      selectedAnswerId: question.selectedAnswerId,
+      options: question.options.map((option) => ({
+        answerId: option.answer_id,
+        optionText: option.option_text,
+        isCorrect: option.is_correct,
+        explanation: option.explanation,
+      })),
+    }));
+
+    return { ok: true as const, data: { questions } };
+  });
+}
+
 /**
  * The entire question bank (GET /api/instructor/questions, GitHub #170) — what the instructor's
  * Question Bank page renders instead of the old MOCK_QUESTIONS array.

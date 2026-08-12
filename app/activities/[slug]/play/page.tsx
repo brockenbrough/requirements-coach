@@ -7,7 +7,9 @@ import { AppShell } from "../../../../components/AppShell";
 import { FeedbackCard } from "../../../../components/FeedbackCard";
 import { QuestionCard } from "../../../../components/QuestionCard";
 import { SessionProgressDots, type ProgressDotStatus } from "../../../../components/SessionProgressDots";
+import { SessionSummaryScreen, type SessionSummaryItem } from "../../../../components/SessionSummaryScreen";
 import { getActivity } from "../../../../lib/activityContent";
+import { isPassing } from "../../../../lib/sessionRules";
 import {
   type CurrentSessionResult,
   type FeedbackResult,
@@ -46,6 +48,7 @@ export default function PlayActivityPage({
   const [cumulativeScore, setCumulativeScore] = useState(0);
   const [answeredCount, setAnsweredCount] = useState(0);
   const [outcome, setOutcome] = useState<AnswerOutcome | null>(null);
+  const [showSummary, setShowSummary] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,9 +56,16 @@ export default function PlayActivityPage({
    * The server is the only source of progress — there is no stored "current question",
    * it is derived from which of the drawn questions have an answer logged. So resuming,
    * reloading, and recovering from a double submit are all the same read.
+   *
+   * GitHub #263 bug fix: skipped while showSummary is true. A finished session is no longer
+   * "current" server-side (GET .../current only ever answers for an in-progress one), so
+   * re-syncing at that point doesn't refresh anything — it finds session: null and immediately
+   * navigates away, discarding the summary the student hasn't dismissed yet. This can happen
+   * without any explicit reload: syncFromServer's identity changes whenever token does, and
+   * UserProvider refreshes the token on its own 45-minute timer.
    */
   const syncFromServer = useCallback(async () => {
-    if (!token || !activity) return;
+    if (!token || !activity || showSummary) return;
 
     const result = await loadCurrentSession(token, activity.activityType);
 
@@ -80,7 +90,7 @@ export default function PlayActivityPage({
     setCumulativeScore(result.data.session.cumulative_score);
     setAnsweredCount(result.data.answers.length);
     setOutcome(null);
-  }, [token, activity, router]);
+  }, [token, activity, router, showSummary]);
 
   useEffect(() => {
     void syncFromServer();
@@ -177,32 +187,15 @@ export default function PlayActivityPage({
     });
   }
 
-  async function handleContinue() {
+  function handleContinue() {
     if (!outcome) return;
-    if (outcome.completed) {
-      if (token && profile?.user_id) {
-        // Await the completed-attempts refresh before navigating so the activity
-        // page's cache is already up to date when it mounts — without this the
-        // "previous attempts" table still shows the stale list (GitHub #130).
-        await Promise.all([
-          loadStudentScore(token, profile.user_id, { forceRefresh: true }),
-          loadSessions(token, "completed", {
-            studentId: profile.user_id,
-            forceRefresh: true,
-          }),
-          loadCompletedAttempts(token, profile.user_id, activity!.activityType, {
-            forceRefresh: true,
-          }),
-        ]);
-      }
-      router.push(`/activities/${activity!.slug}`);
-      return;
-    }
 
     // GitHub #236: fold the just-graded answer into session.answers before dropping the
-    // feedback view — that's what lets the progress dots know this question's correctness
-    // once it stops being "current". Built entirely from outcome (already-fetched, real data
-    // from the submit/feedback round trip), not a second network call or a new parallel state.
+    // feedback view — that's what lets the progress dots (and, once the session is done, the
+    // GitHub #263 summary) know this question's correctness once it stops being "current".
+    // Built entirely from outcome (already-fetched, real data from the submit/feedback round
+    // trip), not a second network call or a new parallel state. Needed for both branches below
+    // now — completed or not, this question's result must be in session.answers.
     setSession((current) =>
       current
         ? {
@@ -221,11 +214,43 @@ export default function PlayActivityPage({
           }
         : current,
     );
+
+    if (outcome.completed) {
+      // GitHub #263: show the session summary instead of navigating away immediately — the
+      // cache refresh + navigation that used to happen right here now happens once the student
+      // dismisses the summary, in handleFinishSummary.
+      setOutcome(null);
+      setShowSummary(true);
+      return;
+    }
+
     // The whole draw is already in hand — advancing is just dropping the feedback view.
     setOutcome(null);
   }
 
-  if (!currentQuestion) return null;
+  async function handleFinishSummary() {
+    if (token && profile?.user_id) {
+      // Await the completed-attempts refresh before navigating so the activity
+      // page's cache is already up to date when it mounts — without this the
+      // "previous attempts" table still shows the stale list (GitHub #130).
+      await Promise.all([
+        loadStudentScore(token, profile.user_id, { forceRefresh: true }),
+        loadSessions(token, "completed", {
+          studentId: profile.user_id,
+          forceRefresh: true,
+        }),
+        loadCompletedAttempts(token, profile.user_id, activity!.activityType, {
+          forceRefresh: true,
+        }),
+      ]);
+    }
+    router.push(`/activities/${activity!.slug}`);
+  }
+
+  // Once the session is complete, currentQuestion legitimately becomes undefined (nextPosition
+  // is null server-side, nothing left to draw) — that's expected while showSummary is up, not
+  // a "got here without starting" case, so it must not hit the same early-out.
+  if (!currentQuestion && !showSummary) return null;
 
   const { feedback } = outcome ?? {};
   const answeredDots = outcome ? answeredCount - 1 : answeredCount;
@@ -243,18 +268,48 @@ export default function PlayActivityPage({
     return isCorrect ? "correct" : "incorrect";
   });
 
+  // GitHub #263: SessionSummaryScreen is generic (score/message/items) — this page maps its
+  // own points-and-correctness session into that shape, the same division of responsibility as
+  // write-acceptance-criteria/page.tsx does for its 1-10 LLM scores. isPassing (lib/sessionRules.ts)
+  // is the same formula the server uses for session_log.passed, so the two can't disagree.
+  const maxScore = session.session.max_score;
+  const correctCount = session.answers.filter((answer) => answer.correct).length;
+  const sessionPassed = isPassing(cumulativeScore, maxScore);
+  const summaryMessage = sessionPassed
+    ? `Great job — you passed with ${correctCount} of ${totalQuestions} correct!`
+    : `Keep practicing — ${correctCount} of ${totalQuestions} correct this time.`;
+  const summaryItems: SessionSummaryItem[] = dotQuestions.map((question) => {
+    const answer = session.answers.find((a) => a.question_id === question.question_id);
+    return {
+      key: question.question_id,
+      label: question.question_prompt,
+      scoreLabel: answer ? `${answer.score} pts` : "—",
+      passed: answer?.correct === true,
+    };
+  });
+
   return (
     <AppShell active="activities">
       <div className="mx-auto max-w-xl">
-        <div className="mb-5 flex items-center justify-between">
-          <SessionProgressDots statuses={dotStatuses} />
-          <span className="text-sm font-bold text-gray-500">
-            Question {Math.min(answeredDots + 1, totalQuestions)} of{" "}
-            {totalQuestions} · {cumulativeScore} pts
-          </span>
-        </div>
+        {!showSummary ? (
+          <div className="mb-5 flex items-center justify-between">
+            <SessionProgressDots statuses={dotStatuses} />
+            <span className="text-sm font-bold text-gray-500">
+              Question {Math.min(answeredDots + 1, totalQuestions)} of{" "}
+              {totalQuestions} · {cumulativeScore} pts
+            </span>
+          </div>
+        ) : null}
 
-        {outcome && feedback ? (
+        {showSummary ? (
+          <SessionSummaryScreen
+            scoreValue={cumulativeScore}
+            scoreMax={maxScore}
+            message={summaryMessage}
+            items={summaryItems}
+            onDone={handleFinishSummary}
+          />
+        ) : outcome && feedback ? (
           <>
             <FeedbackCard
               prompt={outcome.question.question_prompt}
@@ -283,7 +338,7 @@ export default function PlayActivityPage({
               </button>
             </div>
           </>
-        ) : (
+        ) : currentQuestion ? (
           // Keyed so a change of question remounts the card and clears its selection —
           // otherwise the re-sync after a 409 would leave the previous pick staged.
           <QuestionCard
@@ -292,7 +347,7 @@ export default function PlayActivityPage({
             disabled={submitting}
             onSubmit={handleAnswer}
           />
-        )}
+        ) : null}
       </div>
     </AppShell>
   );

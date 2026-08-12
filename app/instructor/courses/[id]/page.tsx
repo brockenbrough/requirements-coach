@@ -7,7 +7,7 @@ import { AddStudentForm } from '../../../../components/AddStudentForm';
 import { CopyCodeButton } from '../../../../components/CopyCodeButton';
 import { CourseStudentList } from '../../../../components/CourseStudentList';
 import { EditCourseModal } from '../../../../components/EditCourseModal';
-import { loadCourse, removeStudentFromCourse, type CourseDetail, type CourseStudent } from '../../../../lib/courseClient';
+import { exportCourseReport, loadCourse, removeStudentFromCourse, type CourseDetail, type CourseStudent } from '../../../../lib/courseClient';
 import { useRequireRole } from '../../../../lib/useRequireRole';
 
 function EditIcon() {
@@ -15,6 +15,16 @@ function EditIcon() {
     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 20h9" />
       <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
+
+function DownloadIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3v12" />
+      <path d="m7 10 5 5 5-5" />
+      <path d="M5 21h14" />
     </svg>
   );
 }
@@ -34,6 +44,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
   const [retryCount, setRetryCount] = useState(0);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [error, setError] = useState('');
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     if (!token) return;
@@ -70,6 +81,16 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
     }
   }
 
+  async function handleExport() {
+    if (!course || exporting) return;
+
+    setError('');
+    setExporting(true);
+    const result = await exportCourseReport(token!, course.id);
+    setExporting(false);
+    if (!result.ok) setError(result.error);
+  }
+
   return (
     <AppShell active="instructor-courses">
       <div className="mx-auto max-w-2xl">
@@ -101,6 +122,15 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
               </div>
               <div className="flex flex-none items-center gap-3">
                 <CopyCodeButton code={course.code} />
+                <button
+                  type="button"
+                  onClick={handleExport}
+                  disabled={exporting}
+                  className="inline-flex items-center gap-2 rounded-full border border-brand-teal/40 bg-white px-4 py-2 text-sm font-extrabold text-brand-teal-dark transition hover:border-brand-teal disabled:opacity-60"
+                >
+                  <DownloadIcon />
+                  {exporting ? 'Exporting…' : 'Export CSV'}
+                </button>
                 <button
                   type="button"
                   onClick={() => setEditModalOpen(true)}

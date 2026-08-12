@@ -62,15 +62,25 @@ export function nextStoryIndex(session: AcceptanceCriteriaSession): number {
 }
 
 /**
- * The in-progress session, if one exists — null both when there's none stored and when a
- * stored session turns out to already be fully answered (a stale leftover from a session that
- * finished without going through clearSession — e.g. a closed tab). A "resume" prompt with
- * nothing left to answer would be a dead end, so this is treated the same as "no session".
+ * Whatever session is stored, whether it's still being answered or already complete — null
+ * only when nothing is stored at all. The caller (app/activities/write-acceptance-criteria/
+ * page.tsx) is the one that decides what a complete session means (show the summary) versus
+ * an incomplete one (show the resume/abandon prompt); this function does not discard either.
+ *
+ * GitHub #263 bug fix: this used to return null for an already-complete session too, treating
+ * it as a "stale leftover" (e.g. a closed tab) — safe back when handleContinue cleared the
+ * session the instant it became complete, so a complete-and-still-stored session could only
+ * mean "abandoned mid-flight". Once #263 started leaving a complete session in storage on
+ * purpose (so SessionSummaryScreen has something to show until the student dismisses it), that
+ * same "treat complete as stale" logic started discarding sessions that were simply awaiting
+ * acknowledgment — any remount while the summary was up (a reload, a background token refresh
+ * re-running the mount effect) silently replaced the finished session with a brand new one
+ * before the student ever saw their results. A session only ever leaves storage via
+ * clearSession() now, called from the student's own "Back to Activities" click — never
+ * implicitly by this getter.
  */
-export function getInProgressSession(): AcceptanceCriteriaSession | null {
-  const session = readRaw();
-  if (!session || isSessionComplete(session)) return null;
-  return session;
+export function getStoredSession(): AcceptanceCriteriaSession | null {
+  return readRaw();
 }
 
 export function startNewSession(stories: UserStoryPrompt[]): AcceptanceCriteriaSession {

@@ -32,7 +32,7 @@ In your Supabase project, open the **SQL Editor** and run the contents of [`supa
 
 ### 4. Create the avatars storage bucket
 
-In your Supabase project, go to **Storage → New bucket**, name it `avatars`, and check **Public bucket**.
+In your Supabase project, go to **Storage → New bucket**, name it `avatars`, and check **Public bucket**. In the same dialog, set **Allowed MIME types** to `image/png, image/jpeg, image/webp` and **File size limit** to `2 MB` — the upload route enforces the same rules, but the bucket is public, so a second line of defence is worth having.
 
 ## Quick start
 

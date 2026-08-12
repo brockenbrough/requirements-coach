@@ -17,7 +17,6 @@ type NavKey =
   | 'instructor'
   | 'instructor-questions'
   | 'instructor-settings'
-  | 'instructor-ac'
   | 'instructor-courses';
 
 // GitHub #242 (UI-2): 'courses' here is the student-facing browse/join page (app/courses/page.tsx)
@@ -38,11 +37,15 @@ const STUDENT_NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
 // it's filtered out of the rendered <nav> below (see visibleNavItems). The sidebar's gear icon
 // opens LLMProviderSettingsModal directly instead of navigating there, per the issue's explicit
 // ask not to add a fourth, separately-visible nav entry for it.
+//
+// GitHub #276: the standalone 'instructor-ac' ("Acceptance Criteria") entry that used to point
+// at /instructor/acceptance-criteria is gone — that page's rows now live in the Instructor
+// Dashboard's own activity table alongside every other attempt, so a separate destination for
+// them would just be a second, stale way to reach the same data.
 const INSTRUCTOR_NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
   { key: 'instructor', label: 'Instructor Dashboard', href: '/instructor' },
   { key: 'instructor-courses', label: 'Courses', href: '/instructor/courses' },
   { key: 'instructor-questions', label: 'Question Bank', href: '/instructor/questions' },
-  { key: 'instructor-ac', label: 'Acceptance Criteria', href: '/instructor/acceptance-criteria' },
   { key: 'profile', label: 'Profile', href: '/profile' },
   { key: 'instructor-settings', label: 'LLM Provider Settings', href: '/instructor/settings' },
 ];
@@ -91,15 +94,6 @@ function BookIcon() {
     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
       <path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v17H6.5A2.5 2.5 0 0 0 4 21.5v-17Z" />
       <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-    </svg>
-  );
-}
-
-function PencilIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5Z" />
     </svg>
   );
 }
@@ -157,7 +151,6 @@ const NAV_ICONS: Record<NavKey, () => JSX.Element> = {
   instructor: UsersIcon,
   'instructor-courses': GraduationCapIcon,
   'instructor-questions': BookIcon,
-  'instructor-ac': PencilIcon,
   'instructor-settings': GearIcon,
 };
 
@@ -232,8 +225,18 @@ export function AppShell({
         <div onClick={closeDrawer} aria-hidden className="fixed inset-0 z-30 bg-black/60 lg:hidden" />
       ) : null}
 
+      {/*
+        GitHub #277: fixed at rest (mobile off-canvas drawer, unrelated to this change) below
+        `lg`, sticky at `lg` and up. `sticky` rather than `fixed` on desktop specifically because
+        the sidebar stays a normal flex sibling of <main> that way — no compensating
+        margin/padding on <main> is needed to avoid it jumping under a fixed sidebar (the layout-
+        shift bullet in the issue), which a `fixed` sidebar would require. `lg:h-screen` pins its
+        height to the viewport so `top-0` has something to stick *within*; the overflow-y-auto
+        already here (needed for the mobile drawer) doubles as the sidebar's own internal scroll
+        if its nav content ever exceeds one viewport height.
+      */}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 w-[80%] max-w-[280px] overflow-y-auto bg-[#1b1642] p-5 transition-transform duration-200 ease-out lg:static lg:z-auto lg:w-60 lg:max-w-none lg:flex-none lg:translate-x-0 lg:border-r lg:border-[#332b6b] ${
+        className={`fixed inset-y-0 left-0 z-40 w-[80%] max-w-[280px] overflow-y-auto bg-[#1b1642] p-5 transition-transform duration-200 ease-out lg:sticky lg:top-0 lg:z-auto lg:h-screen lg:w-60 lg:max-w-none lg:flex-none lg:translate-x-0 lg:border-r lg:border-[#332b6b] ${
           drawerOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >

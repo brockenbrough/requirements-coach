@@ -1,3 +1,6 @@
+'use client';
+
+import { useState } from 'react';
 import { CategoryIcon } from './ActivityCard';
 import { ActivityStatusBadge } from './ActivityStatusBadge';
 import { getActivityByType } from '../lib/activityContent';
@@ -24,22 +27,48 @@ function scoreText(entry: ActivityLogEntry, state: ActivityResultState) {
   return `${entry.score}/${entry.maxScore}`;
 }
 
+function ChevronIcon({ expanded }: { expanded: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={`h-4 w-4 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  );
+}
+
 /**
  * One attempt, rendered either as a table row (ActivityLogTable, the full /dashboard/log page)
  * or as a compact stacked block (the dashboard's "Recent activity" preview, ~240px wide). Both
  * variants share the same badge and score logic so the two views can never disagree about what
  * "Passed" or a given score actually means.
  */
-export function ActivityLogRow({
+export function ActivityLogRow<T extends ActivityLogEntry>({
   entry,
   variant = 'table',
   studentName,
+  renderDetail,
 }: {
-  entry: ActivityLogEntry;
+  entry: T;
   variant?: 'table' | 'compact';
   /** Instructor Dashboard only (GitHub #82): renders a leading Student column in the table variant. */
   studentName?: string;
+  /**
+   * GitHub #276: when provided, adds an expand chevron as the table variant's trailing column —
+   * clicking it reveals whatever this returns for the row (a quiz attempt's questions/options/
+   * pick, or a Write Acceptance Criteria submission's story/answer/score). Omitted entirely by
+   * the student's own log and the dashboard's compact preview, both of which have no per-row
+   * detail to show and no instructor-only detail route to call.
+   */
+  renderDetail?: (entry: T) => React.ReactNode;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const state = resultStateOf(entry);
   const category = getActivityByType(entry.activityType)?.category ?? '';
   const when = formatDateTime(entry.dateTime);
@@ -59,56 +88,83 @@ export function ActivityLogRow({
     );
   }
 
+  const colSpan = (studentName ? 1 : 0) + 5 + (renderDetail ? 1 : 0);
+
   return (
-    <tr className="border-t border-brand-navy-border bg-brand-navy-2 text-brand-ink">
-      {studentName ? <td className="whitespace-nowrap px-4 py-3.5 font-bold text-white">{studentName}</td> : null}
-      <td className="px-4 py-3.5">
-        <div className="flex items-center gap-2.5">
-          <span
-            className={`flex h-9 w-9 flex-none items-center justify-center rounded-brand-md ${
-              category === 'Acceptance Criteria' ? 'bg-brand-teal/15' : 'bg-brand-purple/15'
-            }`}
-          >
-            <CategoryIcon category={category} />
-          </span>
-          <div>
-            <div className="font-extrabold text-white">{entry.activityName}</div>
-            <div className="text-xs font-semibold text-brand-ink-muted">{category}</div>
+    <>
+      <tr className="border-t border-brand-navy-border bg-brand-navy-2 text-brand-ink">
+        {studentName ? <td className="whitespace-nowrap px-4 py-3.5 font-bold text-white">{studentName}</td> : null}
+        <td className="px-4 py-3.5">
+          <div className="flex items-center gap-2.5">
+            <span
+              className={`flex h-9 w-9 flex-none items-center justify-center rounded-brand-md ${
+                category === 'Acceptance Criteria' ? 'bg-brand-teal/15' : 'bg-brand-purple/15'
+              }`}
+            >
+              <CategoryIcon category={category} />
+            </span>
+            <div>
+              <div className="font-extrabold text-white">{entry.activityName}</div>
+              <div className="text-xs font-semibold text-brand-ink-muted">{category}</div>
+            </div>
           </div>
-        </div>
-      </td>
-      <td className="px-4 py-3.5">
-        <span className={`inline-block whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-extrabold ${LEVEL_CLASSES[entry.level]}`}>
-          {LEVEL_LABEL[entry.level]} · Level {entry.level}
-        </span>
-      </td>
-      <td className="whitespace-nowrap px-4 py-3.5">
-        <div className="font-bold tabular-nums">{when.date}</div>
-        <div className="text-xs tabular-nums text-brand-ink-muted">{when.time}</div>
-      </td>
-      <td className="px-4 py-3.5">
-        <div className="whitespace-nowrap font-bold tabular-nums">
-          {entry.score}/{entry.maxScore}
-        </div>
-        <div className="mt-1.5 h-1.5 w-20 overflow-hidden rounded-full bg-brand-navy-border">
-          <span
-            className={`block h-full rounded-full ${
-              state === 'passed' ? 'bg-brand-teal' : state === 'in-progress' ? 'bg-brand-purple' : 'bg-brand-danger'
-            }`}
-            style={{
-              width: state === 'in-progress'
-                ? `${(entry.answeredQuestions / entry.totalQuestions) * 100}%`
-                : `${Math.min(100, Math.max(0, entry.maxScore > 0 ? (entry.score / entry.maxScore) * 100 : 0))}%`,
-            }}
-          />
-        </div>
-        <div className="mt-1 whitespace-nowrap text-xs font-semibold text-brand-ink-muted">
-          {state === 'in-progress' || state === 'abandoned' ? `${entry.answeredQuestions} of ${entry.totalQuestions} answered` : `${entry.maxScore > 0 ? Math.round((entry.score / entry.maxScore) * 100) : 0}%`}
-        </div>
-      </td>
-      <td className="px-4 py-3.5">
-        <ActivityStatusBadge state={state} />
-      </td>
-    </tr>
+        </td>
+        <td className="px-4 py-3.5">
+          <span className={`inline-block whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-extrabold ${LEVEL_CLASSES[entry.level]}`}>
+            {LEVEL_LABEL[entry.level]} · Level {entry.level}
+          </span>
+        </td>
+        <td className="whitespace-nowrap px-4 py-3.5">
+          <div className="font-bold tabular-nums">{when.date}</div>
+          <div className="text-xs tabular-nums text-brand-ink-muted">{when.time}</div>
+        </td>
+        <td className="px-4 py-3.5">
+          <div className="whitespace-nowrap font-bold tabular-nums">
+            {entry.score}/{entry.maxScore}
+          </div>
+          <div className="mt-1.5 h-1.5 w-20 overflow-hidden rounded-full bg-brand-navy-border">
+            <span
+              className={`block h-full rounded-full ${
+                state === 'passed' ? 'bg-brand-teal' : state === 'in-progress' ? 'bg-brand-purple' : 'bg-brand-danger'
+              }`}
+              style={{
+                width: state === 'in-progress'
+                  ? `${(entry.answeredQuestions / entry.totalQuestions) * 100}%`
+                  : `${Math.min(100, Math.max(0, entry.maxScore > 0 ? (entry.score / entry.maxScore) * 100 : 0))}%`,
+              }}
+            />
+          </div>
+          <div className="mt-1 whitespace-nowrap text-xs font-semibold text-brand-ink-muted">
+            {state === 'in-progress' || state === 'abandoned' ? `${entry.answeredQuestions} of ${entry.totalQuestions} answered` : `${entry.maxScore > 0 ? Math.round((entry.score / entry.maxScore) * 100) : 0}%`}
+          </div>
+        </td>
+        <td className="px-4 py-3.5">
+          <ActivityStatusBadge state={state} />
+        </td>
+        {renderDetail ? (
+          <td className="px-4 py-3.5 text-right">
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              aria-expanded={expanded}
+              aria-label={expanded ? 'Collapse attempt' : 'Expand attempt'}
+              className="ml-auto flex h-8 w-8 items-center justify-center rounded-full border border-brand-navy-border text-brand-ink-muted transition-colors duration-150 hover:border-brand-purple hover:text-white"
+            >
+              <ChevronIcon expanded={expanded} />
+            </button>
+          </td>
+        ) : null}
+      </tr>
+      {renderDetail && expanded ? (
+        <tr className="border-t border-brand-navy-border bg-brand-navy-2">
+          {/* No shared wrapper card here — QuizAttemptDetails and AcSubmissionDetails each own
+              their own full styling (the latter reuses StoryDisplayCard, GitHub #262, which
+              already is one; a second card around it here would double the border/background). */}
+          <td colSpan={colSpan} className="px-4 pb-5 pt-3">
+            {renderDetail(entry)}
+          </td>
+        </tr>
+      ) : null}
+    </>
   );
 }

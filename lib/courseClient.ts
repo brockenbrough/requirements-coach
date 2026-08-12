@@ -123,3 +123,42 @@ export function removeStudentFromCourse(token: string, courseId: string, student
     token,
   );
 }
+
+/**
+ * Downloads a depersonalized CSV report of a course's student activity (GET
+ * /api/instructor/courses/{id}/export, REQ-PL-3.4.3) and triggers it as a browser download.
+ * Unlike every other function here, the response body is CSV, not JSON, so this bypasses the
+ * shared request() helper (which always parses JSON on success) and reads the filename off
+ * Content-Disposition instead of a response field.
+ */
+export async function exportCourseReport(token: string, courseId: string): Promise<ApiResult<{ filename: string }>> {
+  let response: Response;
+
+  try {
+    response = await fetch(`/api/instructor/courses/${encodeURIComponent(courseId)}/export`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch {
+    return { ok: false, status: 0, error: NETWORK_ERROR };
+  }
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    return { ok: false, status: response.status, error: body?.error || 'Something went wrong.' };
+  }
+
+  const match = /filename="([^"]+)"/.exec(response.headers.get('Content-Disposition') ?? '');
+  const filename = match?.[1] ?? 'course-report.csv';
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+
+  return { ok: true, data: { filename } };
+}

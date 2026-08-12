@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useState } from 'react';
+import { AcSubmissionDetails } from '../../components/AcSubmissionDetails';
 import { AppShell } from '../../components/AppShell';
 import { ActivityLogTable } from '../../components/ActivityLogTable';
 import { InstructorActivityStats } from '../../components/InstructorActivityStats';
@@ -15,8 +16,10 @@ import {
 import { InstructorDashboardSkeleton } from '../../components/InstructorDashboardSkeleton';
 import { InstructorRoster } from '../../components/InstructorRoster';
 import { Pagination } from '../../components/Pagination';
-import { summarizeStudents, toStudentActivitySummary, type StudentActivitySummary } from '../../lib/activityLogTypes';
-import { loadInstructorActivities, loadInstructorStudents, type InstructorActivityEntry, type StudentSummary } from '../../lib/sessionClient';
+import { QuizAttemptDetails } from '../../components/QuizAttemptDetails';
+import { loadInstructorACSubmissions } from '../../lib/acceptanceCriteriaClient';
+import { summarizeStudents, toAcSubmissionRow, toQuizAttemptRow, type ActivityRow } from '../../lib/activityLogTypes';
+import { loadInstructorActivities, loadInstructorStudents, type StudentSummary } from '../../lib/sessionClient';
 import { useRequireRole } from '../../lib/useRequireRole';
 
 const PAGE_SIZE = 10;
@@ -37,7 +40,7 @@ function InstructorDashboardContent() {
   const { token, profile, loading, authorized } = useRequireRole('instructor');
   const searchParams = useSearchParams();
 
-  const [entries, setEntries] = useState<StudentActivitySummary[] | null>(null);
+  const [entries, setEntries] = useState<ActivityRow[] | null>(null);
   const [allStudents, setAllStudents] = useState<StudentSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -47,20 +50,39 @@ function InstructorDashboardContent() {
   const [sort, setSort] = useState<InstructorSortOrder>('newest');
   const [page, setPage] = useState(1);
 
-  // GET /api/instructor/activities (GitHub #171/#176) — cache-first; forceRefresh on the
-  // Refresh button or when profile.user_id becomes available for the first time.
+  /**
+   * GitHub #276: quiz attempts (GET /api/instructor/activities) and Write Acceptance Criteria
+   * submissions (GET /api/instructor/acceptance-criteria/submissions) are two separate routes —
+   * there is no combined backend endpoint — so this fetches both in parallel and merges them
+   * client-side into one ActivityRow[] list. A combined route would save a round trip, but isn't
+   * worth adding for two lists this size; revisit if the class-wide read ever needs to page
+   * server-side.
+   *
+   * Cache-first for the quiz attempts (forceRefresh on the Refresh button or when profile.user_id
+   * becomes available for the first time); AC submissions are never cached (same as the page this
+   * replaced), so they're always a fresh network read.
+   */
   useEffect(() => {
     if (!token || !profile?.user_id) return;
     let cancelled = false;
 
-    loadInstructorActivities(token, profile.user_id).then((result) => {
-      if (cancelled) return;
-      if (result.ok) {
-        setEntries(result.data.sessions.map((session: InstructorActivityEntry) => toStudentActivitySummary(session)));
-      } else {
-        setError(result.error);
-      }
-    });
+    Promise.all([loadInstructorActivities(token, profile.user_id), loadInstructorACSubmissions(token)]).then(
+      ([activitiesResult, submissionsResult]) => {
+        if (cancelled) return;
+        if (!activitiesResult.ok) {
+          setError(activitiesResult.error);
+          return;
+        }
+        if (!submissionsResult.ok) {
+          setError(submissionsResult.error);
+          return;
+        }
+        setEntries([
+          ...activitiesResult.data.sessions.map(toQuizAttemptRow),
+          ...submissionsResult.data.submissions.map(toAcSubmissionRow),
+        ]);
+      },
+    );
 
     return () => {
       cancelled = true;
@@ -70,14 +92,24 @@ function InstructorDashboardContent() {
   function handleRefresh() {
     if (!token || !profile?.user_id || refreshing) return;
     setRefreshing(true);
-    loadInstructorActivities(token, profile.user_id, { forceRefresh: true }).then((result) => {
+    Promise.all([
+      loadInstructorActivities(token, profile.user_id, { forceRefresh: true }),
+      loadInstructorACSubmissions(token),
+    ]).then(([activitiesResult, submissionsResult]) => {
       setRefreshing(false);
-      if (result.ok) {
-        setEntries(result.data.sessions.map((session: InstructorActivityEntry) => toStudentActivitySummary(session)));
-        setError(null);
-      } else {
-        setError(result.error);
+      if (!activitiesResult.ok) {
+        setError(activitiesResult.error);
+        return;
       }
+      if (!submissionsResult.ok) {
+        setError(submissionsResult.error);
+        return;
+      }
+      setEntries([
+        ...activitiesResult.data.sessions.map(toQuizAttemptRow),
+        ...submissionsResult.data.submissions.map(toAcSubmissionRow),
+      ]);
+      setError(null);
     });
   }
 
@@ -170,10 +202,11 @@ function InstructorDashboardContent() {
         ) : entries === null ? (
           <InstructorDashboardSkeleton />
         ) : entries.length === 0 ? (
-          // GET /api/instructor/activities answers 200 [] for a class that has not started
-          // anything (by design — see its docstring). Rendering the full dashboard here would
-          // show empty stat tiles and the table's "No attempts match these filters." message,
-          // which blames filters the instructor never set (GitHub #174).
+          // Both GET /api/instructor/activities and GET /api/instructor/acceptance-criteria/
+          // submissions answer 200 [] for a class that has not started anything (by design —
+          // see their docstrings). Rendering the full dashboard here would show empty stat
+          // tiles and the table's "No attempts match these filters." message, which blames
+          // filters the instructor never set (GitHub #174).
           <div className="rounded-brand-lg border border-gray-100 bg-gray-50 p-10 text-center">
             <p className="text-sm font-extrabold text-brand-navy">No activity yet</p>
             <p className="mx-auto mt-1.5 max-w-md text-sm font-semibold text-gray-500">
@@ -202,7 +235,17 @@ function InstructorDashboardContent() {
               onSortChange={setSort}
             />
 
-            <ActivityLogTable entries={pageEntries} getStudentName={(entry) => studentNameById.get(entry.studentId) ?? ''} />
+            <ActivityLogTable
+              entries={pageEntries}
+              getStudentName={(entry) => studentNameById.get(entry.studentId) ?? ''}
+              renderDetail={(entry) =>
+                entry.kind === 'ac-submission' ? (
+                  <AcSubmissionDetails submission={entry} />
+                ) : (
+                  <QuizAttemptDetails sessionId={entry.id} token={token!} />
+                )
+              }
+            />
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
               <span className="text-xs font-semibold text-gray-500">
