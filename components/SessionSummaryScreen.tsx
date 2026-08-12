@@ -1,60 +1,61 @@
 'use client';
 
-import { deriveStoryTitle } from '../lib/storyMarkdown';
-import { AC_PASS_SCORE, summarizeSession, type AcceptanceCriteriaSession } from '../lib/acceptanceCriteriaSessionStore';
-
 /**
- * GitHub #263: shown once every story in the session has been submitted and graded — distinct
- * from AcceptanceCriteriaFeedbackScreen (which recaps one story's own criteria and feedback)
- * both in content (every story's score at a glance, not one story's full write-up) and look
- * (gold "session complete" framing instead of that screen's per-story teal/purple pass/fail
- * gradient), so a student can tell which screen they're looking at without reading the heading.
+ * GitHub #263: shown once every item in a session has been graded — distinct from a per-item
+ * feedback screen (AcceptanceCriteriaFeedbackScreen, FeedbackCard) both in content (every
+ * item's result at a glance, not one item's full write-up) and look (gold "session complete"
+ * framing instead of a per-item pass/fail gradient), so a student can tell which screen they're
+ * looking at without reading the heading.
  *
- * Takes the whole session rather than a pre-computed total, per the issue's instruction to
- * derive this from the existing session state instead of tracking scores separately —
- * summarizeSession (lib/acceptanceCriteriaSessionStore.ts) does the aggregation.
+ * Generic on purpose (GitHub #263 follow-up): the Write Acceptance Criteria session (LLM score
+ * out of 10 per story) and the Type A quiz session (points, correct/incorrect per question)
+ * score on entirely different scales, so this component takes pre-formatted numbers and a
+ * pre-built item list rather than either domain's own types — each caller (write-acceptance-
+ * criteria/page.tsx, [slug]/play/page.tsx) maps its own session state into these props, the same
+ * division of responsibility as SessionProgressDots (GitHub #261) and ResumeOrAbandonPrompt
+ * (GitHub #260).
  */
+export type SessionSummaryItem = {
+  key: string;
+  label: string;
+  scoreLabel: string;
+  passed: boolean;
+};
+
 export function SessionSummaryScreen({
-  session,
+  scoreValue,
+  scoreMax,
+  message,
+  items,
   onDone,
+  doneLabel = 'Back to Activities',
 }: {
-  session: AcceptanceCriteriaSession;
+  scoreValue: number | string;
+  scoreMax: number | string;
+  message: string;
+  items: SessionSummaryItem[];
   onDone: () => void;
+  doneLabel?: string;
 }) {
-  const { totalScore, maxScore, passedCount, storyCount } = summarizeSession(session);
-
-  const message =
-    storyCount === 0
-      ? 'No stories were graded in this session.'
-      : passedCount === storyCount
-        ? `Great job — all ${storyCount} stories passed!`
-        : passedCount === 0
-          ? `Keep practicing — none of the ${storyCount} stories passed this time.`
-          : `Nice progress — ${passedCount} of ${storyCount} stories passed.`;
-
   return (
     <div className="rounded-brand-lg border border-brand-gold/40 bg-gradient-to-br from-brand-gold-dark to-brand-navy p-8 text-center">
       <span className="mb-2 block text-xs font-extrabold uppercase tracking-wide text-brand-gold">Session complete</span>
 
       <div className="text-5xl font-extrabold text-white">
-        {totalScore}
-        <span className="text-2xl font-bold text-brand-ink-muted"> / {maxScore}</span>
+        {scoreValue}
+        <span className="text-2xl font-bold text-brand-ink-muted"> / {scoreMax}</span>
       </div>
       <p className="mt-2 text-sm font-semibold text-brand-ink-muted">{message}</p>
 
       <div className="mt-6 space-y-2 text-left">
-        {session.stories.map((story) => (
+        {items.map((item) => (
           <div
-            key={story.userStoryId}
+            key={item.key}
             className="flex items-center justify-between gap-3 rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-4 py-3"
           >
-            <span className="text-sm font-semibold text-brand-ink">{deriveStoryTitle(story.description)}</span>
-            <span
-              className={`shrink-0 text-sm font-extrabold ${
-                story.result && story.result.score >= AC_PASS_SCORE ? 'text-brand-green' : 'text-brand-ink-muted'
-              }`}
-            >
-              {story.result ? `${story.result.score} / 10` : '—'}
+            <span className="text-sm font-semibold text-brand-ink">{item.label}</span>
+            <span className={`shrink-0 text-sm font-extrabold ${item.passed ? 'text-brand-green' : 'text-brand-ink-muted'}`}>
+              {item.scoreLabel}
             </span>
           </div>
         ))}
@@ -65,7 +66,7 @@ export function SessionSummaryScreen({
         onClick={onDone}
         className="mt-6 w-full rounded-brand-md bg-brand-purple py-3 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark"
       >
-        Back to Activities
+        {doneLabel}
       </button>
     </div>
   );
