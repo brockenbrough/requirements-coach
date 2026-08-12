@@ -1,7 +1,6 @@
 import { getSupabaseClient } from '../../../../../lib/supabase';
 import { shuffleArray } from '../../../../../lib/shuffleArray';
-
-const STORIES_PER_SESSION = 4;
+import { STORIES_PER_SESSION } from '../../../../../lib/acSessionConfig';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');

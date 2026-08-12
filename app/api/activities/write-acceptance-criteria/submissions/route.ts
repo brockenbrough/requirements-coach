@@ -1,10 +1,7 @@
 import { getSupabaseClient } from "../../../../../lib/supabase";
-import {
-  getLLMProvider,
-  isLLMProviderName,
-} from "../../../../../lib/llm/factory";
-
-const STORIES_PER_SESSION = 4;
+import { getLLMProvider, isLLMProviderName } from "../../../../../lib/llm/factory";
+import { STORIES_PER_SESSION } from "../../../../../lib/acSessionConfig";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 type UserStoryRow = { user_story_id: string; story_text: string; creator_id: string };
 type LLMConfigRow = { provider: string; api_key: string; model: string };
@@ -12,6 +9,40 @@ type LLMConfigRow = { provider: string; api_key: string; model: string };
 function getToken(request: Request): string | null {
   const auth = request.headers.get("Authorization");
   return auth?.startsWith("Bearer ") ? auth.slice(7) : null;
+}
+
+/**
+ * Returns the next unanswered story in the session (id + position), or null if all have
+ * been submitted. Extracted here because the submissions route needs it twice: once to
+ * enforce sequential order before the LLM call, and once to tell the client what comes
+ * next after a successful submission.
+ */
+async function findNextStory(
+  supabase: SupabaseClient,
+  sessionId: string,
+): Promise<{ next: { userStoryId: string; position: number } | null; error: string | null }> {
+  const { data: sessionStories, error: storiesError } = await supabase
+    .from("ac_session_story")
+    .select("position, user_story_id")
+    .eq("ac_session_id", sessionId)
+    .order("position", { ascending: true });
+
+  if (storiesError) return { next: null, error: storiesError.message };
+
+  const { data: submissions, error: subError } = await supabase
+    .from("submission")
+    .select("user_story_id")
+    .eq("ac_session_id", sessionId);
+
+  if (subError) return { next: null, error: subError.message };
+
+  const submittedIds = new Set((submissions ?? []).map((s) => s.user_story_id));
+  const next = (sessionStories ?? []).find((s) => !submittedIds.has(s.user_story_id));
+
+  return {
+    next: next ? { userStoryId: next.user_story_id, position: next.position } : null,
+    error: null,
+  };
 }
 
 /**
@@ -79,30 +110,15 @@ export async function POST(request: Request) {
       return Response.json({ error: "This session is already completed." }, { status: 409 });
     }
 
-    // Determine the current story (next unanswered position).
-    const { data: sessionStories, error: storiesError } = await supabase
-      .from("ac_session_story")
-      .select("position, user_story_id")
-      .eq("ac_session_id", resolvedSessionId)
-      .order("position", { ascending: true });
-
-    if (storiesError) return Response.json({ error: storiesError.message }, { status: 500 });
-
-    const { data: existingSubmissions, error: subError } = await supabase
-      .from("submission")
-      .select("user_story_id")
-      .eq("ac_session_id", resolvedSessionId);
-
-    if (subError) return Response.json({ error: subError.message }, { status: 500 });
-
-    const submittedIds = new Set((existingSubmissions ?? []).map((s) => s.user_story_id));
-    const currentStory = (sessionStories ?? []).find((s) => !submittedIds.has(s.user_story_id));
+    // Reject out-of-order submissions — the student must work through stories 1→4.
+    const { next: currentStory, error: nextError } = await findNextStory(supabase, resolvedSessionId);
+    if (nextError) return Response.json({ error: nextError }, { status: 500 });
 
     if (!currentStory) {
       return Response.json({ error: "This session is already completed." }, { status: 409 });
     }
 
-    if (userStoryId !== currentStory.user_story_id) {
+    if (userStoryId !== currentStory.userStoryId) {
       return Response.json(
         { error: `You must submit story ${currentStory.position} before moving on.` },
         { status: 409 },
@@ -135,14 +151,12 @@ export async function POST(request: Request) {
     );
 
   const { provider: providerName, api_key: apiKey, model } = config as LLMConfigRow;
-  if (!isLLMProviderName(providerName)) {
+  if (!isLLMProviderName(providerName))
     return Response.json({ error: "Configured LLM provider is invalid." }, { status: 500 });
-  }
 
   const provider = getLLMProvider(providerName, apiKey, model);
-  if (!provider) {
+  if (!provider)
     return Response.json({ error: "Configured LLM provider is missing an API key." }, { status: 500 });
-  }
 
   const submissionId = crypto.randomUUID();
 
@@ -210,16 +224,9 @@ export async function POST(request: Request) {
 
         sessionCompleted = true;
       } else {
-        // Find the next unanswered story.
-        const { data: sessionStories } = await supabase
-          .from("ac_session_story")
-          .select("position, user_story_id")
-          .eq("ac_session_id", resolvedSessionId)
-          .order("position", { ascending: true });
-
-        const submittedIds = new Set(allSubmissions.map((s) => s.user_story_id));
-        const nextStory = (sessionStories ?? []).find((s) => !submittedIds.has(s.user_story_id));
-        nextStoryId = nextStory?.user_story_id ?? null;
+        // Reuse the helper to avoid repeating the "find next" query logic.
+        const { next } = await findNextStory(supabase, resolvedSessionId);
+        nextStoryId = next?.userStoryId ?? null;
       }
     }
   }
