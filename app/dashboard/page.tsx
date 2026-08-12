@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AppShell } from "../../components/AppShell";
 import { ActivityLogRow } from "../../components/ActivityLogRow";
+import { LeaderboardPreview } from "../../components/LeaderboardPreview";
 import { ACTIVITIES, Difficulty } from "../../lib/activityContent";
 import { toActivityLogEntry } from "../../lib/activityLogTypes";
 import { ActivityState, getActivityState } from "../../lib/activityStore";
@@ -248,6 +249,8 @@ export default function DashboardPage() {
           </Link>
         </div>
       )}
+
+      <LeaderboardPreview studentId={profile?.user_id} />
 
       <h3 className="mb-4 text-lg font-extrabold text-[#1B1642]">
         Mastery titles

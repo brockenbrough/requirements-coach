@@ -1,22 +1,12 @@
 import Link from 'next/link';
 import { Avatar } from './Avatar';
+import { LeaderboardRankBadge } from './LeaderboardRankBadge';
 import { RankChangeIndicator } from './RankChangeIndicator';
 import type { LeaderboardEntry } from '../lib/leaderboardTypes';
 
 // The photo column has no header — a label above a 36px circle is noise, and the username
 // beside it already names the row.
 const COLUMNS = ['Rank', '', 'Username', 'Points', 'Change'];
-
-// CLAUDE.md reserves brand-gold for "rewards/XP/achievements", which is exactly the podium.
-// Silver has no token, so second place borrows the muted ink; third takes teal rather than an
-// invented bronze — adding a one-off hex here would be the first violation of the token rule.
-const RANK_CLASSES: Record<number, string> = {
-  1: 'bg-brand-gold/25 text-brand-gold',
-  2: 'bg-brand-ink-muted/25 text-brand-ink',
-  3: 'bg-brand-teal/20 text-brand-teal',
-};
-
-const RANK_DEFAULT = 'text-brand-ink-muted';
 
 /**
  * One row. Exported so the "Your position" strip below the table and the dashboard preview can
@@ -38,13 +28,7 @@ export function LeaderboardRow({
       }`}
     >
       <td className={`py-3.5 pr-2 ${isCurrentUser ? 'border-l-4 border-l-brand-purple pl-3' : 'pl-4'}`}>
-        <span
-          className={`inline-flex h-8 min-w-8 items-center justify-center rounded-full px-2 text-xs font-extrabold tabular-nums ${
-            RANK_CLASSES[entry.rank] ?? RANK_DEFAULT
-          }`}
-        >
-          {entry.rank}
-        </span>
+        <LeaderboardRankBadge rank={entry.rank} />
       </td>
       <td className="py-3.5 pl-1 pr-2">
         <Avatar avatarUrl={entry.avatarUrl} fallbackName={entry.username} size="sm" />
