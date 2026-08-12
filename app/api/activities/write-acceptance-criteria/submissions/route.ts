@@ -248,15 +248,10 @@ export async function POST(request: Request) {
     }
   }
 
-  const responseBody: Record<string, unknown> = {
-    submissionId,
-    score: rating.score,
-    feedback: rating.feedback,
-  };
-
-  if (resolvedSessionId) {
-    Object.assign(responseBody, { sessionCompleted, nextStoryId, totalScore, averageScore });
-  }
-
-  return Response.json(responseBody, { status: 200 });
+  // sessionId is required (checked above), so these fields are always present now — no more
+  // conditional shape depending on whether a session was involved.
+  return Response.json(
+    { submissionId, score: rating.score, feedback: rating.feedback, sessionCompleted, nextStoryId, totalScore, averageScore },
+    { status: 200 },
+  );
 }
