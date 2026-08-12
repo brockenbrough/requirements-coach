@@ -9,20 +9,23 @@ import { AcceptanceCriteriaWritingScreen } from '../../../components/AcceptanceC
 import { AcceptanceCriteriaWritingScreenSkeleton } from '../../../components/AcceptanceCriteriaWritingScreenSkeleton';
 import { ResumeOrAbandonPrompt } from '../../../components/ResumeOrAbandonPrompt';
 import { SessionProgressDots, type ProgressDotStatus } from '../../../components/SessionProgressDots';
-import { SessionSummaryScreen } from '../../../components/SessionSummaryScreen';
+import { SessionSummaryScreen, type SessionSummaryItem } from '../../../components/SessionSummaryScreen';
 import { drawSessionStories, submitAcceptanceCriteria } from '../../../lib/acceptanceCriteriaClient';
-import type { AcceptanceCriteriaResult, UserStoryPrompt } from '../../../lib/acceptanceCriteriaTypes';
 import {
+  AC_PASS_SCORE,
   answeredCount,
   clearSession,
-  getInProgressSession,
+  getStoredSession,
   isSessionComplete,
   nextStoryIndex,
   recordStoryResult,
   startNewSession,
   STORIES_PER_SESSION,
+  summarizeSession,
   type AcceptanceCriteriaSession,
 } from '../../../lib/acceptanceCriteriaSessionStore';
+import type { AcceptanceCriteriaResult, UserStoryPrompt } from '../../../lib/acceptanceCriteriaTypes';
+import { deriveStoryTitle } from '../../../lib/storyMarkdown';
 import { useRequireRole } from '../../../lib/useRequireRole';
 
 type Outcome = { userStory: UserStoryPrompt; result: AcceptanceCriteriaResult };
@@ -46,22 +49,32 @@ export default function WriteAcceptanceCriteriaPage() {
   const [lastAttemptedText, setLastAttemptedText] = useState<string | null>(null);
 
   // GitHub #260: mirrors the Type A start/resume flow (app/activities/[slug]/page.tsx) — on
-  // mount, an in-progress local session (lib/acceptanceCriteriaSessionStore.ts) wins over
-  // starting fresh. loadAttempt doubles as "start a brand-new session", bumped by the
-  // failed-draw Retry button and by handleAbandon (after it clears the old session first, so
-  // the re-run below finds nothing in progress and draws a new one).
+  // mount, a stored local session (lib/acceptanceCriteriaSessionStore.ts) wins over starting
+  // fresh. loadAttempt doubles as "start a brand-new session", bumped by the failed-draw Retry
+  // button and by handleAbandon (after it clears the old session first, so the re-run below
+  // finds nothing stored and draws a new one).
+  //
+  // GitHub #263 bug fix: a stored session that's already complete is routed straight to the
+  // summary, not treated as "nothing to resume" — getStoredSession() no longer discards it (see
+  // that function's own comment for why the old behavior silently lost a finished session if
+  // the effect re-ran — e.g. a reload — before the student clicked past the summary).
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
 
-    const existing = getInProgressSession();
-    if (existing) {
-      setSession(existing);
-      setShowPrompt(true);
-      setShowSummary(false);
+    const stored = getStoredSession();
+    if (stored) {
+      setSession(stored);
       setOutcome(null);
       setSubmitError(null);
       setIsLoading(false);
+      if (isSessionComplete(stored)) {
+        setShowPrompt(false);
+        setShowSummary(true);
+      } else {
+        setShowPrompt(true);
+        setShowSummary(false);
+      }
       return () => {
         cancelled = true;
       };
@@ -177,6 +190,28 @@ export default function WriteAcceptanceCriteriaPage() {
       })
     : [];
 
+  // GitHub #263: SessionSummaryScreen is generic (score/message/items), so this page is the one
+  // that maps its own LLM-graded, 1-10-per-story session into that shape — see the component's
+  // own comment for why it doesn't know about stories/LLM scores itself.
+  const summary = session && allStoriesComplete ? summarizeSession(session) : null;
+  const summaryItems: SessionSummaryItem[] = session
+    ? session.stories.map((story) => ({
+        key: story.userStoryId,
+        label: deriveStoryTitle(story.description),
+        scoreLabel: story.result ? `${story.result.score} / 10` : '—',
+        passed: (story.result?.score ?? 0) >= AC_PASS_SCORE,
+      }))
+    : [];
+  const summaryMessage = summary
+    ? summary.storyCount === 0
+      ? 'No stories were graded in this session.'
+      : summary.passedCount === summary.storyCount
+        ? `Great job — all ${summary.storyCount} stories passed!`
+        : summary.passedCount === 0
+          ? `Keep practicing — none of the ${summary.storyCount} stories passed this time.`
+          : `Nice progress — ${summary.passedCount} of ${summary.storyCount} stories passed.`
+    : '';
+
   return (
     <AppShell active="activities">
       <div className="mx-auto max-w-xl">
@@ -223,8 +258,14 @@ export default function WriteAcceptanceCriteriaPage() {
               confirmMessage="Are you sure you want to abandon this session? Your current answers will be lost."
             />
           </div>
-        ) : showSummary && session ? (
-          <SessionSummaryScreen session={session} onDone={handleFinishSummary} />
+        ) : showSummary && summary ? (
+          <SessionSummaryScreen
+            scoreValue={summary.totalScore}
+            scoreMax={summary.maxScore}
+            message={summaryMessage}
+            items={summaryItems}
+            onDone={handleFinishSummary}
+          />
         ) : currentUserStory ? (
           outcome ? (
             <>
