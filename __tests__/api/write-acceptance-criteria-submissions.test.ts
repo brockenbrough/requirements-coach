@@ -70,6 +70,7 @@ vi.mock('../../lib/llm/factory', async (importOriginal) => {
 import { getLLMProvider } from '../../lib/llm/factory';
 import { POST } from '../../app/api/activities/write-acceptance-criteria/submissions/route';
 
+const SESSION_ID = 'session-1';
 const STORY = {
   user_story_id: 'story-1',
   story_text: 'As a user, I want to log in with email.',
@@ -86,6 +87,22 @@ function req(body?: object, token: string | null = 'valid-token') {
     },
     body: body ? JSON.stringify(body) : undefined,
   });
+}
+
+/**
+ * Queues an in-progress session (ac_session) plus its story list and existing submissions
+ * (ac_session_story, submission — read in that order by findNextStory), the minimum needed to
+ * pass the session/sequential-order gate that now runs on every request. Defaults to a single
+ * story (story-1) with nothing submitted yet, so story-1 is the current story.
+ */
+function queueSession({
+  status = 'in-progress' as string | null,
+  sessionStories = [{ position: 1, user_story_id: 'story-1' }],
+  existingSubmissions = [] as { user_story_id: string }[],
+} = {}) {
+  queue('ac_session', { data: { ac_session_id: SESSION_ID, status }, error: null });
+  queue('ac_session_story', { data: sessionStories, error: null });
+  queue('submission', { data: existingSubmissions, error: null });
 }
 
 /** Queues story lookup + the story creator's config lookup, the two reads before any write. */
@@ -120,7 +137,7 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
 
   it('returns 401 for an invalid token', async () => {
     const response = await POST(
-      req({ userStoryId: 'story-1', submittedText: 'Given...' }, 'bad-token'),
+      req({ userStoryId: 'story-1', submittedText: 'Given...', sessionId: SESSION_ID }, 'bad-token'),
     );
     expect(response.status).toBe(401);
   });
@@ -150,27 +167,99 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
     expect(getLLMProvider).not.toHaveBeenCalled();
   });
 
+  // The cost/abuse-vector fix: this endpoint burns a real, billed LLM call, so it must never be
+  // reachable without a session tying it to a bounded, sequential activity.
+  it('returns 400 when submittedText exceeds the max length', async () => {
+    const response = await POST(
+      req({ userStoryId: 'story-1', submittedText: 'x'.repeat(5001), sessionId: SESSION_ID }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(h.state.inserts).toHaveLength(0);
+    expect(getLLMProvider).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when sessionId is missing — no more unthrottled submissions', async () => {
+    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'Given...' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toMatch(/sessionid is required/i);
+    expect(h.state.inserts).toHaveLength(0);
+    expect(getLLMProvider).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when the session does not exist', async () => {
+    queue('ac_session', { data: null, error: null });
+
+    const response = await POST(
+      req({ userStoryId: 'story-1', submittedText: 'Given...', sessionId: 'missing-session' }),
+    );
+
+    expect(response.status).toBe(404);
+    expect(h.state.inserts).toHaveLength(0);
+  });
+
+  it('returns 409 when the session is already completed', async () => {
+    queue('ac_session', { data: { ac_session_id: SESSION_ID, status: 'completed' }, error: null });
+
+    const response = await POST(
+      req({ userStoryId: 'story-1', submittedText: 'Given...', sessionId: SESSION_ID }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(h.state.inserts).toHaveLength(0);
+  });
+
+  it('returns 409 when submitting a story out of order', async () => {
+    queueSession({
+      sessionStories: [
+        { position: 1, user_story_id: 'story-1' },
+        { position: 2, user_story_id: 'story-2' },
+      ],
+    });
+
+    // story-1 hasn't been answered yet, so story-2 is out of order.
+    const response = await POST(
+      req({ userStoryId: 'story-2', submittedText: 'Given...', sessionId: SESSION_ID }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.error).toMatch(/story 1/);
+    expect(h.state.inserts).toHaveLength(0);
+  });
+
   it('returns 404 when the user story does not exist', async () => {
+    queueSession();
     queueLookups({ story: null });
 
-    const response = await POST(req({ userStoryId: 'missing-story', submittedText: 'Given...' }));
+    const response = await POST(
+      req({ userStoryId: 'story-1', submittedText: 'Given...', sessionId: SESSION_ID }),
+    );
 
     expect(response.status).toBe(404);
     expect(h.state.inserts).toHaveLength(0);
   });
 
   it('returns 500 when the user story lookup errors', async () => {
+    queueSession();
     queue('user_story', { data: null, error: { message: 'db down' } });
 
-    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'Given...' }));
+    const response = await POST(
+      req({ userStoryId: 'story-1', submittedText: 'Given...', sessionId: SESSION_ID }),
+    );
 
     expect(response.status).toBe(500);
   });
 
   it('returns 500 when the story creator has no LLM provider configured', async () => {
+    queueSession();
     queueLookups({ config: null });
 
-    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'Given...' }));
+    const response = await POST(
+      req({ userStoryId: 'story-1', submittedText: 'Given...', sessionId: SESSION_ID }),
+    );
     const body = await response.json();
 
     expect(response.status).toBe(500);
@@ -179,10 +268,11 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
   });
 
   it('looks up instructor_llm_config filtered by the story creator, not a global flag', async () => {
+    queueSession();
     queueLookups();
     mockProvider({ score: 8, feedback: 'ok' });
 
-    await POST(req({ userStoryId: 'story-1', submittedText: 'Given...' }));
+    await POST(req({ userStoryId: 'story-1', submittedText: 'Given...', sessionId: SESSION_ID }));
 
     expect(h.state.filters).toContainEqual({
       table: 'instructor_llm_config',
@@ -195,43 +285,54 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
   });
 
   it('passes the config row\'s provider, api_key, and model to getLLMProvider', async () => {
+    queueSession();
     queueLookups();
     mockProvider({ score: 8, feedback: 'ok' });
 
-    await POST(req({ userStoryId: 'story-1', submittedText: 'Given...' }));
+    await POST(req({ userStoryId: 'story-1', submittedText: 'Given...', sessionId: SESSION_ID }));
 
     expect(getLLMProvider).toHaveBeenCalledWith(CONFIG.provider, CONFIG.api_key, CONFIG.model);
   });
 
   it('returns 500 when the config lookup errors', async () => {
+    queueSession();
     queue('user_story', { data: STORY, error: null });
     queue('instructor_llm_config', { data: null, error: { message: 'db down' } });
 
-    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'Given...' }));
+    const response = await POST(
+      req({ userStoryId: 'story-1', submittedText: 'Given...', sessionId: SESSION_ID }),
+    );
 
     expect(response.status).toBe(500);
   });
 
   it('returns 500 when the configured provider name is invalid', async () => {
+    queueSession();
     queueLookups({ config: { provider: 'NOT_A_PROVIDER', api_key: 'sk-test', model: 'x' } });
 
-    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'Given...' }));
+    const response = await POST(
+      req({ userStoryId: 'story-1', submittedText: 'Given...', sessionId: SESSION_ID }),
+    );
 
     expect(response.status).toBe(500);
     expect(h.state.inserts).toHaveLength(0);
   });
 
   it('returns 500 when the provider factory returns null (missing api key)', async () => {
+    queueSession();
     queueLookups({ config: { provider: 'CLAUDE', api_key: '', model: 'claude-opus-5' } });
     vi.mocked(getLLMProvider).mockReturnValue(null);
 
-    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'Given...' }));
+    const response = await POST(
+      req({ userStoryId: 'story-1', submittedText: 'Given...', sessionId: SESSION_ID }),
+    );
 
     expect(response.status).toBe(500);
     expect(h.state.inserts).toHaveLength(0);
   });
 
   it('inserts the submission with null grading columns before calling the LLM', async () => {
+    queueSession();
     queueLookups();
     let insertsAtCallTime = -1;
     const rateAcceptanceCriteria = vi.fn().mockImplementation(async () => {
@@ -240,7 +341,13 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
     });
     vi.mocked(getLLMProvider).mockReturnValue({ rateAcceptanceCriteria });
 
-    await POST(req({ userStoryId: 'story-1', submittedText: 'Given a user, when they log in...' }));
+    await POST(
+      req({
+        userStoryId: 'story-1',
+        submittedText: 'Given a user, when they log in...',
+        sessionId: SESSION_ID,
+      }),
+    );
 
     expect(insertsAtCallTime).toBe(1);
     const submissionInsert = h.state.inserts.find((i) => i.table === 'submission')!
@@ -249,6 +356,7 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
       user_id: 'user-123',
       user_story_id: 'story-1',
       submitted_text: 'Given a user, when they log in...',
+      ac_session_id: SESSION_ID,
     });
     expect(submissionInsert.submission_id).toEqual(expect.any(String));
     expect(submissionInsert).not.toHaveProperty('llm_score');
@@ -261,21 +369,27 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
   });
 
   it('returns 500 when the submission insert fails', async () => {
+    queueSession();
     queue('user_story', { data: STORY, error: null });
     queue('instructor_llm_config', { data: CONFIG, error: null });
     queue('submission', { data: null, error: { message: 'insert failed' } });
     mockProvider({ score: 8, feedback: 'ok' });
 
-    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'Given...' }));
+    const response = await POST(
+      req({ userStoryId: 'story-1', submittedText: 'Given...', sessionId: SESSION_ID }),
+    );
 
     expect(response.status).toBe(500);
   });
 
   it('returns 502 when the provider call throws', async () => {
+    queueSession();
     queueLookups();
     mockProvider(new Error('upstream timeout'));
 
-    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'Given...' }));
+    const response = await POST(
+      req({ userStoryId: 'story-1', submittedText: 'Given...', sessionId: SESSION_ID }),
+    );
     const body = await response.json();
 
     expect(response.status).toBe(502);
@@ -283,11 +397,16 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
   });
 
   it('updates the submission with the graded result and returns 200', async () => {
+    queueSession();
     queueLookups();
     mockProvider({ score: 9, feedback: 'Clear and testable.' });
 
     const response = await POST(
-      req({ userStoryId: 'story-1', submittedText: 'Given a user, when they log in...' }),
+      req({
+        userStoryId: 'story-1',
+        submittedText: 'Given a user, when they log in...',
+        sessionId: SESSION_ID,
+      }),
     );
     const body = await response.json();
 
@@ -296,6 +415,12 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
       submissionId: expect.any(String),
       score: 9,
       feedback: 'Clear and testable.',
+      // Session has only one story (story-1, now submitted) — nothing left to point at, and
+      // fewer than STORIES_PER_SESSION submissions exist, so the session isn't complete yet.
+      sessionCompleted: false,
+      nextStoryId: null,
+      totalScore: null,
+      averageScore: null,
     });
 
     const update = h.state.updates.find((u) => u.table === 'submission')!
@@ -309,13 +434,16 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
   });
 
   it('returns 500 when the post-grading update fails', async () => {
+    queueSession();
     queue('user_story', { data: STORY, error: null });
     queue('instructor_llm_config', { data: CONFIG, error: null });
     queue('submission', { data: null, error: null });
     queue('submission', { data: null, error: { message: 'update failed' } });
     mockProvider({ score: 8, feedback: 'ok' });
 
-    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'Given...' }));
+    const response = await POST(
+      req({ userStoryId: 'story-1', submittedText: 'Given...', sessionId: SESSION_ID }),
+    );
 
     expect(response.status).toBe(500);
   });

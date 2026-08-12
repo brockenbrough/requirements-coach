@@ -6,6 +6,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 type UserStoryRow = { user_story_id: string; story_text: string; creator_id: string };
 type LLMConfigRow = { provider: string; api_key: string; model: string };
 
+/**
+ * Hard cap on submittedText, enforced before any DB write or LLM call. Without this, a caller
+ * could pay for (and make the instructor's provider pay for) an arbitrarily large completion by
+ * submitting an arbitrarily large prompt — this is a coarse token-cost bound, not a UX limit.
+ */
+const MAX_SUBMITTED_TEXT_LENGTH = 5000;
+
 function getToken(request: Request): string | null {
   const auth = request.headers.get("Authorization");
   return auth?.startsWith("Bearer ") ? auth.slice(7) : null;
@@ -53,12 +60,17 @@ async function findNextStory(
  * the LLM call runs, then the row is updated. A crash between insert and update leaves an
  * ungraded row rather than a graded answer that was never recorded.
  *
- * When sessionId is provided (GitHub #256):
+ * sessionId is required (GitHub #256, cost/abuse fix): every graded submission must belong to
+ * a real, validated session, so this route can never be reduced to "auth check + unthrottled
+ * LLM call". The session checks below always run:
  *   - Validates the session is in-progress and belongs to this student.
  *   - Enforces sequential order: only the next unanswered story may be submitted. Attempting
  *     a story the student hasn't reached yet returns 409.
  *   - After grading, checks whether all four stories are now answered. If so, marks the
  *     session completed and returns sessionCompleted: true with the totals.
+ * A session only ever admits STORIES_PER_SESSION graded submissions (one per story, ever —
+ * uq_submission_session_user_story-equivalent enforcement via the sequential-order check plus
+ * "already completed" 409), which is what actually bounds LLM spend per session.
  */
 export async function POST(request: Request) {
   const token = getToken(request);
@@ -85,6 +97,17 @@ export async function POST(request: Request) {
     return Response.json({ error: "submittedText is required." }, { status: 400 });
   }
 
+  if (submittedText.length > MAX_SUBMITTED_TEXT_LENGTH) {
+    return Response.json(
+      { error: `submittedText must be ${MAX_SUBMITTED_TEXT_LENGTH} characters or fewer.` },
+      { status: 400 },
+    );
+  }
+
+  if (typeof sessionId !== "string" || sessionId.trim() === "") {
+    return Response.json({ error: "sessionId is required." }, { status: 400 });
+  }
+
   const supabase = getSupabaseClient();
   if (!supabase)
     return Response.json({ error: "Supabase credentials are not configured." }, { status: 500 });
@@ -93,37 +116,33 @@ export async function POST(request: Request) {
   if (authError || !user)
     return Response.json({ error: "Invalid or expired token." }, { status: 401 });
 
-  const resolvedSessionId: string | null = typeof sessionId === "string" ? sessionId : null;
+  // Validate the session belongs to this student and is still open.
+  const { data: session, error: sessionError } = await supabase
+    .from("ac_session")
+    .select("ac_session_id, status")
+    .eq("ac_session_id", sessionId)
+    .eq("user_id", user.id)
+    .maybeSingle();
 
-  if (resolvedSessionId) {
-    // Validate the session belongs to this student and is still open.
-    const { data: session, error: sessionError } = await supabase
-      .from("ac_session")
-      .select("ac_session_id, status")
-      .eq("ac_session_id", resolvedSessionId)
-      .eq("user_id", user.id)
-      .maybeSingle();
+  if (sessionError) return Response.json({ error: sessionError.message }, { status: 500 });
+  if (!session) return Response.json({ error: "Session not found." }, { status: 404 });
+  if (session.status === "completed") {
+    return Response.json({ error: "This session is already completed." }, { status: 409 });
+  }
 
-    if (sessionError) return Response.json({ error: sessionError.message }, { status: 500 });
-    if (!session) return Response.json({ error: "Session not found." }, { status: 404 });
-    if (session.status === "completed") {
-      return Response.json({ error: "This session is already completed." }, { status: 409 });
-    }
+  // Reject out-of-order submissions — the student must work through stories 1→4.
+  const { next: currentStory, error: nextError } = await findNextStory(supabase, sessionId);
+  if (nextError) return Response.json({ error: nextError }, { status: 500 });
 
-    // Reject out-of-order submissions — the student must work through stories 1→4.
-    const { next: currentStory, error: nextError } = await findNextStory(supabase, resolvedSessionId);
-    if (nextError) return Response.json({ error: nextError }, { status: 500 });
+  if (!currentStory) {
+    return Response.json({ error: "This session is already completed." }, { status: 409 });
+  }
 
-    if (!currentStory) {
-      return Response.json({ error: "This session is already completed." }, { status: 409 });
-    }
-
-    if (userStoryId !== currentStory.userStoryId) {
-      return Response.json(
-        { error: `You must submit story ${currentStory.position} before moving on.` },
-        { status: 409 },
-      );
-    }
+  if (userStoryId !== currentStory.userStoryId) {
+    return Response.json(
+      { error: `You must submit story ${currentStory.position} before moving on.` },
+      { status: 409 },
+    );
   }
 
   const { data: story, error: storyError } = await supabase
@@ -165,7 +184,7 @@ export async function POST(request: Request) {
     user_id: user.id,
     user_story_id: userStoryId,
     submitted_text: submittedText,
-    ac_session_id: resolvedSessionId,
+    ac_session_id: sessionId,
   });
 
   if (insertError) return Response.json({ error: insertError.message }, { status: 500 });
@@ -199,35 +218,33 @@ export async function POST(request: Request) {
   let totalScore: number | null = null;
   let averageScore: number | null = null;
 
-  if (resolvedSessionId) {
-    const { data: allSubmissions, error: countError } = await supabase
-      .from("submission")
-      .select("llm_score, user_story_id")
-      .eq("ac_session_id", resolvedSessionId);
+  const { data: allSubmissions, error: countError } = await supabase
+    .from("submission")
+    .select("llm_score, user_story_id")
+    .eq("ac_session_id", sessionId);
 
-    if (!countError && allSubmissions) {
-      const count = allSubmissions.length;
+  if (!countError && allSubmissions) {
+    const count = allSubmissions.length;
 
-      if (count >= STORIES_PER_SESSION) {
-        const scores = allSubmissions.map((s) => s.llm_score ?? 0);
-        totalScore = scores.reduce((sum, s) => sum + s, 0);
-        averageScore = Math.round(((totalScore ?? 0) / count) * 10) / 10;
+    if (count >= STORIES_PER_SESSION) {
+      const scores = allSubmissions.map((s) => s.llm_score ?? 0);
+      totalScore = scores.reduce((sum, s) => sum + s, 0);
+      averageScore = Math.round(((totalScore ?? 0) / count) * 10) / 10;
 
-        await supabase
-          .from("ac_session")
-          .update({
-            status: "completed",
-            completed_at: new Date().toISOString(),
-            total_score: totalScore,
-          })
-          .eq("ac_session_id", resolvedSessionId);
+      await supabase
+        .from("ac_session")
+        .update({
+          status: "completed",
+          completed_at: new Date().toISOString(),
+          total_score: totalScore,
+        })
+        .eq("ac_session_id", sessionId);
 
-        sessionCompleted = true;
-      } else {
-        // Reuse the helper to avoid repeating the "find next" query logic.
-        const { next } = await findNextStory(supabase, resolvedSessionId);
-        nextStoryId = next?.userStoryId ?? null;
-      }
+      sessionCompleted = true;
+    } else {
+      // Reuse the helper to avoid repeating the "find next" query logic.
+      const { next } = await findNextStory(supabase, sessionId);
+      nextStoryId = next?.userStoryId ?? null;
     }
   }
 
