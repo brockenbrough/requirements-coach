@@ -1,11 +1,4 @@
-function StatTile({ value, label }: { value: number; label: string }) {
-  return (
-    <div className="rounded-brand-lg border border-gray-100 bg-gray-50 p-4 text-center">
-      <div className="text-2xl font-extrabold tabular-nums text-brand-navy">{value.toLocaleString()}</div>
-      <div className="mt-0.5 text-xs font-bold uppercase tracking-wide text-gray-400">{label}</div>
-    </div>
-  );
-}
+import { StatTile } from './StatTile';
 
 /**
  * GitHub #39: the student's standing at a glance — cumulative score plus how many sessions
