@@ -9,6 +9,12 @@ import { EditableField } from '../../components/EditableField';
 import { ImageCropModal } from '../../components/ImageCropModal';
 import { MyCoursesSection } from '../../components/MyCoursesSection';
 import { useUser } from '../../components/UserProvider';
+import {
+  AVATAR_ACCEPT_ATTRIBUTE,
+  AVATAR_MIME_EXTENSIONS,
+  AVATAR_TYPE_ERROR,
+  avatarSizeError,
+} from '../../lib/imageRules';
 import { getInitials } from '../../lib/initials';
 
 type ProfileDraft = {
@@ -210,6 +216,13 @@ export default function ProfilePage() {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
+    // The `accept` attribute is only a filter in the picker dialog; this is the message the user
+    // actually sees. The real gate is POST /api/profile/avatar, which sniffs the bytes.
+    if (!(file.type in AVATAR_MIME_EXTENSIONS)) {
+      setError(AVATAR_TYPE_ERROR);
+      return;
+    }
+    setError('');
     setPendingImage(URL.createObjectURL(file));
   }
 
@@ -220,6 +233,15 @@ export default function ProfilePage() {
 
   async function handleCropSave(croppedBlob: Blob) {
     if (!token) return;
+    // Checked on the cropped JPEG rather than on the picked file: that blob is what gets uploaded,
+    // and getCroppedImageBlob caps it at MAX_AVATAR_EDGE_PX, so a large source is fine.
+    const sizeError = avatarSizeError(croppedBlob.size);
+    if (sizeError) {
+      setError(sizeError);
+      if (pendingImage) URL.revokeObjectURL(pendingImage);
+      setPendingImage(null);
+      return;
+    }
     setUploading(true);
     setError('');
     const formData = new FormData();
@@ -373,7 +395,7 @@ export default function ProfilePage() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*"
+                accept={AVATAR_ACCEPT_ATTRIBUTE}
                 className="hidden"
                 onChange={handleAvatarChange}
               />
