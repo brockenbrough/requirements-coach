@@ -11,7 +11,12 @@ import {
   type StudentActivitySummary,
   type StudentAggregate,
 } from '../../../lib/activityLogTypes';
-import { loadInstructorActivities, loadInstructorStudents, type InstructorActivityEntry } from '../../../lib/sessionClient';
+import {
+  loadInstructorActivities,
+  loadInstructorStudents,
+  type InstructorActivityEntry,
+  type StudentSummary,
+} from '../../../lib/sessionClient';
 import { useRequireRole } from '../../../lib/useRequireRole';
 
 const PAGE_SIZE = 9;
@@ -32,13 +37,15 @@ function compareByScore(a: StudentAggregate, b: StudentAggregate, direction: 1 |
  * summarizeStudents aggregation, but paginated and with its own search/sort so an instructor can
  * find one specific student directly instead of scrolling.
  *
- * Only students who have attempted something appear — the roster is derived from attempts
- * (GitHub #171), so an enrolled student who never started an activity has no row to aggregate.
+ * Unlike the dashboard's preview, this page shows the *whole* class (GitHub #175): the attempt
+ * timeline is merged with the roster from GET /api/instructor/students, so a student who has
+ * never started an activity still gets a row (0 attempts, no average) instead of vanishing.
  */
 export default function AllStudentsPage() {
   const { token, profile, loading, authorized } = useRequireRole('instructor');
 
   const [entries, setEntries] = useState<StudentActivitySummary[] | null>(null);
+  const [roster, setRoster] = useState<StudentSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [query, setQuery] = useState('');
@@ -68,13 +75,27 @@ export default function AllStudentsPage() {
     if (!token || !profile?.user_id) return;
     let cancelled = false;
     loadInstructorStudents(token, profile.user_id).then((result) => {
-      if (cancelled || !result.ok) return;
-      // Warms the cache so repeat visits don't re-fetch the full roster.
+      if (cancelled) return;
+      // A failed roster degrades to the attempts-only list rather than blanking the page — the
+      // students with attempts are the ones an instructor is usually here for. [] keeps the
+      // loading gate below from waiting forever.
+      setRoster(result.ok ? result.data.students : []);
     });
     return () => { cancelled = true; };
   }, [token, profile?.user_id]);
 
-  const allStudents = useMemo(() => summarizeStudents(entries ?? []), [entries]);
+  // Same name composition as the dashboard's student filter, so one student reads identically
+  // on both pages whether or not they have attempted anything.
+  const rosterEntries = useMemo(
+    () =>
+      (roster ?? []).map((student) => ({
+        studentId: student.userId,
+        studentName: `${student.firstName} ${student.lastName}`.trim() || student.username,
+      })),
+    [roster],
+  );
+
+  const allStudents = useMemo(() => summarizeStudents(entries ?? [], rosterEntries), [entries, rosterEntries]);
 
   const filteredSorted = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -138,7 +159,9 @@ export default function AllStudentsPage() {
           <p className="mb-6 rounded-brand-lg border border-brand-danger/40 bg-brand-danger/10 p-4 text-sm font-semibold text-brand-danger-light">
             {error}
           </p>
-        ) : entries === null ? (
+        ) : entries === null || roster === null ? (
+          // Both are load-bearing: rendering on `entries` alone would show the list once without
+          // the zero-attempt students and then have it jump when the roster lands.
           <p className="mb-6 text-sm font-semibold text-gray-500">Loading…</p>
         ) : (
           <>
@@ -173,8 +196,8 @@ export default function AllStudentsPage() {
             {pageStudents.length === 0 ? (
               <p className="rounded-brand-lg border border-gray-100 bg-gray-50 p-6 text-center text-sm font-semibold text-gray-500">
                 {/* An empty class and a search that matched nothing are different states now that
-                    the roster is real — only students with at least one attempt appear here. */}
-                {query ? `No students match "${query}".` : 'No student has attempted an activity yet.'}
+                    the roster is real — this list is the class itself, not just who has attempted. */}
+                {query ? `No students match "${query}".` : 'No students in this class yet.'}
               </p>
             ) : (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
