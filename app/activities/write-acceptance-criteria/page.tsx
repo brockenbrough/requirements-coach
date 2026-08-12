@@ -8,6 +8,7 @@ import { AcceptanceCriteriaFeedbackScreen } from '../../../components/Acceptance
 import { AcceptanceCriteriaWritingScreen } from '../../../components/AcceptanceCriteriaWritingScreen';
 import { AcceptanceCriteriaWritingScreenSkeleton } from '../../../components/AcceptanceCriteriaWritingScreenSkeleton';
 import { ResumeOrAbandonPrompt } from '../../../components/ResumeOrAbandonPrompt';
+import { SessionProgressDots, type ProgressDotStatus } from '../../../components/SessionProgressDots';
 import { drawSessionStories, submitAcceptanceCriteria } from '../../../lib/acceptanceCriteriaClient';
 import type { AcceptanceCriteriaResult, UserStoryPrompt } from '../../../lib/acceptanceCriteriaTypes';
 import {
@@ -148,6 +149,21 @@ export default function WriteAcceptanceCriteriaPage() {
   const storyPosition = currentIndex >= 0 ? currentIndex + 1 : 0;
   const isLastStory = session ? currentIndex === session.stories.length - 1 : false;
 
+  // GitHub #261: mirrors Type A's dot row (app/activities/[slug]/play/page.tsx, GitHub #236),
+  // but a submitted story only ever reaches "done" — there is no immediate right/wrong here,
+  // grading is an async LLM call (GitHub #149), so no dot is ever "correct"/"incorrect". Once
+  // the last story's result lands, every dot flips to "done" in the same render — including
+  // while its own feedback is still on screen — so the indicator reads as "session finished"
+  // before the student even clicks Finish, per the issue's explicit completion requirement.
+  const allStoriesComplete = session ? isSessionComplete(session) : false;
+  const dotStatuses: ProgressDotStatus[] = session
+    ? session.stories.map((story, i) => {
+        if (allStoriesComplete) return 'done';
+        if (i === currentIndex) return 'current';
+        return story.result !== null ? 'done' : 'upcoming';
+      })
+    : [];
+
   return (
     <AppShell active="activities">
       <div className="mx-auto max-w-xl">
@@ -155,14 +171,18 @@ export default function WriteAcceptanceCriteriaPage() {
           ← Back to Activities
         </Link>
 
-        <div className="mb-5 flex items-center justify-between">
-          <h3 className="text-lg font-extrabold">Write Acceptance Criteria</h3>
-          {!isLoading && !loadFailed && !showPrompt && session ? (
-            <span className="text-sm font-extrabold text-gray-500">
-              Story {storyPosition} of {STORIES_PER_SESSION}
+        <h3 className="mb-5 text-lg font-extrabold">Write Acceptance Criteria</h3>
+
+        {!isLoading && !loadFailed && !showPrompt && session ? (
+          <div className="mb-5 flex items-center justify-between">
+            <SessionProgressDots statuses={dotStatuses} />
+            <span className="text-sm font-bold text-gray-500">
+              {allStoriesComplete
+                ? `${STORIES_PER_SESSION} of ${STORIES_PER_SESSION} complete`
+                : `Story ${storyPosition} of ${STORIES_PER_SESSION}`}
             </span>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
 
         {isLoading ? (
           <AcceptanceCriteriaWritingScreenSkeleton />
