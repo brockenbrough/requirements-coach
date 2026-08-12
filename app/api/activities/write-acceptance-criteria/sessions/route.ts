@@ -93,9 +93,12 @@ export async function GET(request: Request) {
  * resumes the one already in progress (GitHub #254).
  *
  * On start: selects STORIES_PER_SESSION random user stories and records them in
- * ac_session_story (positions 1–4). Returns 503 when the story pool is too small.
+ * ac_session_story (positions 1–4) so every subsequent request in this session works from
+ * the same fixed set. Returns 503 when the story pool is too small to fill a session.
  *
- * On resume: returns the existing in-progress session with resumed: true (200).
+ * On resume: returns the existing in-progress session unchanged with resumed: true. A 200
+ * here is not an error — the client uses resumed to decide whether to show a "continuing
+ * where you left off" message rather than a "session started" one.
  *
  * Returns 201 { sessionId, storyIds, resumed: false } on start.
  * Returns 200 { sessionId, storyIds, resumed: true } on resume.
@@ -110,6 +113,7 @@ export async function POST(request: Request) {
   const { data: { user }, error: authError } = await supabase.auth.getUser(token);
   if (authError || !user) return Response.json({ error: 'Invalid or expired token.' }, { status: 401 });
 
+  // Resume path: return the existing in-progress session with its stories.
   const { data: existing, error: existingError } = await supabase
     .from('ac_session')
     .select('ac_session_id')
@@ -132,6 +136,7 @@ export async function POST(request: Request) {
     return Response.json({ sessionId: existing.ac_session_id, storyIds, resumed: true }, { status: 200 });
   }
 
+  // Start path: need at least STORIES_PER_SESSION stories in the pool.
   const { data: allStories, error: storiesError } = await supabase
     .from('user_story')
     .select('user_story_id');
@@ -166,6 +171,7 @@ export async function POST(request: Request) {
   const { error: linkError } = await supabase.from('ac_session_story').insert(storyRows);
 
   if (linkError) {
+    // Clean up the orphaned session so the student can try again.
     await supabase.from('ac_session').delete().eq('ac_session_id', sessionId);
     return Response.json({ error: linkError.message }, { status: 500 });
   }

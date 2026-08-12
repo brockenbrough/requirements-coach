@@ -3,26 +3,28 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { StudentCourseCard } from '../../components/StudentCourseCard';
-import { loadCourses, type Course } from '../../lib/mockCourses';
+import { loadJoinableCourses } from '../../lib/studentCourseClient';
+import type { JoinableCourse } from '../../lib/courseTypes';
 import { useRequireRole } from '../../lib/useRequireRole';
 
 /**
  * GitHub #242 (UI-2): browse every available course and join one — the expanded version of
- * "Join Course" the issue asks for, a full page instead of a bare code-entry modal. Backend
- * (API-2) doesn't exist yet, so this runs on lib/mockCourses.ts; see that file's header for
- * what a real integration needs to swap in (notably: a student-facing GET /api/courses, not
- * reusing the instructor-scoped one this mock's loadCourses stands in for either way).
+ * "Join Course" the issue asks for, a full page instead of a bare code-entry modal. Real now
+ * (lib/studentCourseClient.ts, REQ-DL-5): GET /api/courses lists courses with a code
+ * (course_code IS NOT NULL) but never the code itself — that's a secret the instructor hands
+ * out directly, so joining (StudentCourseCard) is a manual code-entry step, not a click on
+ * something already visible here. Each course's alreadyMember flag is already scoped to this
+ * student server-side.
  */
 export default function BrowseCoursesPage() {
   // Also redirects an instructor account away (GitHub #82) — joining a course as a student is
   // not something an instructor account does.
   const { token, profile, loading, authorized } = useRequireRole('student');
 
-  const [courses, setCourses] = useState<Course[] | null>(null);
+  const [courses, setCourses] = useState<JoinableCourse[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
 
-  const [codeQuery, setCodeQuery] = useState('');
   const [nameQuery, setNameQuery] = useState('');
   const [professorQuery, setProfessorQuery] = useState('');
 
@@ -32,7 +34,7 @@ export default function BrowseCoursesPage() {
 
     setLoadFailed(false);
 
-    loadCourses(token).then((result) => {
+    loadJoinableCourses(token).then((result) => {
       if (cancelled) return;
       if (result.ok) setCourses(result.data.courses);
       else setLoadFailed(true);
@@ -43,28 +45,27 @@ export default function BrowseCoursesPage() {
     };
   }, [token, retryCount]);
 
-  // Three independent, always-combinable filters (AND, not OR) — matches the Activity Log's
+  // Two independent, always-combinable filters (AND, not OR) — matches the Activity Log's
   // filter row (components/ActivityFilters.tsx): each field narrows the list on its own,
-  // client-side, as soon as the mock course list is in hand.
+  // client-side, as soon as the course list is in hand. No code filter — the code is never in
+  // this response (see the file header), so there's nothing here to search it by.
   const filtered = useMemo(() => {
     if (!courses) return [];
-    const code = codeQuery.trim().toLowerCase();
     const name = nameQuery.trim().toLowerCase();
     const professor = professorQuery.trim().toLowerCase();
 
     return courses.filter(
       (course) =>
-        (!code || course.code.toLowerCase().includes(code)) &&
         (!name || course.name.toLowerCase().includes(name)) &&
         (!professor || course.professorName.toLowerCase().includes(professor)),
     );
-  }, [courses, codeQuery, nameQuery, professorQuery]);
+  }, [courses, nameQuery, professorQuery]);
 
   if (loading || !authorized) return null;
   if (!token || !profile) return null;
 
-  function handleJoined(updated: Course) {
-    setCourses((current) => current?.map((c) => (c.id === updated.id ? updated : c)) ?? current);
+  function handleJoined(courseId: string) {
+    setCourses((current) => current?.map((c) => (c.id === courseId ? { ...c, alreadyMember: true } : c)) ?? current);
   }
 
   return (
@@ -72,20 +73,10 @@ export default function BrowseCoursesPage() {
       <div className="mx-auto max-w-4xl">
         <h1 className="mb-1.5 text-2xl font-extrabold text-brand-navy">Courses</h1>
         <p className="mb-6 max-w-2xl text-sm font-semibold text-gray-500">
-          Find your professor&apos;s course by code, name, or their name, and join with one click.
+          Find your professor&apos;s course by name, then enter the code they gave you to join.
         </p>
 
         <div className="mb-5 flex flex-wrap gap-4">
-          <label className="block text-xs font-extrabold uppercase tracking-wide text-gray-400">
-            Course code
-            <input
-              type="text"
-              value={codeQuery}
-              onChange={(event) => setCodeQuery(event.target.value)}
-              placeholder="e.g. FALL26"
-              className="mt-1 block w-40 rounded-brand-md border border-gray-300 bg-white px-3.5 py-2 text-sm font-bold text-gray-600 outline-none transition focus:border-brand-purple"
-            />
-          </label>
           <label className="block text-xs font-extrabold uppercase tracking-wide text-gray-400">
             Course name
             <input
@@ -128,7 +119,7 @@ export default function BrowseCoursesPage() {
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {filtered.map((course) => (
-              <StudentCourseCard key={course.id} course={course} token={token} studentId={profile.user_id} onJoined={handleJoined} />
+              <StudentCourseCard key={course.id} course={course} token={token} onJoined={handleJoined} />
             ))}
           </div>
         )}

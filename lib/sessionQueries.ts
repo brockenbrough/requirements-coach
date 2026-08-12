@@ -387,6 +387,60 @@ export async function loadAllStudentActivity(supabase: SupabaseClient) {
 }
 
 /**
+ * Every attempt belonging to a specific set of students, newest first — the sibling
+ * loadAllStudentActivity needs for a course roster (app/api/instructor/courses/[id]/route.ts,
+ * REQ-DL-5): that function has no id filter at all, only a class-wide role scope, so a course
+ * with a handful of enrolled students would otherwise mean fetching every student's activity
+ * and filtering client-side. Same SESSION_COLUMNS/STUDENT_EMBED/progress-lookup/studentDisplayName
+ * pipeline as loadAllStudentActivity, just scoped by .in('user_id', …) instead of role.
+ *
+ * studentIds is expected to already be trusted (e.g. drawn from student_course, which only ever
+ * gets real students inserted into it) — this does not re-check role. An empty list short-
+ * circuits before querying: .in('user_id', []) is not something to rely on Postgrest for, and a
+ * course with zero enrolled students has nothing to fetch anyway.
+ */
+export async function loadStudentActivityForIds(supabase: SupabaseClient, studentIds: string[]) {
+  if (studentIds.length === 0) return { activities: [] as InstructorActivityEntry[], error: null };
+
+  const { data, error } = await supabase
+    .from('session_log')
+    .select(`${SESSION_COLUMNS}, ${STUDENT_EMBED}`)
+    .in('user_id', studentIds)
+    .order('ended_at', { ascending: false })
+    .order('started_at', { ascending: false });
+
+  if (error) return { activities: null, error };
+
+  type SessionRow = Omit<ActivityLogRow, 'questionCount' | 'answeredCount' | 'nextPosition'> & {
+    student: EmbeddedStudent;
+  };
+
+  const rows = (data ?? []) as unknown as SessionRow[];
+
+  const { progress, error: progressError } = await loadProgressForSessions(
+    supabase,
+    rows.map((row) => row.session_id),
+  );
+
+  if (progressError) return { activities: null, error: progressError };
+
+  const activities: InstructorActivityEntry[] = rows.map(({ student, ...session }) => {
+    const sessionProgress = progress!.get(session.session_id);
+
+    return {
+      ...session,
+      questionCount: sessionProgress?.questionCount ?? 0,
+      answeredCount: sessionProgress?.answeredCount ?? 0,
+      nextPosition: sessionProgress?.nextPosition ?? null,
+      studentId: session.user_id,
+      studentName: studentDisplayName(student),
+    };
+  });
+
+  return { activities, error: null };
+}
+
+/**
  * Every session_log record belonging to a student, class-wide (GitHub #115) — the leaner
  * counterpart to loadAllStudentActivity (#171): same STUDENT_EMBED join and role = 'student'
  * scope, but no loadProgressForSessions call, since this endpoint's AC (student, activity,

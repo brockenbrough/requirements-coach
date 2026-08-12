@@ -480,7 +480,7 @@ export default function ProfilePage() {
             {/* GitHub #242 (UI-2): a course concept only exists for students right now — an
                 instructor manages courses from /instructor/courses instead, so this doesn't
                 apply to their profile. */}
-            {!isInstructor ? <MyCoursesSection token={token} studentId={profile.user_id} /> : null}
+            {!isInstructor ? <MyCoursesSection token={token} /> : null}
           </>
         )}
       </section>

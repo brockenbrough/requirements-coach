@@ -57,6 +57,40 @@ export function loadUserStory(
   );
 }
 
+/**
+ * GitHub #260: draws `count` *distinct* stories for a new local session
+ * (lib/acceptanceCriteriaSessionStore.ts) — the Type A equivalent of the four questions
+ * POST /api/sessions draws in one server-side call, but GET .../user-story has no batch or
+ * exclude-list form, so this calls it repeatedly and de-duplicates client-side instead.
+ *
+ * Falls back to allowing a repeat once the retry budget is used up, rather than failing the
+ * whole session, in case the story bank has fewer than `count` rows.
+ */
+export async function drawSessionStories(
+  token: string,
+  count: number,
+): Promise<ApiResult<UserStoryPrompt[]>> {
+  const stories: UserStoryPrompt[] = [];
+  const seen = new Set<string>();
+  const maxAttempts = count * 4;
+
+  for (let attempt = 0; attempt < maxAttempts && stories.length < count; attempt++) {
+    const result = await loadUserStory(token);
+    if (!result.ok) return result;
+    if (seen.has(result.data.userStoryId)) continue;
+    seen.add(result.data.userStoryId);
+    stories.push(result.data);
+  }
+
+  while (stories.length < count) {
+    const result = await loadUserStory(token);
+    if (!result.ok) return result;
+    stories.push(result.data);
+  }
+
+  return { ok: true, data: stories };
+}
+
 export type InstructorACSubmission = {
   submissionId: string;
   studentId: string;

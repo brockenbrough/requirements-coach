@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AppShell } from "../../../../components/AppShell";
 import { FeedbackCard } from "../../../../components/FeedbackCard";
 import { QuestionCard } from "../../../../components/QuestionCard";
+import { SessionProgressDots, type ProgressDotStatus } from "../../../../components/SessionProgressDots";
 import { getActivity } from "../../../../lib/activityContent";
 import {
   type CurrentSessionResult,
@@ -232,34 +233,21 @@ export default function PlayActivityPage({
   // the API already returned questions in position order — dot i must line up with position i+1
   // for the per-question correctness lookup below to point at the right answer.
   const dotQuestions = [...questions].sort((a, b) => a.position - b.position);
+  const dotStatuses: ProgressDotStatus[] = dotQuestions.map((question, i) => {
+    if (i === answeredDots) return "current";
+    if (i >= answeredDots) return "upcoming";
+    // GitHub #236: correctness for an already-answered question comes from session.answers —
+    // kept accurate across "Next question" clicks by handleContinue above, so no separate
+    // per-question tracking is needed here.
+    const isCorrect = session.answers.find((a) => a.question_id === question.question_id)?.correct === true;
+    return isCorrect ? "correct" : "incorrect";
+  });
 
   return (
     <AppShell active="activities">
       <div className="mx-auto max-w-xl">
         <div className="mb-5 flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            {dotQuestions.map((question, i) => {
-              const isCurrent = i === answeredDots;
-              const isAnswered = i < answeredDots;
-              // GitHub #236: correctness for an already-answered question comes from
-              // session.answers — kept accurate across "Next question" clicks by handleContinue
-              // above, so no separate per-question tracking is needed here.
-              const isCorrect = isAnswered && session.answers.find((a) => a.question_id === question.question_id)?.correct === true;
-
-              return (
-                <span
-                  key={question.question_id}
-                  className={`rounded-full transition-all duration-300 ${
-                    isCurrent
-                      ? "h-3 w-3 bg-brand-purple"
-                      : isAnswered
-                        ? `h-2 w-2 ${isCorrect ? "bg-brand-green" : "bg-brand-danger"}`
-                        : "h-2 w-2 bg-brand-navy-border"
-                  }`}
-                />
-              );
-            })}
-          </div>
+          <SessionProgressDots statuses={dotStatuses} />
           <span className="text-sm font-bold text-gray-500">
             Question {Math.min(answeredDots + 1, totalQuestions)} of{" "}
             {totalQuestions} · {cumulativeScore} pts

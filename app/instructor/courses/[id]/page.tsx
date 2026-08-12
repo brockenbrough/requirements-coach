@@ -1,19 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AppShell } from '../../../../components/AppShell';
 import { AddStudentForm } from '../../../../components/AddStudentForm';
 import { CopyCodeButton } from '../../../../components/CopyCodeButton';
 import { CourseStudentList } from '../../../../components/CourseStudentList';
 import { EditCourseModal } from '../../../../components/EditCourseModal';
-import {
-  getMockCourseStudent,
-  loadCourse,
-  removeStudentFromCourse,
-  type Course,
-  type MockCourseStudent,
-} from '../../../../lib/mockCourses';
+import { loadCourse, removeStudentFromCourse, type CourseDetail, type CourseStudent } from '../../../../lib/courseClient';
 import { useRequireRole } from '../../../../lib/useRequireRole';
 
 function EditIcon() {
@@ -25,26 +19,17 @@ function EditIcon() {
   );
 }
 
-function LockIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-      <rect x="5" y="11" width="14" height="9" rx="2" />
-      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
-    </svg>
-  );
-}
-
 /**
- * GitHub #241 follow-up: one course's detail view — code + roster management. Backend doesn't
- * exist yet, so this runs on lib/mockCourses.ts; see that file's header for what a real
- * integration needs to swap in.
+ * GitHub #241 follow-up: one course's detail view — code + roster management. Fully real
+ * (lib/courseClient.ts, REQ-DL-5): GET /api/instructor/courses/{id} already embeds the roster
+ * with attempt/score summaries, so there's no separate per-student lookup here.
  */
 export default function CourseDetailPage({ params }: { params: { id: string } }) {
   // Same guard as every other /instructor/* page (GitHub #82/#169) — a student hitting this
   // URL directly is redirected, never shown the roster or edit/remove controls.
-  const { token, loading, authorized } = useRequireRole('instructor');
+  const { token, profile, loading, authorized } = useRequireRole('instructor');
 
-  const [course, setCourse] = useState<Course | null>(null);
+  const [course, setCourse] = useState<CourseDetail | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [editModalOpen, setEditModalOpen] = useState(false);
@@ -67,17 +52,10 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
     };
   }, [token, params.id, retryCount]);
 
-  // Resolves enrolled ids into display info — undefined entries (an id with no directory match)
-  // are filtered out rather than rendered as a broken row.
-  const students = useMemo<MockCourseStudent[]>(
-    () => (course?.studentIds ?? []).map((id) => getMockCourseStudent(id)).filter((s): s is MockCourseStudent => Boolean(s)),
-    [course?.studentIds],
-  );
-
   if (loading || !authorized) return null;
-  if (!token) return null;
+  if (!token || !profile) return null;
 
-  async function handleRemove(student: MockCourseStudent) {
+  async function handleRemove(student: CourseStudent) {
     if (!course) return;
     if (!confirm(`Remove ${student.name} from this course?`)) return;
 
@@ -85,8 +63,11 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
     // token is already checked non-null above this point in the render (guards return null
     // otherwise); TS doesn't carry that narrowing into this nested function declaration.
     const result = await removeStudentFromCourse(token!, course.id, student.id);
-    if (result.ok) setCourse(result.data.course);
-    else setError(result.error);
+    if (result.ok) {
+      setCourse((current) => (current ? { ...current, students: current.students.filter((s) => s.id !== student.id) } : current));
+    } else {
+      setError(result.error);
+    }
   }
 
   return (
@@ -116,15 +97,6 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
                 <h1 className="text-2xl font-extrabold text-brand-navy">{course.name}</h1>
                 <div className="mt-1.5 flex flex-wrap items-center gap-2">
                   <span className="text-sm font-semibold tracking-[0.15em] text-brand-purple">{course.code}</span>
-                  {course.enrollmentKey ? (
-                    <span
-                      className="inline-flex items-center gap-1 rounded-full bg-brand-gold/25 px-2.5 py-0.5 text-[11px] font-extrabold text-brand-gold-dark"
-                      title="Students need the enrollment key to join"
-                    >
-                      <LockIcon />
-                      Key required
-                    </span>
-                  ) : null}
                 </div>
               </div>
               <div className="flex flex-none items-center gap-3">
@@ -143,19 +115,20 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
             {error ? <p className="mb-4 text-sm font-semibold text-brand-danger">{error}</p> : null}
 
             <p className="mb-3 text-xs font-extrabold uppercase tracking-wide text-gray-400">
-              Students ({students.length})
+              Students ({course.students.length})
             </p>
             <div className="mb-6">
-              <CourseStudentList students={students} onRemove={handleRemove} />
+              <CourseStudentList students={course.students} onRemove={handleRemove} />
             </div>
 
             <AddStudentForm
               token={token}
-              course={course}
-              enrolledIds={course.studentIds}
-              onAdded={(updated) => {
+              instructorId={profile.user_id}
+              courseId={course.id}
+              enrolledIds={course.students.map((s) => s.id)}
+              onAdded={(student) => {
                 setError('');
-                setCourse(updated);
+                setCourse((current) => (current ? { ...current, students: [...current.students, student] } : current));
               }}
             />
           </>
@@ -167,7 +140,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
           course={course}
           token={token}
           onClose={() => setEditModalOpen(false)}
-          onSaved={(updated) => setCourse(updated)}
+          onSaved={(updated) => setCourse((current) => (current ? { ...current, name: updated.name, code: updated.code } : current))}
         />
       ) : null}
     </AppShell>
