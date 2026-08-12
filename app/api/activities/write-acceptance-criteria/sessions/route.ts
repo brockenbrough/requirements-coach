@@ -9,6 +9,86 @@ function getToken(request: Request): string | null {
 }
 
 /**
+ * GET /api/activities/write-acceptance-criteria/sessions — returns the student's current
+ * session with full progress: all four stories, which have a submission, and which comes
+ * next (GitHub #255).
+ *
+ * Checks in-progress first, then the most recently completed session, so a student who
+ * just finished their last story still sees their results. Returns { session: null } when
+ * no session exists at all — not an error, just means they haven't started yet.
+ *
+ * stories is ordered by position (1–4). nextStoryId is null when all four are answered
+ * or the session is completed.
+ */
+export async function GET(request: Request) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
+
+  const token = getToken(request);
+  if (!token) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+  if (authError || !user) return Response.json({ error: 'Invalid or expired token.' }, { status: 401 });
+
+  // Prefer in-progress; fall back to the most recently completed session so a student who
+  // just finished can still see their results on the same request.
+  const { data: session, error: sessionError } = await supabase
+    .from('ac_session')
+    .select('ac_session_id, status, started_at, completed_at, total_score')
+    .eq('user_id', user.id)
+    .order('started_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (sessionError) return Response.json({ error: sessionError.message }, { status: 500 });
+  if (!session) return Response.json({ session: null }, { status: 200 });
+
+  const sessionId = session.ac_session_id;
+
+  const { data: sessionStories, error: storiesError } = await supabase
+    .from('ac_session_story')
+    .select('position, user_story_id')
+    .eq('ac_session_id', sessionId)
+    .order('position', { ascending: true });
+
+  if (storiesError) return Response.json({ error: storiesError.message }, { status: 500 });
+
+  const { data: submissions, error: submissionsError } = await supabase
+    .from('submission')
+    .select('user_story_id')
+    .eq('ac_session_id', sessionId);
+
+  if (submissionsError) return Response.json({ error: submissionsError.message }, { status: 500 });
+
+  const submittedStoryIds = new Set((submissions ?? []).map((s) => s.user_story_id));
+
+  const stories = (sessionStories ?? []).map((row) => ({
+    position: row.position,
+    userStoryId: row.user_story_id,
+    submitted: submittedStoryIds.has(row.user_story_id),
+  }));
+
+  const nextStory = stories.find((s) => !s.submitted) ?? null;
+  const nextPosition = nextStory?.position ?? null;
+  const nextStoryId = nextStory?.userStoryId ?? null;
+
+  return Response.json({
+    session: {
+      sessionId,
+      status: session.status,
+      startedAt: session.started_at,
+      completedAt: session.completed_at ?? null,
+      totalScore: session.total_score ?? null,
+      submittedCount: submittedStoryIds.size,
+      storiesPerSession: STORIES_PER_SESSION,
+      stories,
+      nextPosition,
+      nextStoryId,
+    },
+  }, { status: 200 });
+}
+
+/**
  * POST /api/activities/write-acceptance-criteria/sessions — starts a new AC session or
  * resumes the one already in progress (GitHub #254).
  *
