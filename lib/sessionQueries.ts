@@ -89,6 +89,10 @@ export async function findInProgressSession(
  * Where a new session for activityType should start: one level past the highest difficulty_level
  * this student has passed for that activity type, capped at MAX_DIFFICULTY_LEVEL. No prior passed
  * session -> START_DIFFICULTY_LEVEL, unchanged.
+ *
+ * This is also the ceiling POST /api/sessions's difficultyLevel replay override validates
+ * against: a student may start at any level up to and including this one (any already-passed
+ * level, or the one they'd auto-advance to anyway), never beyond it.
  */
 export async function findStartDifficultyLevel(
   supabase: SupabaseClient,
@@ -105,9 +109,8 @@ export async function findStartDifficultyLevel(
 
   const highestPassed = highestPassedLevelByType((data ?? []) as PassedSessionRow[]);
   const highestPassedLevel = highestPassed.get(activityType) ?? null;
-  const startLevel = nextDifficultyLevel(highestPassedLevel);
 
-  return { startLevel, error: null };
+  return { startLevel: nextDifficultyLevel(highestPassedLevel), error: null };
 }
 
 /**

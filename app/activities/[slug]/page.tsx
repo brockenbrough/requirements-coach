@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { AppShell } from "../../../components/AppShell";
 import { CompletedAttemptsTable } from "../../../components/CompletedAttemptsTable";
+import { LevelReplaySelector } from "../../../components/LevelReplaySelector";
 import { ResumeOrAbandonPrompt } from "../../../components/ResumeOrAbandonPrompt";
 import { getActivity } from "../../../lib/activityContent";
-import { START_DIFFICULTY_LEVEL } from "../../../lib/sessionRules";
+import { MAX_DIFFICULTY_LEVEL, START_DIFFICULTY_LEVEL, nextDifficultyLevel } from "../../../lib/sessionRules";
 import {
   type CompletedAttempt,
   type CurrentSessionResult,
@@ -25,7 +26,32 @@ const DIFFICULTY_LABEL: Record<number, string> = {
   3: "Hard",
 };
 
-export default function ActivityDetailPage({
+// Easy-to-hard reads green-to-orange, using the existing brand palette (CLAUDE.md's Styling
+// Guidelines) rather than new hex values: brand-green for passing/easy, brand-danger — the
+// closest existing token to orange — for the hardest level, brand-gold bridging the two.
+// Level 2 (Medium) reuses components/ActivityCard.tsx's exact medium classes — a tinted pill
+// with brand-gold (the brighter of the two yellows) as the text, not just gold text on the
+// neutral bg-white/10 the other two levels keep, since plain gold text read too low-contrast
+// against this card's dark background on its own.
+const DIFFICULTY_COLOR: Record<number, string> = {
+  1: "bg-white/10 text-brand-green",
+  2: "bg-[#8A6100]/25 text-brand-gold",
+  3: "bg-white/10 text-brand-danger",
+};
+
+/** A valid 1..MAX_DIFFICULTY_LEVEL integer from the ?level= query param, or null. */
+function parseLevelParam(raw: string | null): number | null {
+  if (!raw) return null;
+  const level = Number(raw);
+  return Number.isInteger(level) && level >= 1 && level <= MAX_DIFFICULTY_LEVEL ? level : null;
+}
+
+/**
+ * Split out because useSearchParams() forces the nearest Suspense boundary to render
+ * client-side — without one, `npm run build` fails prerendering this route (same reason
+ * app/leaderboard/page.tsx is split into a Content component this way).
+ */
+function ActivityDetailContent({
   params,
 }: {
   params: { slug: string };
@@ -36,17 +62,58 @@ export default function ActivityDetailPage({
   const { token, profile, loading, authorized } = useRequireRole('student');
   const activity = getActivity(params.slug);
 
+  // The level ActivityCard was already showing for this activity on the activities list page
+  // (components/ActivityCard.tsx's ?level= link) — used only to seed the first paint below so
+  // it doesn't default to level 1 and then jump once this page's own data has loaded; the effect
+  // further down still recomputes and corrects it from real data once that arrives.
+  const initialLevel = parseLevelParam(useSearchParams().get('level'));
+
   // The server is the only source of "does this activity have a run in progress" (REQ-PL-6.3) —
   // there is no local/mock notion of progress anymore. null means "not checked yet or nothing
   // running", which the render below treats the same as "not started".
   const [current, setCurrent] = useState<CurrentSessionResult | null>(null);
   const [attempts, setAttempts] = useState<CompletedAttempt[] | null>(null);
   const [starting, setStarting] = useState(false);
+  // The level picked in LevelReplaySelector — chosen ahead of time, not acted on until Start is
+  // clicked. Seeded from initialLevel (the list page's own value) rather than null, so the badge
+  // below reads correctly from the very first paint. null still means "nothing replayable yet"
+  // once real data has loaded (no level passed, so Start uses the server's auto-advance level);
+  // once a level becomes selectable there is always exactly one selected and no way to clear it
+  // back to null — see the effect below and LevelReplaySelector's onSelect, which always replaces
+  // the selection rather than toggling it off.
+  const [selectedLevel, setSelectedLevel] = useState<number | null>(initialLevel);
+  const userPickedLevelRef = useRef(false);
   const [abandoning, setAbandoning] = useState(false);
   const [error, setError] = useState<{
     message: string;
     needsProfile: boolean;
   } | null>(null);
+
+  // The highest difficulty level passed so far, derived from the same completed-attempts list
+  // the history table below already renders — no separate fetch needed. 0 means "nothing passed
+  // yet," which LevelReplaySelector reads as "nothing to replay."
+  const highestPassedLevel = attempts
+    ? Math.max(0, ...attempts.filter((attempt) => attempt.passed).map((attempt) => attempt.difficultyLevel))
+    : 0;
+  // The top of the selectable range: every already-passed level, plus the one level beyond that
+  // Start would auto-advance to anyway (POST /api/sessions accepts a replay override up to and
+  // including this exact value — see that route's comment). Always >= 1: a student who hasn't
+  // passed anything yet still has level 1 to show and select (nextDifficultyLevel(null) ===
+  // START_DIFFICULTY_LEVEL), so the selector is never hidden just because nothing's been passed.
+  const highestSelectableLevel = nextDifficultyLevel(highestPassedLevel >= 1 ? highestPassedLevel : null);
+
+  // The next level (one past whatever was last passed) is the default selection — right after
+  // finishing a level, that's what's shown pre-selected; for a student with nothing passed yet,
+  // that's level 1. Gated on attempts !== null rather than highestPassedLevel >= 1 — attempts
+  // starting null (not yet loaded) must not itself count as "confirmed nothing passed" and stomp
+  // initialLevel (the query-param guess) with a premature "level 1" before the real fetch lands.
+  // userPickedLevelRef means this only ever sets the default itself; it never re-asserts itself
+  // over a level the student has since picked.
+  useEffect(() => {
+    if (!userPickedLevelRef.current && attempts !== null) {
+      setSelectedLevel(highestSelectableLevel);
+    }
+  }, [attempts, highestSelectableLevel]);
 
   // Both reads in one pass, because the page re-runs this on every return from /play: the
   // running session decides Start vs. Resume/Abandon, the finished ones fill the history below.
@@ -85,13 +152,16 @@ export default function ActivityDetailPage({
     return null;
   }
 
+  // Starts at selectedLevel when one has been picked via LevelReplaySelector, otherwise the
+  // server's auto-advance level (undefined difficultyLevel) — Start is the only thing that ever
+  // triggers the actual POST; selecting a level just sets what Start will use.
   async function handleStart() {
     if (!token || starting) return;
 
     setStarting(true);
     setError(null);
 
-    const result = await startSession(token, activity!.activityType);
+    const result = await startSession(token, activity!.activityType, { difficultyLevel: selectedLevel ?? undefined });
 
     if (result.ok) {
       // A fresh (or resumed) session now shows up in the activity log too.
@@ -159,10 +229,10 @@ export default function ActivityDetailPage({
   const session = current?.session ?? null;
   const totalQuestions = current?.questions.length ?? 0;
   const answeredCount = current?.answers.length ?? 0;
-  // POST /api/sessions now computes the actual starting level from pass history server-side; this
-  // fallback only covers the moment before a session exists, when there's nothing to read a level
-  // from yet, so it shows the easy-level default rather than guessing what Start would produce.
-  const displayLevel = session?.difficulty_level ?? START_DIFFICULTY_LEVEL;
+  // Before a session exists, show whatever level Start would actually use: the replay level the
+  // student picked, if any, else the easy-level default (POST /api/sessions computes the real
+  // auto-advance level server-side, so this default is only ever a guess for that case).
+  const displayLevel = session?.difficulty_level ?? selectedLevel ?? START_DIFFICULTY_LEVEL;
 
   return (
     <AppShell active="activities">
@@ -176,7 +246,7 @@ export default function ActivityDetailPage({
 
         <div className="rounded-2xl border border-[#332b6b] bg-[#1b1642] p-8 text-[#F3F1FF]">
           <div className="mb-4 flex flex-wrap gap-2">
-            <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-extrabold text-[#2DD4BF]">
+            <span className={`rounded-full px-2.5 py-1 text-xs font-extrabold ${DIFFICULTY_COLOR[displayLevel] ?? "bg-white/10 text-brand-teal"}`}>
               {DIFFICULTY_LABEL[displayLevel] ?? "Level"} · Level {displayLevel}
             </span>
             <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-bold text-[#A79FC9]">
@@ -223,10 +293,36 @@ export default function ActivityDetailPage({
               ) : null}
             </div>
           ) : null}
+
+          {!session ? (
+            <LevelReplaySelector
+              highestSelectableLevel={highestSelectableLevel}
+              selectedLevel={selectedLevel}
+              // A level, once replayable, is always selected — clicking a button switches the
+              // selection, it never clears it back to auto-advance.
+              onSelect={(level) => {
+                userPickedLevelRef.current = true;
+                setSelectedLevel(level);
+              }}
+              disabled={starting}
+            />
+          ) : null}
         </div>
 
         <CompletedAttemptsTable attempts={attempts} />
       </div>
     </AppShell>
+  );
+}
+
+export default function ActivityDetailPage({
+  params,
+}: {
+  params: { slug: string };
+}) {
+  return (
+    <Suspense fallback={null}>
+      <ActivityDetailContent params={params} />
+    </Suspense>
   );
 }

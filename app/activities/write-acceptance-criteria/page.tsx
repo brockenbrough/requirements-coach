@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../../components/AppShell';
 import { CompletedAttemptsTable } from '../../../components/CompletedAttemptsTable';
+import { LevelReplaySelector } from '../../../components/LevelReplaySelector';
 import { ResumeOrAbandonPrompt } from '../../../components/ResumeOrAbandonPrompt';
 import {
   type CurrentAcSessionResult,
@@ -147,6 +148,13 @@ export default function WriteAcceptanceCriteriaLandingPage() {
 
         <div className="rounded-brand-lg border border-brand-navy-border bg-brand-navy p-8 text-brand-ink">
           <div className="mb-4 flex flex-wrap gap-2">
+            {/* This activity has no difficulty progression (CLAUDE.md's "half-connected worlds"
+                note on write-acceptance-criteria) — every session is level 1, so this badge is
+                the same fixed "Easy · Level 1" app/activities/[slug]/page.tsx shows a level-1
+                student, just without a live displayLevel to read from. */}
+            <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-extrabold text-brand-green">
+              Easy · Level 1
+            </span>
             <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-bold text-brand-ink-muted">
               {ACTIVITY.category}
             </span>
@@ -184,6 +192,13 @@ export default function WriteAcceptanceCriteriaLandingPage() {
                 </Link>
               ) : null}
             </div>
+          ) : null}
+
+          {/* Level 1 is the only level this activity ever has, so unlike
+              app/activities/[slug]/page.tsx there's nothing to pick between — shown purely for
+              visual consistency with the other activity detail pages (see the badge above). */}
+          {!session ? (
+            <LevelReplaySelector highestSelectableLevel={1} selectedLevel={1} onSelect={() => {}} disabled={starting} />
           ) : null}
         </div>
 

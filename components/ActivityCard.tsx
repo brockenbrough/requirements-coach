@@ -5,10 +5,26 @@ import { activityCardStatusLabel, type ActivityCardStatus } from '../lib/activit
 import type { ActivitySlug, Difficulty } from '../lib/activityContent';
 
 const DIFFICULTY_LABEL: Record<Difficulty, string> = { 1: 'Easy', 2: 'Medium', 3: 'Hard' };
+// Same green-to-orange difficulty color schema as the activity detail page
+// (app/activities/[slug]/page.tsx's DIFFICULTY_COLOR) — kept in sync there rather than shared.
+// Levels 1 and 3 there stay solid text on a neutral bg-white/10 pill; level 2 (Medium) there
+// copies this card's exact tinted-pill classes verbatim, since plain gold text alone read too
+// low-contrast on that page's dark card.
+//
+// The tinted pill background stays a literal hex value (not the bg-brand-* token) deliberately:
+// brand-* colors are `var(--rc-*)` references (tailwind.config.js), and Tailwind can only apply
+// an opacity modifier like /20 to a color it can resolve at build time — bg-brand-green/20
+// silently compiles to no rule at all, so the pill would have no background whatsoever. The hex
+// values match --rc-green/--rc-gold-dark/--rc-danger in app/globals.css; the text half has no
+// such restriction, so it stays on the brand-* tokens.
+//
+// Level 2 uses the *other* yellow for its text: brand-gold (#FFD666, the bright one) rather than
+// brand-gold-dark (#8A6100, muddy/brownish) — swapped with the background from the earlier
+// version of this pill so the visible label reads as a clear yellow instead of dark gold-brown.
 const DIFFICULTY_CLASSES: Record<Difficulty, string> = {
-  1: 'bg-[#4ADE80]/20 text-[#1e8f52]',
-  2: 'bg-[#2DD4BF]/20 text-[#0f7d70]',
-  3: 'bg-[#FFD666]/25 text-[#8a6100]',
+  1: 'bg-[#4ADE80]/20 text-brand-green-dark',
+  2: 'bg-[#8A6100]/25 text-brand-gold',
+  3: 'bg-[#FF6B57]/20 text-brand-danger',
 };
 
 /**
@@ -69,7 +85,10 @@ export function ActivityCard({
 
   return (
     <Link
-      href={`/activities/${activity.slug}`}
+      // The level query param lets the activity detail page (app/activities/[slug]/page.tsx)
+      // render this exact level on its first paint instead of a hardcoded easy-level default
+      // that then jumps once its own data finishes loading — see that page's initialLevel.
+      href={`/activities/${activity.slug}?level=${level}`}
       className="flex flex-col gap-3 rounded-2xl border border-[#332b6b] bg-[#1b1642] p-5 text-left text-[#F3F1FF] transition hover:-translate-y-0.5 hover:border-[#8b5cf6] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#2DD4BF]"
     >
       <span className={`flex h-11 w-11 items-center justify-center rounded-[10px] ${badgeBg}`}>

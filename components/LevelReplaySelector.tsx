@@ -1,0 +1,74 @@
+'use client';
+
+const DIFFICULTY_LABEL: Record<number, string> = {
+  1: 'Easy',
+  2: 'Medium',
+  3: 'Hard',
+};
+
+/**
+ * Lets a student choose which difficulty level to start next — any level they've already
+ * passed, to practice an easier one, or the level they'd auto-advance to anyway (POST
+ * /api/sessions's difficultyLevel override accepts both, up to and including that auto-advance
+ * level — see that route's comment). Modeled on components/LeaderboardCourseSwitcher.tsx's
+ * controlled button row (role="group", aria-pressed, parent-owned selection), not
+ * components/TitleProgressionTrack.tsx's display-only ladder, which has no click handler — this
+ * is an input control, not a status display.
+ *
+ * Fully controlled: this component holds no state of its own and never starts anything itself —
+ * onSelect only records the choice in the parent (app/activities/[slug]/page.tsx), which shows it
+ * in the level badge above and only actually starts a session once Start is clicked. disabled
+ * locks the row while that Start request is in flight.
+ *
+ * Lives inside that page's dark hero card (bg-brand-navy), so — unlike the light-surface switcher
+ * it's modeled on — its colors are brand-ink/brand-ink-muted/white-alpha rather than the gray
+ * scale, matching the card's existing badges (bg-white/10) and Start button (bg-brand-purple).
+ */
+export function LevelReplaySelector({
+  highestSelectableLevel,
+  selectedLevel,
+  onSelect,
+  disabled = false,
+}: {
+  /** The top of the 1..N button range — see app/activities/[slug]/page.tsx for how it's derived. */
+  highestSelectableLevel: number;
+  selectedLevel: number | null;
+  onSelect: (level: number) => void;
+  disabled?: boolean;
+}) {
+  // Defensive only: app/activities/[slug]/page.tsx always derives highestSelectableLevel as at
+  // least 1 (a student with nothing passed yet still has level 1 to show), so this never actually
+  // hides the row — kept as a guard against a 0/negative value reaching here some other way.
+  if (highestSelectableLevel < 1) return null;
+
+  const levels = Array.from({ length: highestSelectableLevel }, (_, i) => i + 1);
+
+  return (
+    <div className="mt-6 text-left">
+      <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-brand-ink-muted">
+        Choose a difficulty level
+      </p>
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Choose a difficulty level">
+        {levels.map((level) => {
+          const isSelected = level === selectedLevel;
+          return (
+            <button
+              key={level}
+              type="button"
+              onClick={() => onSelect(level)}
+              aria-pressed={isSelected}
+              disabled={disabled}
+              className={`rounded-full border px-3.5 py-1.5 text-xs font-extrabold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-purple disabled:cursor-not-allowed disabled:opacity-40 ${
+                isSelected
+                  ? 'border-brand-purple bg-brand-purple text-white'
+                  : 'border-white/10 bg-white/10 text-brand-ink-muted hover:border-white/20 hover:text-brand-ink'
+              }`}
+            >
+              {DIFFICULTY_LABEL[level] ?? `Level ${level}`} · {level}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
