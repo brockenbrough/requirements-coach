@@ -103,6 +103,24 @@ export async function updateCourse(token: string, courseId: string, updates: { n
   return { ok: true, data: { course: { ...result.data.course, createdAt: toInstant(result.data.course.createdAt) } } };
 }
 
+/**
+ * Deletes a course and every enrollment in it (DELETE /api/instructor/courses/{id}, GitHub #327).
+ *
+ * unenrolledCount is how many students the cascade actually removed, counted server-side just
+ * before the delete — the dialog that asks for confirmation shows its own, possibly seconds-old
+ * count from the roster already in hand, so this is the authoritative number, not that one.
+ *
+ * The students' attempt history and scores are untouched; only the course, its join code and its
+ * CSV export go away. See the route's docblock for why that split is the way it is.
+ */
+export function deleteCourse(token: string, courseId: string): Promise<ApiResult<{ courseId: string; unenrolledCount: number }>> {
+  return request<{ courseId: string; unenrolledCount: number }>(
+    `/api/instructor/courses/${encodeURIComponent(courseId)}`,
+    { method: 'DELETE' },
+    token,
+  );
+}
+
 /** Enrolls a student in a course (POST /api/instructor/courses/{id}/students). */
 export function addStudentToCourse(token: string, courseId: string, studentId: string): Promise<ApiResult<{ student: CourseStudent }>> {
   return request<{ student: CourseStudent }>(
