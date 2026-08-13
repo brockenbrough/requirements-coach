@@ -14,6 +14,12 @@ import type {
 import type { SessionRecord } from "./sessionTypes";
 import { toInstant } from "./dateTime";
 
+// Already the shape the route returns (camelCase, pre-aggregated) — re-exported here so this
+// file stays the one import components need, the same role sessionClient.ts's re-export of
+// SessionRecord plays for lib/sessionTypes.ts.
+import type { AcceptanceCriteriaStatistics } from "./acceptanceCriteriaStatisticsQueries";
+export type { AcceptanceCriteriaStatistics } from "./acceptanceCriteriaStatisticsQueries";
+
 export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; status: number; error: string };
@@ -154,6 +160,23 @@ export function loadInstructorACSubmissions(
 
     return { ok: true as const, data: { submissions } };
   });
+}
+
+/**
+ * GET /api/instructor/acceptance-criteria/statistics — class-wide aggregates for the
+ * write-acceptance-criteria activity (GitHub #152, #155). Already pre-aggregated server-side
+ * (lib/acceptanceCriteriaStatisticsQueries.ts); this is a plain pass-through, not a cache — the
+ * same "always fresh" treatment loadInstructorACSubmissions above gets, since a newly graded
+ * submission should move the average right away.
+ */
+export function loadAcceptanceCriteriaStatistics(
+  token: string,
+): Promise<ApiResult<{ statistics: AcceptanceCriteriaStatistics }>> {
+  return request<{ statistics: AcceptanceCriteriaStatistics }>(
+    "/api/instructor/acceptance-criteria/statistics",
+    { method: "GET" },
+    token,
+  );
 }
 
 export type SubmitAcceptanceCriteriaResult = AcceptanceCriteriaResult & {
