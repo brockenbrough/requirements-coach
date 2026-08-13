@@ -1,4 +1,5 @@
 import './globals.css';
+import { OnboardingTourProvider } from '../components/OnboardingTourProvider';
 import { UserProvider } from '../components/UserProvider';
 
 export const metadata = {
@@ -13,7 +14,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
-        <UserProvider>{children}</UserProvider>
+        <UserProvider>
+          <OnboardingTourProvider>{children}</OnboardingTourProvider>
+        </UserProvider>
       </body>
     </html>
   );
