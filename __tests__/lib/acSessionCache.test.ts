@@ -43,7 +43,9 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 beforeEach(() => {
-  vi.stubGlobal('window', { localStorage: makeLocalStorageMock() });
+  // sessionStorage too: clearAllClientCaches also clears lib/leaderboardStore.ts and
+  // lib/leaderboardCoursesStore.ts, both sessionStorage-backed (GitHub #328/#329).
+  vi.stubGlobal('window', { localStorage: makeLocalStorageMock(), sessionStorage: makeLocalStorageMock() });
 });
 
 afterEach(() => {
