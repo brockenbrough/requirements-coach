@@ -5,9 +5,10 @@
 // app/courses/page.tsx, components/StudentCourseCard.tsx, and components/MyCoursesSection.tsx.
 
 import type { CourseMeta, JoinableCourse } from './courseTypes';
-import type { LeaderboardEntry } from './leaderboardTypes';
+import type { LeaderboardCourse, LeaderboardEntry } from './leaderboardTypes';
 import { toInstant } from './dateTime';
 import { getCachedLeaderboard, setCachedLeaderboard } from './leaderboardStore';
+import { getCachedLeaderboardCourses, setCachedLeaderboardCourses } from './leaderboardCoursesStore';
 import { getPreviousRanks, withRankChange } from './previousRankStore';
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number; error: string };
@@ -61,6 +62,36 @@ export async function loadJoinableCourses(token: string): Promise<ApiResult<{ co
  */
 export function joinCourseByCode(token: string, code: string): Promise<ApiResult<{ course: CourseMeta; alreadyMember: boolean }>> {
   return request<{ course: CourseMeta; alreadyMember: boolean }>('/api/courses/join', postJson({ code }), token);
+}
+
+/**
+ * The alreadyMember-filtered slice of loadJoinableCourses that app/leaderboard/page.tsx and
+ * components/LeaderboardPreview.tsx use to pick a courseId, cached session-scoped
+ * (lib/leaderboardCoursesStore.ts, GitHub #328) so revisiting either view doesn't re-run this
+ * network call — same cache-first/forceRefresh shape as loadCourseLeaderboard below. Distinct
+ * from loadJoinableCourses itself, which stays uncached: app/courses/page.tsx and
+ * MyCoursesSection need a just-joined course to show up without waiting for a fresh session.
+ */
+export function loadMyLeaderboardCourses(
+  token: string,
+  options: { forceRefresh?: boolean } = {},
+): Promise<ApiResult<{ courses: LeaderboardCourse[] }>> {
+  if (!options.forceRefresh) {
+    const cached = getCachedLeaderboardCourses();
+    if (cached !== null) {
+      return Promise.resolve({ ok: true, data: { courses: cached } });
+    }
+  }
+
+  return loadJoinableCourses(token).then((result) => {
+    if (!result.ok) return result;
+
+    const courses = result.data.courses
+      .filter((course) => course.alreadyMember)
+      .map((course) => ({ courseId: course.id, courseName: course.name }));
+    setCachedLeaderboardCourses(courses);
+    return { ok: true as const, data: { courses } };
+  });
 }
 
 /** The wire shape of GET /api/courses/{courseId}/leaderboard — no rankChange; see below. */

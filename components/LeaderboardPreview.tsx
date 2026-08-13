@@ -6,7 +6,7 @@ import { Avatar } from './Avatar';
 import { LeaderboardRankBadge } from './LeaderboardRankBadge';
 import { RankChangeIndicator } from './RankChangeIndicator';
 import { StreakBadge } from './StreakBadge';
-import { loadCourseLeaderboard, loadJoinableCourses } from '../lib/studentCourseClient';
+import { loadCourseLeaderboard, loadMyLeaderboardCourses } from '../lib/studentCourseClient';
 import { recordLeaderboardRanks } from '../lib/previousRankStore';
 import type { LeaderboardCourse, LeaderboardEntry } from '../lib/leaderboardTypes';
 
@@ -65,14 +65,13 @@ export function LeaderboardPreview({ token, studentId }: { token: string; studen
   useEffect(() => {
     let cancelled = false;
 
-    loadJoinableCourses(token).then((result) => {
+    loadMyLeaderboardCourses(token).then((result) => {
       if (cancelled) return;
       if (!result.ok) {
         setCourse(null);
         return;
       }
-      const mine = result.data.courses.find((c) => c.alreadyMember);
-      setCourse(mine ? { courseId: mine.id, courseName: mine.name } : null);
+      setCourse(result.data.courses[0] ?? null);
     });
 
     return () => {
