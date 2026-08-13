@@ -15,7 +15,7 @@ function PreviewRow({ entry, isCurrentUser }: { entry: LeaderboardEntry; isCurre
   return (
     <div
       className={`flex items-center gap-3 rounded-brand-md px-2 py-2 ${
-        isCurrentUser ? 'bg-brand-purple/20' : ''
+        isCurrentUser ? 'bg-brand-navy-border' : ''
       }`}
     >
       <LeaderboardRankBadge rank={entry.rank} />

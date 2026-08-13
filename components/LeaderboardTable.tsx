@@ -24,7 +24,7 @@ export function LeaderboardRow({
   return (
     <tr
       className={`border-t border-brand-navy-border text-brand-ink ${
-        isCurrentUser ? 'bg-brand-purple/15' : 'bg-brand-navy-2'
+        isCurrentUser ? 'bg-brand-navy-border' : 'bg-brand-navy-2'
       }`}
     >
       <td className={`py-3.5 pr-2 ${isCurrentUser ? 'border-l-4 border-l-brand-purple pl-3' : 'pl-4'}`}>
