@@ -248,6 +248,68 @@ describe('POST /api/sessions', () => {
     expect(sessionInsert).toMatchObject({ difficulty_level: 3 });
   });
 
+  // Replay: a student may choose any level they have already passed instead of the auto-advance
+  // level, to practice an easier one without being forced back to level 1 or stuck at the current
+  // level.
+  it('accepts a requested difficultyLevel at or below the highest passed level', async () => {
+    queue('session_log', { data: null, error: null }); // no session in progress
+    queue('session_log', {
+      data: [
+        { activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 1, passed: true },
+        { activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 2, passed: true },
+      ],
+      error: null,
+    }); // highestPassedLevel: 2 — auto-advance would draw level 3
+    const level1Pool = Array.from({ length: 4 }, (_, i) => ({ question_id: `L1-q-${i + 1}`, max_score: 25 }));
+    queue('question', { data: level1Pool, error: null });
+    queue('session_log', { data: { ...sessionRow, difficulty_level: 1 }, error: null }); // insert
+    queue('session_to_question', { data: null, error: null });
+    queue('session_to_question', { data: drawnQuestions, error: null });
+
+    const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES', difficultyLevel: 1 }));
+    expect(response.status).toBe(201);
+
+    const sessionInsert = h.state.inserts.find((i) => i.table === 'session_log')!
+      .payload as Record<string, unknown>;
+    // The replayed level, not 3 (what auto-advance would have picked).
+    expect(sessionInsert).toMatchObject({ difficulty_level: 1 });
+
+    // The draw pulled from the requested level's own pool.
+    const links = h.state.inserts.find((i) => i.table === 'session_to_question')!
+      .payload as { question_id: string }[];
+    links.forEach((l) => expect(level1Pool.map((q) => q.question_id)).toContain(l.question_id));
+  });
+
+  it('rejects a requested difficultyLevel above the highest passed level', async () => {
+    queue('session_log', { data: null, error: null }); // no session in progress
+    queue('session_log', {
+      data: [{ activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 1, passed: true }],
+      error: null,
+    }); // highestPassedLevel: 1
+
+    const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES', difficultyLevel: 2 }));
+
+    expect(response.status).toBe(403);
+    expect(h.state.inserts).toHaveLength(0);
+  });
+
+  it('rejects a requested difficultyLevel when nothing has been passed yet', async () => {
+    queue('session_log', { data: null, error: null }); // no session in progress
+    queue('session_log', { data: [], error: null }); // nothing passed
+
+    const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES', difficultyLevel: 1 }));
+
+    expect(response.status).toBe(403);
+    expect(h.state.inserts).toHaveLength(0);
+  });
+
+  it('returns 400 for a malformed difficultyLevel', async () => {
+    const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES', difficultyLevel: 0 }));
+
+    expect(response.status).toBe(400);
+    expect(h.state.inserts).toHaveLength(0);
+  });
+
   it('never exposes is_correct in the response', async () => {
     queueHappyPath();
 
