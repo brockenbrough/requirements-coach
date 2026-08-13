@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AppShell } from "../../../components/AppShell";
 import { CompletedAttemptsTable } from "../../../components/CompletedAttemptsTable";
 import { LevelReplaySelector } from "../../../components/LevelReplaySelector";
@@ -26,6 +26,15 @@ const DIFFICULTY_LABEL: Record<number, string> = {
   3: "Hard",
 };
 
+// Easy-to-hard reads green-to-orange, using the existing brand palette (CLAUDE.md's Styling
+// Guidelines) rather than new hex values: brand-green for passing/easy, brand-danger — the
+// closest existing token to orange — for the hardest level, brand-gold bridging the two.
+const DIFFICULTY_COLOR: Record<number, string> = {
+  1: "text-brand-green",
+  2: "text-brand-gold",
+  3: "text-brand-danger",
+};
+
 export default function ActivityDetailPage({
   params,
 }: {
@@ -45,13 +54,34 @@ export default function ActivityDetailPage({
   const [starting, setStarting] = useState(false);
   // The level picked in LevelReplaySelector, if any — chosen ahead of time, not acted on until
   // Start is clicked. null means "no replay chosen," i.e. Start uses the server's auto-advance
-  // level.
+  // level. Defaults to level 1 once it's known to be replayable (see the effect below);
+  // userPickedLevelRef stops that default from re-asserting itself after the student has
+  // explicitly chosen (or deliberately cleared) a level.
   const [selectedLevel, setSelectedLevel] = useState<number | null>(null);
+  const userPickedLevelRef = useRef(false);
   const [abandoning, setAbandoning] = useState(false);
   const [error, setError] = useState<{
     message: string;
     needsProfile: boolean;
   } | null>(null);
+
+  // The highest difficulty level passed so far, derived from the same completed-attempts list
+  // the history table below already renders — no separate fetch needed. 0 means "nothing passed
+  // yet," which LevelReplaySelector reads as "nothing to replay."
+  const highestPassedLevel = attempts
+    ? Math.max(0, ...attempts.filter((attempt) => attempt.passed).map((attempt) => attempt.difficultyLevel))
+    : 0;
+
+  // Level 1 is the default replay selection once it's actually available — guarded by
+  // highestPassedLevel so a student who hasn't passed anything yet still gets plain auto-advance
+  // on Start, not a 403 for "replaying" a level they've never passed. userPickedLevelRef means
+  // this only ever sets the default once; it never re-asserts itself over an explicit choice
+  // (including an explicit deselect back to auto-advance).
+  useEffect(() => {
+    if (!userPickedLevelRef.current && highestPassedLevel >= 1) {
+      setSelectedLevel(1);
+    }
+  }, [highestPassedLevel]);
 
   // Both reads in one pass, because the page re-runs this on every return from /play: the
   // running session decides Start vs. Resume/Abandon, the finished ones fill the history below.
@@ -171,12 +201,6 @@ export default function ActivityDetailPage({
   // student picked, if any, else the easy-level default (POST /api/sessions computes the real
   // auto-advance level server-side, so this default is only ever a guess for that case).
   const displayLevel = session?.difficulty_level ?? selectedLevel ?? START_DIFFICULTY_LEVEL;
-  // The highest difficulty level passed so far, derived from the same completed-attempts list
-  // the history table below already renders — no separate fetch needed. 0 means "nothing passed
-  // yet," which LevelReplaySelector reads as "nothing to replay."
-  const highestPassedLevel = attempts
-    ? Math.max(0, ...attempts.filter((attempt) => attempt.passed).map((attempt) => attempt.difficultyLevel))
-    : 0;
 
   return (
     <AppShell active="activities">
@@ -190,7 +214,7 @@ export default function ActivityDetailPage({
 
         <div className="rounded-2xl border border-[#332b6b] bg-[#1b1642] p-8 text-[#F3F1FF]">
           <div className="mb-4 flex flex-wrap gap-2">
-            <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-extrabold text-[#2DD4BF]">
+            <span className={`rounded-full bg-white/10 px-2.5 py-1 text-xs font-extrabold ${DIFFICULTY_COLOR[displayLevel] ?? "text-brand-teal"}`}>
               {DIFFICULTY_LABEL[displayLevel] ?? "Level"} · Level {displayLevel}
             </span>
             <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-bold text-[#A79FC9]">
@@ -243,7 +267,10 @@ export default function ActivityDetailPage({
               highestPassedLevel={highestPassedLevel}
               selectedLevel={selectedLevel}
               // Clicking the already-selected level deselects it, back to auto-advance.
-              onSelect={(level) => setSelectedLevel((current) => (current === level ? null : level))}
+              onSelect={(level) => {
+                userPickedLevelRef.current = true;
+                setSelectedLevel((current) => (current === level ? null : level));
+              }}
               disabled={starting}
             />
           ) : null}
