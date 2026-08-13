@@ -20,6 +20,7 @@ import { clearCachedInstructorActivities } from './instructorActivityStore';
 import { clearCachedInstructorQuestions } from './instructorQuestionsStore';
 import { clearCachedInstructorStudents } from './instructorStudentsStore';
 import { clearCachedLeaderboard } from './leaderboardStore';
+import { clearCachedLeaderboardCourses } from './leaderboardCoursesStore';
 import { clearCachedLlmConfig } from './instructorLlmConfigStore';
 import { clearCachedScore } from './scoreStore';
 import { clearPreviousRanks } from './previousRankStore';
@@ -48,5 +49,6 @@ export function clearAllClientCaches(): void {
   clearCachedAcceptanceCriteriaSubmissions();
   clearCachedLlmConfig();
   clearCachedLeaderboard();
+  clearCachedLeaderboardCourses();
   clearPreviousRanks();
 }

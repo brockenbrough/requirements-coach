@@ -13,8 +13,9 @@ import {
 import { Pagination } from "../../components/Pagination";
 import {
   loadCourseLeaderboard,
-  loadJoinableCourses,
+  loadMyLeaderboardCourses,
 } from "../../lib/studentCourseClient";
+import { getCachedLeaderboard } from "../../lib/leaderboardStore";
 import { recordLeaderboardRanks } from "../../lib/previousRankStore";
 import type {
   LeaderboardCourse,
@@ -54,25 +55,21 @@ function LeaderboardContent() {
 
   const studentId = profile?.user_id;
 
-  // The course list a student can see a leaderboard for is exactly "my courses" — the same
-  // alreadyMember filter components/MyCoursesSection.tsx already applies to
-  // loadJoinableCourses's response, since that's the only real "which courses is this student
-  // in" source that exists (GET /api/courses, not a dedicated "my courses" route).
+  // The course list a student can see a leaderboard for is exactly "my courses" — cached
+  // session-scoped via loadMyLeaderboardCourses (GitHub #328) so revisiting this page within the
+  // same app session doesn't re-fetch it, the same way loadCourseLeaderboard already caches the
+  // entries themselves.
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
 
-    loadJoinableCourses(token).then((result) => {
+    loadMyLeaderboardCourses(token).then((result) => {
       if (cancelled) return;
       if (!result.ok) {
         setCoursesFailed(true);
         return;
       }
-      setCourses(
-        result.data.courses
-          .filter((course) => course.alreadyMember)
-          .map((course) => ({ courseId: course.id, courseName: course.name })),
-      );
+      setCourses(result.data.courses);
     });
 
     return () => {
@@ -96,7 +93,12 @@ function LeaderboardContent() {
     }
 
     let cancelled = false;
-    setEntries(null);
+    // Skip the null reset (and the resulting skeleton) when this course's leaderboard is
+    // already cached this session — loadCourseLeaderboard below will resolve it from cache
+    // essentially instantly, so there is nothing to show a loading state for (GitHub #328).
+    if (getCachedLeaderboard(selectedCourseId) === null) {
+      setEntries(null);
+    }
     setEntriesFailed(false);
     setPage(1);
 
@@ -133,17 +135,22 @@ function LeaderboardContent() {
   function handleRefresh() {
     if (!token || !selectedCourseId || refreshing) return;
     setRefreshing(true);
-    loadCourseLeaderboard(token, selectedCourseId, { forceRefresh: true }).then(
-      (result) => {
-        setRefreshing(false);
-        if (!result.ok) {
-          setEntriesFailed(true);
-          return;
-        }
-        setEntriesFailed(false);
-        setEntries(result.data.entries);
-      },
-    );
+    // Forces both caches this page reads: the course list (membership can have changed since
+    // this session started) and the selected course's entries — the one on-demand escape hatch
+    // for both of the session caches GitHub #328 introduced.
+    Promise.all([
+      loadMyLeaderboardCourses(token, { forceRefresh: true }),
+      loadCourseLeaderboard(token, selectedCourseId, { forceRefresh: true }),
+    ]).then(([coursesResult, entriesResult]) => {
+      setRefreshing(false);
+      if (coursesResult.ok) setCourses(coursesResult.data.courses);
+      if (!entriesResult.ok) {
+        setEntriesFailed(true);
+        return;
+      }
+      setEntriesFailed(false);
+      setEntries(entriesResult.data.entries);
+    });
   }
 
   const rows = entries ?? [];
