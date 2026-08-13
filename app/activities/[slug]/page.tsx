@@ -28,12 +28,14 @@ const DIFFICULTY_LABEL: Record<number, string> = {
 
 // Easy-to-hard reads green-to-orange, using the existing brand palette (CLAUDE.md's Styling
 // Guidelines) rather than new hex values: brand-green for passing/easy, brand-danger — the
-// closest existing token to orange — for the hardest level, brand-gold bridging the two. Same
-// three colors as components/ActivityCard.tsx's DIFFICULTY_CLASSES on the activities list page.
+// closest existing token to orange — for the hardest level, brand-gold bridging the two.
+// Level 2 (Medium) reuses components/ActivityCard.tsx's exact medium classes — a tinted
+// bg-[#FFD666] pill, not just gold text on the neutral bg-white/10 the other two levels keep —
+// since plain gold text read too low-contrast against this card's dark background on its own.
 const DIFFICULTY_COLOR: Record<number, string> = {
-  1: "text-brand-green",
-  2: "text-brand-gold",
-  3: "text-brand-danger",
+  1: "bg-white/10 text-brand-green",
+  2: "bg-[#FFD666]/25 text-brand-gold-dark",
+  3: "bg-white/10 text-brand-danger",
 };
 
 /** A valid 1..MAX_DIFFICULTY_LEVEL integer from the ?level= query param, or null. */
@@ -240,7 +242,7 @@ function ActivityDetailContent({
 
         <div className="rounded-2xl border border-[#332b6b] bg-[#1b1642] p-8 text-[#F3F1FF]">
           <div className="mb-4 flex flex-wrap gap-2">
-            <span className={`rounded-full bg-white/10 px-2.5 py-1 text-xs font-extrabold ${DIFFICULTY_COLOR[displayLevel] ?? "text-brand-teal"}`}>
+            <span className={`rounded-full px-2.5 py-1 text-xs font-extrabold ${DIFFICULTY_COLOR[displayLevel] ?? "bg-white/10 text-brand-teal"}`}>
               {DIFFICULTY_LABEL[displayLevel] ?? "Level"} · Level {displayLevel}
             </span>
             <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-bold text-[#A79FC9]">
