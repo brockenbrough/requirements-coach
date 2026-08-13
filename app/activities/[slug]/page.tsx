@@ -29,12 +29,13 @@ const DIFFICULTY_LABEL: Record<number, string> = {
 // Easy-to-hard reads green-to-orange, using the existing brand palette (CLAUDE.md's Styling
 // Guidelines) rather than new hex values: brand-green for passing/easy, brand-danger — the
 // closest existing token to orange — for the hardest level, brand-gold bridging the two.
-// Level 2 (Medium) reuses components/ActivityCard.tsx's exact medium classes — a tinted
-// bg-[#FFD666] pill, not just gold text on the neutral bg-white/10 the other two levels keep —
-// since plain gold text read too low-contrast against this card's dark background on its own.
+// Level 2 (Medium) reuses components/ActivityCard.tsx's exact medium classes — a tinted pill
+// with brand-gold (the brighter of the two yellows) as the text, not just gold text on the
+// neutral bg-white/10 the other two levels keep, since plain gold text read too low-contrast
+// against this card's dark background on its own.
 const DIFFICULTY_COLOR: Record<number, string> = {
   1: "bg-white/10 text-brand-green",
-  2: "bg-[#FFD666]/25 text-brand-gold-dark",
+  2: "bg-[#8A6100]/25 text-brand-gold",
   3: "bg-white/10 text-brand-danger",
 };
 
