@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { ActivityCard, type ActivityCardData } from '../../components/ActivityCard';
 import { ActivityCardSkeleton } from '../../components/ActivityCardSkeleton';
-import { answeredCount, getStoredSession, isSessionComplete, STORIES_PER_SESSION } from '../../lib/acceptanceCriteriaSessionStore';
 import { deriveActivityCardStatus, type ActivityCardStatus } from '../../lib/activityCardStatus';
 import { ACTIVITIES, Difficulty } from '../../lib/activityContent';
 import { loadCompletedAttempts, loadSessions, loadStudentTitles, type StudentTitle } from '../../lib/sessionClient';
@@ -98,26 +97,7 @@ export default function ActivitiesPage() {
         };
       });
 
-      // Type B (GitHub #149, REQ-FU-2): no session_log row is ever created for this activity —
-      // see app/activities/write-acceptance-criteria/page.tsx — so it can't join the
-      // loadCompletedAttempts/loadSessions calls above. Its progress comes from the same
-      // localStorage session the activity's own page trusts (lib/acceptanceCriteriaSessionStore.ts),
-      // which is the point: the card now says exactly what the student sees after clicking it.
-      // Best score stays null — no student-facing endpoint lists their own graded submissions —
-      // and activityType is null because there is no row in the titles response to look up.
-      const stored = getStoredSession();
-      const acSession = stored && !isSessionComplete(stored) ? stored : null;
-      const writeAcCard: CardData = {
-        activity: WRITE_ACCEPTANCE_CRITERIA_CARD,
-        activityType: null,
-        level: START_DIFFICULTY_LEVEL,
-        status: deriveActivityCardStatus(
-          acSession ? { answeredCount: answeredCount(acSession), questionCount: STORIES_PER_SESSION } : null,
-          null,
-        ),
-      };
-
-      setCards([...typeACards, writeAcCard]);
+      setCards(cards);
       setIsLoading(false);
     });
 
