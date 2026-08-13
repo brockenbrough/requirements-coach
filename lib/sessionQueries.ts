@@ -2,7 +2,14 @@
 // client see" are answered in exactly one place.
 
 import { getSupabaseClient } from './supabase';
-import { DEFAULT_QUESTION_MAX_SCORE, SESSION_COLUMNS } from './sessionRules';
+import {
+  DEFAULT_QUESTION_MAX_SCORE,
+  MAX_DIFFICULTY_LEVEL,
+  SESSION_COLUMNS,
+  START_DIFFICULTY_LEVEL,
+  highestPassedLevelByType,
+  type PassedSessionRow,
+} from './sessionRules';
 import type { InstructorActivityEntry, InstructorSessionEntry, SessionListEntry, SessionRecord } from './sessionTypes';
 import { shuffleArray } from './shuffleArray';
 
@@ -77,6 +84,32 @@ export async function findInProgressSession(
     .maybeSingle();
 
   return { session: error ? null : data, error };
+}
+
+/**
+ * Where a new session for activityType should start: one level past the highest difficulty_level
+ * this student has passed for that activity type, capped at MAX_DIFFICULTY_LEVEL. No prior passed
+ * session -> START_DIFFICULTY_LEVEL, unchanged.
+ */
+export async function findStartDifficultyLevel(
+  supabase: SupabaseClient,
+  userId: string,
+  activityType: string,
+) {
+  const { data, error } = await supabase
+    .from('session_log')
+    .select('activity_type, difficulty_level, passed')
+    .eq('user_id', userId)
+    .eq('activity_type', activityType);
+
+  if (error) return { startLevel: null, error };
+
+  const highestPassed = highestPassedLevelByType((data ?? []) as PassedSessionRow[]);
+  const highestPassedLevel = highestPassed.get(activityType) ?? null;
+  const startLevel =
+    highestPassedLevel === null ? START_DIFFICULTY_LEVEL : Math.min(highestPassedLevel + 1, MAX_DIFFICULTY_LEVEL);
+
+  return { startLevel, error: null };
 }
 
 /**

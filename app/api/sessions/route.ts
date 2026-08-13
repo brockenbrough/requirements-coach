@@ -4,12 +4,12 @@ import {
   DEFAULT_QUESTION_MAX_SCORE,
   QUESTIONS_PER_SESSION,
   SESSION_COLUMNS,
-  START_DIFFICULTY_LEVEL,
   isSessionStatus,
 } from '../../../lib/sessionRules';
 import {
   type SupabaseClient,
   findInProgressSession,
+  findStartDifficultyLevel,
   loadProgressForSessions,
   loadSessionQuestions,
 } from '../../../lib/sessionQueries';
@@ -146,14 +146,19 @@ export async function POST(request: Request) {
   if (existing.error) return Response.json({ error: existing.error.message }, { status: 500 });
   if (existing.session) return respondWithSession(supabase, existing.session, { created: false });
 
-  // AC 1: draw QUESTIONS_PER_SESSION questions matching activity type and difficulty level 1.
+  // The student's next unpassed level for this activity: one past the highest difficulty_level
+  // they've passed, capped at MAX_DIFFICULTY_LEVEL. No prior passed session -> level 1.
+  const { startLevel, error: levelError } = await findStartDifficultyLevel(supabase, user.id, activityType);
+  if (levelError) return Response.json({ error: levelError.message }, { status: 500 });
+
+  // AC 1: draw QUESTIONS_PER_SESSION questions matching activity type and the computed level.
   // GitHub #124: filtered through an inner join against the activity_type table (#122/#123)
   // instead of a plain equality check on the free-text column.
   const { data: pool, error: poolError } = await supabase
     .from('question')
     .select('question_id, max_score, activity:activity_type!inner ( activity_type )')
     .eq('activity.activity_type', activityType)
-    .eq('difficulty_level', START_DIFFICULTY_LEVEL);
+    .eq('difficulty_level', startLevel);
 
   if (poolError) return Response.json({ error: poolError.message }, { status: 500 });
 
@@ -181,7 +186,7 @@ export async function POST(request: Request) {
       session_id: sessionId,
       user_id: user.id,
       activity_type: activityType,
-      difficulty_level: START_DIFFICULTY_LEVEL,
+      difficulty_level: startLevel,
       status: 'in-progress',
       cumulative_score: 0,
       max_score: maxScore,

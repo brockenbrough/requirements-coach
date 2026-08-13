@@ -108,9 +108,19 @@ function req(body?: object, token: string | null = 'valid-token') {
   });
 }
 
+/**
+ * Queues the two session_log reads that precede every fresh-draw path: no session in progress
+ * (findInProgressSession), and no prior passed sessions (findStartDifficultyLevel), so the draw
+ * starts at level 1.
+ */
+function queueFreshSessionStart() {
+  queue('session_log', { data: null, error: null }); // findInProgressSession: none in progress
+  queue('session_log', { data: [], error: null });   // findStartDifficultyLevel: no prior sessions -> level 1
+}
+
 /** Queues a full happy-path draw: no running session, big enough pool, insert, links, reload. */
 function queueHappyPath() {
-  queue('session_log', { data: null, error: null });                   // no session in progress
+  queueFreshSessionStart();
   queue('question', { data: pool, error: null });                      // question bank
   queue('session_log', { data: sessionRow, error: null });             // insert
   queue('session_to_question', { data: null, error: null });           // insert links
@@ -150,7 +160,7 @@ describe('POST /api/sessions', () => {
 
   // AC 5
   it('returns 400 when fewer than 4 questions exist for type and difficulty level', async () => {
-    queue('session_log', { data: null, error: null });
+    queueFreshSessionStart();
     queue('question', { data: pool.slice(0, 3), error: null });
 
     const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES' }));
@@ -200,6 +210,44 @@ describe('POST /api/sessions', () => {
     links.forEach((l) => expect(pool.map((q) => q.question_id)).toContain(l.question_id));
   });
 
+  it('starts the next session at the next difficulty level once the current one is passed', async () => {
+    queue('session_log', { data: null, error: null }); // no session in progress
+    queue('session_log', {
+      data: [{ activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 1, passed: true }],
+      error: null,
+    }); // prior passed level-1 session
+    queue('question', { data: pool, error: null });
+    queue('session_log', { data: { ...sessionRow, difficulty_level: 2 }, error: null }); // insert
+    queue('session_to_question', { data: null, error: null });
+    queue('session_to_question', { data: drawnQuestions, error: null });
+
+    const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES' }));
+    expect(response.status).toBe(201);
+
+    const sessionInsert = h.state.inserts.find((i) => i.table === 'session_log')!
+      .payload as Record<string, unknown>;
+    expect(sessionInsert).toMatchObject({ difficulty_level: 2 });
+  });
+
+  it('caps the next session at MAX_DIFFICULTY_LEVEL once the top level is already passed', async () => {
+    queue('session_log', { data: null, error: null }); // no session in progress
+    queue('session_log', {
+      data: [{ activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 3, passed: true }],
+      error: null,
+    }); // prior passed level-3 (top) session
+    queue('question', { data: pool, error: null });
+    queue('session_log', { data: { ...sessionRow, difficulty_level: 3 }, error: null }); // insert
+    queue('session_to_question', { data: null, error: null });
+    queue('session_to_question', { data: drawnQuestions, error: null });
+
+    const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES' }));
+    expect(response.status).toBe(201);
+
+    const sessionInsert = h.state.inserts.find((i) => i.table === 'session_log')!
+      .payload as Record<string, unknown>;
+    expect(sessionInsert).toMatchObject({ difficulty_level: 3 });
+  });
+
   it('never exposes is_correct in the response', async () => {
     queueHappyPath();
 
@@ -246,7 +294,7 @@ describe('POST /api/sessions', () => {
   });
 
   it('returns the winning session when a parallel request hit the unique index', async () => {
-    queue('session_log', { data: null, error: null });
+    queueFreshSessionStart();
     queue('question', { data: pool, error: null });
     queue('session_log', { data: null, error: { code: '23505', message: 'duplicate key' } });
     queue('session_log', { data: sessionRow, error: null });
@@ -262,7 +310,7 @@ describe('POST /api/sessions', () => {
 
   // session_log.user_id references "user"(user_id) — an auth account alone is not enough.
   it('returns 409 when the student has no profile row yet', async () => {
-    queue('session_log', { data: null, error: null });
+    queueFreshSessionStart();
     queue('question', { data: pool, error: null });
     queue('session_log', {
       data: null,
@@ -278,7 +326,7 @@ describe('POST /api/sessions', () => {
   // GitHub #124: session_log's other foreign keys (activity_type from #123, badge) must not be
   // misreported as the profile case just because they share the 23503 code.
   it('returns 500, not the profile message, for an unrelated foreign key violation', async () => {
-    queue('session_log', { data: null, error: null });
+    queueFreshSessionStart();
     queue('question', { data: pool, error: null });
     queue('session_log', {
       data: null,
@@ -294,7 +342,7 @@ describe('POST /api/sessions', () => {
   });
 
   it('removes the session when its questions could not be stored', async () => {
-    queue('session_log', { data: null, error: null });
+    queueFreshSessionStart();
     queue('question', { data: pool, error: null });
     queue('session_log', { data: sessionRow, error: null });
     queue('session_to_question', { data: null, error: { message: 'insert failed' } });
