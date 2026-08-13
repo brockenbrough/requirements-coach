@@ -3,6 +3,7 @@
 // notification from REQ-GAM-PL-2.4) cannot drift apart.
 
 import { ACTIVITY_TYPES } from './activityTypes';
+import { highestPassedLevelByType, type PassedSessionRow } from './sessionRules';
 import type { SupabaseClient } from './sessionQueries';
 
 export type StudentTitle = {
@@ -11,7 +12,7 @@ export type StudentTitle = {
   title: string | null;
 };
 
-type SessionRow = { activity_type: string; difficulty_level: number; passed: boolean };
+type SessionRow = PassedSessionRow;
 type TitleDefinitionRow = { activity_type: string; difficulty_level: number; title_name: string };
 
 const NOT_STARTED = 'Not yet started';
@@ -41,12 +42,7 @@ export async function computeStudentTitles(supabase: SupabaseClient, userId: str
 
   const attempted = new Set(sessions.map((row) => row.activity_type));
 
-  const highestPassed = new Map<string, number>();
-  for (const row of sessions) {
-    if (!row.passed) continue;
-    const current = highestPassed.get(row.activity_type) ?? 0;
-    if (row.difficulty_level > current) highestPassed.set(row.activity_type, row.difficulty_level);
-  }
+  const highestPassed = highestPassedLevelByType(sessions);
 
   // ACTIVITY_TYPES order keeps the response deterministic regardless of session_log row order.
   const titles: StudentTitle[] = ACTIVITY_TYPES.filter((type) => attempted.has(type)).map((activityType) => {

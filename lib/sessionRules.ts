@@ -5,6 +5,10 @@ export const START_DIFFICULTY_LEVEL = 1;
 export const QUESTIONS_PER_SESSION = 4;
 export const DEFAULT_QUESTION_MAX_SCORE = 25;
 
+// Mirrors ck_question_difficulty_level / ck_user_story_difficulty_level (supabase/schema.sql):
+// levels run 1-3 across the whole schema.
+export const MAX_DIFFICULTY_LEVEL = 3;
+
 // "If the student has a cumulative score of 75% on the questions, then the student can
 // advance to the next level of difficulty." (docs/requirements/requirements.md)
 export const PASS_RATIO = 0.75;
@@ -36,4 +40,23 @@ export function isPassing(cumulativeScore: number, maxScore: number): boolean {
  */
 export function scoreForAnswer(isCorrect: boolean, questionMaxScore: number | null): number {
   return isCorrect ? questionMaxScore ?? DEFAULT_QUESTION_MAX_SCORE : 0;
+}
+
+export type PassedSessionRow = { activity_type: string; difficulty_level: number; passed: boolean };
+
+/**
+ * Reduces session_log rows to the highest difficulty_level passed, per activity_type. Pure so it
+ * can be shared between computeStudentTitles (lib/titleQueries.ts, unscoped — every activity type
+ * a student has touched) and the session-start route's per-activity-type lookup
+ * (lib/sessionQueries.ts's findStartDifficultyLevel), instead of two copies of the same reduction
+ * drifting apart.
+ */
+export function highestPassedLevelByType(sessions: readonly PassedSessionRow[]): Map<string, number> {
+  const highestPassed = new Map<string, number>();
+  for (const row of sessions) {
+    if (!row.passed) continue;
+    const current = highestPassed.get(row.activity_type) ?? 0;
+    if (row.difficulty_level > current) highestPassed.set(row.activity_type, row.difficulty_level);
+  }
+  return highestPassed;
 }
