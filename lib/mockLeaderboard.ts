@@ -12,6 +12,12 @@
 // it still drives app/instructor/students/[id]/page.tsx with fabricated data, and nothing in the
 // UI admits it.
 //
+// The rows below still carry rankChange/streak fields (GitHub #307), even though
+// getMockPublicProfile never reads either — keeping the rows shaped like a real LeaderboardEntry
+// costs nothing and avoids a second, drifted shape for the same data. The real leaderboard route
+// (lib/leaderboardQueries.ts) sources streak from computeStudentStreak (lib/streakQueries.ts) per
+// row, same reducer GET /api/students/{id}/streak uses.
+//
 // The rows below deliberately cover every case a public profile has to render: a two-way tie,
 // students with and without an avatar, a zero-point student who is enrolled but has never
 // finished an activity, an empty biography, and a student who has passed nothing at all.
@@ -30,35 +36,36 @@ function mockAvatar(background: string, initials: string): string {
 }
 
 const REQUIREMENTS_ENGINEERING: LeaderboardEntry[] = [
-  { rank: 1, studentId: 'mock-stu-01', username: 'mkellner', avatarUrl: mockAvatar('#7c4dff', 'MK'), points: 1450, rankChange: 2 },
-  { rank: 2, studentId: 'mock-stu-02', username: 'anne_b', avatarUrl: null, points: 1320, rankChange: -1 },
-  { rank: 3, studentId: 'mock-stu-03', username: 'philipp', avatarUrl: mockAvatar('#2dd4bf', 'PH'), points: 1180, rankChange: 0 },
+  { rank: 1, studentId: 'mock-stu-01', username: 'mkellner', avatarUrl: mockAvatar('#7c4dff', 'MK'), points: 1450, streak: 12, rankChange: 2 },
+  { rank: 2, studentId: 'mock-stu-02', username: 'anne_b', avatarUrl: null, points: 1320, streak: 4, rankChange: -1 },
+  { rank: 3, studentId: 'mock-stu-03', username: 'philipp', avatarUrl: mockAvatar('#2dd4bf', 'PH'), points: 1180, streak: 1, rankChange: 0 },
   // Two-way tie: same points, same rank, and rank 5 is skipped.
-  { rank: 4, studentId: 'mock-stu-04', username: 'brockenbrough', avatarUrl: null, points: 1050, rankChange: 5 },
-  { rank: 4, studentId: 'mock-stu-05', username: 'jvandermeer', avatarUrl: mockAvatar('#ffd666', 'JV'), points: 1050, rankChange: null },
-  { rank: 6, studentId: 'mock-stu-06', username: 'sofia_r', avatarUrl: null, points: 980, rankChange: -3 },
-  { rank: 7, studentId: 'mock-stu-07', username: 'tobias.w', avatarUrl: null, points: 910, rankChange: 1 },
-  { rank: 8, studentId: 'mock-stu-08', username: 'nadia_k', avatarUrl: mockAvatar('#4ade80', 'NK'), points: 870, rankChange: 0 },
-  { rank: 9, studentId: 'mock-stu-09', username: 'lars', avatarUrl: null, points: 720, rankChange: -2 },
-  { rank: 10, studentId: 'mock-stu-10', username: 'emilia_h', avatarUrl: null, points: 690, rankChange: null },
+  { rank: 4, studentId: 'mock-stu-04', username: 'brockenbrough', avatarUrl: null, points: 1050, streak: 7, rankChange: 5 },
+  { rank: 4, studentId: 'mock-stu-05', username: 'jvandermeer', avatarUrl: mockAvatar('#ffd666', 'JV'), points: 1050, streak: 0, rankChange: null },
+  { rank: 6, studentId: 'mock-stu-06', username: 'sofia_r', avatarUrl: null, points: 980, streak: 2, rankChange: -3 },
+  { rank: 7, studentId: 'mock-stu-07', username: 'tobias.w', avatarUrl: null, points: 910, streak: 0, rankChange: 1 },
+  { rank: 8, studentId: 'mock-stu-08', username: 'nadia_k', avatarUrl: mockAvatar('#4ade80', 'NK'), points: 870, streak: 3, rankChange: 0 },
+  { rank: 9, studentId: 'mock-stu-09', username: 'lars', avatarUrl: null, points: 720, streak: 0, rankChange: -2 },
+  { rank: 10, studentId: 'mock-stu-10', username: 'emilia_h', avatarUrl: null, points: 690, streak: 1, rankChange: null },
   // From here on it is page 2 at PAGE_SIZE 10 — the signed-in student sits down here on purpose,
   // so the "Your position" strip under the table is visible on first load.
-  { rank: 11, studentId: 'mock-stu-11', username: 'dmitri_s', avatarUrl: null, points: 540, rankChange: 4 },
-  { rank: 12, studentId: 'mock-stu-12', username: 'you', avatarUrl: null, points: 410, rankChange: -6 },
-  { rank: 13, studentId: 'mock-stu-13', username: 'carla_m', avatarUrl: null, points: 275, rankChange: 0 },
+  { rank: 11, studentId: 'mock-stu-11', username: 'dmitri_s', avatarUrl: null, points: 540, streak: 5, rankChange: 4 },
+  { rank: 12, studentId: 'mock-stu-12', username: 'you', avatarUrl: null, points: 410, streak: 2, rankChange: -6 },
+  { rank: 13, studentId: 'mock-stu-13', username: 'carla_m', avatarUrl: null, points: 275, streak: 0, rankChange: 0 },
   // Enrolled but has never completed an activity. The real query must include this student
   // (roster from student_course, not from who has attempted something) rather than hide them.
-  { rank: 14, studentId: 'mock-stu-14', username: 'newcomer', avatarUrl: null, points: 0, rankChange: null },
+  { rank: 14, studentId: 'mock-stu-14', username: 'newcomer', avatarUrl: null, points: 0, streak: 0, rankChange: null },
 ];
 
 // A student's points are their cumulative score across every activity type (REQ-GAM-DL-1), not
 // something earned per course — so a student in two courses carries the SAME number into both
-// leaderboards, and only the field of competitors changes. These three rows therefore repeat the
-// points from the course above rather than inventing second, smaller totals.
+// leaderboards, and only the field of competitors changes. streak is the same story (REQ-GAM-
+// BL-2): one daily streak per student, not per course. These three rows therefore repeat the
+// points and streak from the course above rather than inventing second, smaller totals.
 const SOFTWARE_ARCHITECTURE: LeaderboardEntry[] = [
-  { rank: 1, studentId: 'mock-stu-01', username: 'mkellner', avatarUrl: mockAvatar('#7c4dff', 'MK'), points: 1450, rankChange: -2 },
-  { rank: 2, studentId: 'mock-stu-06', username: 'sofia_r', avatarUrl: null, points: 980, rankChange: 3 },
-  { rank: 3, studentId: 'mock-stu-12', username: 'you', avatarUrl: null, points: 410, rankChange: 1 },
+  { rank: 1, studentId: 'mock-stu-01', username: 'mkellner', avatarUrl: mockAvatar('#7c4dff', 'MK'), points: 1450, streak: 12, rankChange: -2 },
+  { rank: 2, studentId: 'mock-stu-06', username: 'sofia_r', avatarUrl: null, points: 980, streak: 2, rankChange: 3 },
+  { rank: 3, studentId: 'mock-stu-12', username: 'you', avatarUrl: null, points: 410, streak: 2, rankChange: 1 },
 ];
 
 /** A course with a roster but no completed activity yet — exercises the table's empty state. */

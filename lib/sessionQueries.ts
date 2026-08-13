@@ -418,12 +418,23 @@ function studentDisplayName(student: EmbeddedStudent): string {
  *
  * Carries no question prompts, options, is_correct or explanation — this answers "who did what
  * and how did it go", so SESSION_COLUMNS is the whole payload.
+ *
+ * Excludes WRITE_ACCEPTANCE_CRITERIA session_log rows: this is the query behind
+ * loadInstructorActivities, which app/instructor/page.tsx (GitHub #276) already merges
+ * client-side with GET /api/instructor/acceptance-criteria/submissions (one row per graded
+ * submission, via toAcSubmissionRow) into the combined dashboard. Now that AC attempts have real
+ * session_log rows too, including them here as well would show every AC attempt twice — once
+ * (correctly) as a submission row, once (redundantly, and mislabeled as a quiz) as a session row.
+ * loadStudentActivityForIds has no such second source to double against — the course CSV export
+ * is the only thing that reads it, and there's no separate AC-submissions merge there — so it
+ * deliberately keeps including every activity type.
  */
 export async function loadAllStudentActivity(supabase: SupabaseClient) {
   const { data, error } = await supabase
     .from('session_log')
     .select(`${SESSION_COLUMNS}, ${STUDENT_EMBED}`)
     .eq('student.role', 'student')
+    .neq('activity_type', 'WRITE_ACCEPTANCE_CRITERIA')
     .order('ended_at', { ascending: false })
     .order('started_at', { ascending: false });
 
@@ -555,27 +566,45 @@ export async function loadAllStudentSessions(supabase: SupabaseClient) {
 /**
  * Progress for several sessions at once, keyed by session id.
  *
- * Two queries regardless of how many sessions are passed in — a per-session lookup would turn
- * a status page into N+1 round trips.
+ * Four queries regardless of how many sessions are passed in — a per-session lookup would turn
+ * a status page into N+1 round trips. `sessionIds` is a mix of Type A (session_to_question /
+ * answered_question_log) and Write Acceptance Criteria (session_to_user_story / submission)
+ * session ids; a given id only ever has rows on one side, so the two pairs are merged into the
+ * same per-session bag below rather than picked apart by activity type. session_to_user_story's
+ * `user_story_id` is carried in SessionPosition's `question_id` field and submission's
+ * `user_story_id` in the `answered` set's question-id slot — same shape nextUnansweredPosition
+ * already accepts, so "which position comes next" needs no AC-specific derivation.
  */
 export async function loadProgressForSessions(supabase: SupabaseClient, sessionIds: string[]) {
   if (sessionIds.length === 0) {
     return { progress: new Map<string, SessionProgress>(), error: null };
   }
 
-  const [{ data: positionRows, error: positionError }, { data: answerRows, error: answerError }] =
-    await Promise.all([
-      supabase
-        .from('session_to_question')
-        .select('session_id, position, question_id')
-        .in('session_id', sessionIds),
-      supabase
-        .from('answered_question_log')
-        .select('session_id, question_id')
-        .in('session_id', sessionIds),
-    ]);
+  const [
+    { data: positionRows, error: positionError },
+    { data: answerRows, error: answerError },
+    { data: storyRows, error: storyError },
+    { data: submissionRows, error: submissionError },
+  ] = await Promise.all([
+    supabase
+      .from('session_to_question')
+      .select('session_id, position, question_id')
+      .in('session_id', sessionIds),
+    supabase
+      .from('answered_question_log')
+      .select('session_id, question_id')
+      .in('session_id', sessionIds),
+    supabase
+      .from('session_to_user_story')
+      .select('session_id, position, user_story_id')
+      .in('session_id', sessionIds),
+    supabase
+      .from('submission')
+      .select('session_id, user_story_id')
+      .in('session_id', sessionIds),
+  ]);
 
-  const error = positionError ?? answerError ?? null;
+  const error = positionError ?? answerError ?? storyError ?? submissionError ?? null;
   if (error) return { progress: null, error };
 
   const grouped = new Map(
@@ -586,8 +615,16 @@ export async function loadProgressForSessions(supabase: SupabaseClient, sessionI
     grouped.get(row.session_id)?.positions.push({ position: row.position, question_id: row.question_id });
   }
 
+  for (const row of (storyRows ?? []) as { session_id: string; position: number; user_story_id: string }[]) {
+    grouped.get(row.session_id)?.positions.push({ position: row.position, question_id: row.user_story_id });
+  }
+
   for (const row of (answerRows ?? []) as { session_id: string; question_id: string }[]) {
     grouped.get(row.session_id)?.answered.add(row.question_id);
+  }
+
+  for (const row of (submissionRows ?? []) as { session_id: string; user_story_id: string }[]) {
+    grouped.get(row.session_id)?.answered.add(row.user_story_id);
   }
 
   const progress = new Map<string, SessionProgress>();

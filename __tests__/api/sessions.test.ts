@@ -414,13 +414,21 @@ describe('GET /api/sessions', () => {
     });
   });
 
-  // One list query plus two batched progress queries, no matter how many sessions.
+  // One list query plus four batched progress queries (Type A's two plus Write Acceptance
+  // Criteria's two, merged by loadProgressForSessions regardless of which activity type each
+  // session actually is), no matter how many sessions.
   it('does not query per session', async () => {
     queueTwoRunningSessions();
 
     await GET(listReq());
 
-    expect(h.state.tables).toEqual(['session_log', 'session_to_question', 'answered_question_log']);
+    expect(h.state.tables).toEqual([
+      'session_log',
+      'session_to_question',
+      'answered_question_log',
+      'session_to_user_story',
+      'submission',
+    ]);
   });
 
   it('never exposes questions or solutions in the list', async () => {

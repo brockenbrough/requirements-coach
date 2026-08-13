@@ -64,7 +64,14 @@ export function joinCourseByCode(token: string, code: string): Promise<ApiResult
 }
 
 /** The wire shape of GET /api/courses/{courseId}/leaderboard — no rankChange; see below. */
-type LeaderboardRow = { rank: number; studentId: string; username: string; avatarUrl: string | null; points: number };
+type LeaderboardRow = {
+  rank: number;
+  studentId: string;
+  username: string;
+  avatarUrl: string | null;
+  points: number;
+  streak: number;
+};
 
 /**
  * One course's leaderboard (GET /api/courses/{courseId}/leaderboard), real data behind the

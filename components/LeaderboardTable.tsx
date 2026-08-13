@@ -2,11 +2,12 @@ import Link from 'next/link';
 import { Avatar } from './Avatar';
 import { LeaderboardRankBadge } from './LeaderboardRankBadge';
 import { RankChangeIndicator } from './RankChangeIndicator';
+import { StreakBadge } from './StreakBadge';
 import type { LeaderboardEntry } from '../lib/leaderboardTypes';
 
 // The photo column has no header — a label above a 36px circle is noise, and the username
 // beside it already names the row.
-const COLUMNS = ['Rank', '', 'Username', 'Points', 'Change'];
+const COLUMNS = ['Rank', '', 'Username', 'Streak', 'Points', 'Change'];
 
 /**
  * One row. Exported so the "Your position" strip below the table and the dashboard preview can
@@ -41,6 +42,9 @@ export function LeaderboardRow({
           {entry.username}
         </Link>
         {isCurrentUser ? <span className="ml-2 text-xs font-extrabold text-brand-purple">You</span> : null}
+      </td>
+      <td className="whitespace-nowrap px-4 py-3.5">
+        <StreakBadge streak={entry.streak} />
       </td>
       <td className="whitespace-nowrap px-4 py-3.5 font-bold tabular-nums">{entry.points.toLocaleString()}</td>
       <td className="px-4 py-3.5">

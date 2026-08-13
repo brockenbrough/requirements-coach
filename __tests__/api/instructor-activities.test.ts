@@ -22,6 +22,14 @@ const h = vi.hoisted(() => {
         state.filters.push({ table, column, value });
         return builder;
       },
+      // Recorded like eq() rather than a no-op: excluding WRITE_ACCEPTANCE_CRITERIA from this
+      // query is an acceptance criterion (it's shown via a separate submissions route by the
+      // combined Instructor Dashboard instead), not incidental — an ignored filter would let a
+      // regression back in unnoticed.
+      neq: (column: string, value: unknown) => {
+        state.filters.push({ table, column: `${column} (neq)`, value });
+        return builder;
+      },
       in: () => builder,
       order: (column: string, opts?: { ascending?: boolean }) => {
         state.orders.push({ table, column, ascending: opts?.ascending ?? true });
@@ -192,6 +200,23 @@ describe('GET /api/instructor/activities', () => {
     await GET(request('valid-token'));
 
     expect(h.state.filters).toContainEqual({ table: 'session_log', column: 'student.role', value: 'student' });
+  });
+
+  // app/instructor/page.tsx (GitHub #276) already merges this route's response with
+  // GET /api/instructor/acceptance-criteria/submissions client-side. Now that
+  // WRITE_ACCEPTANCE_CRITERIA sessions have real session_log rows too, this query must keep
+  // excluding them — otherwise every AC attempt would render twice on the combined dashboard.
+  it('excludes Write Acceptance Criteria sessions, which the combined dashboard already gets from the submissions route', async () => {
+    queueRole('instructor');
+    queue('session_log', { data: [], error: null });
+
+    await GET(request('valid-token'));
+
+    expect(h.state.filters).toContainEqual({
+      table: 'session_log',
+      column: 'activity_type (neq)',
+      value: 'WRITE_ACCEPTANCE_CRITERIA',
+    });
   });
 
   it('sorts in the query: ended_at desc, then started_at desc', async () => {
