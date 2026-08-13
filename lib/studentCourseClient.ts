@@ -7,8 +7,8 @@
 import type { CourseMeta, JoinableCourse } from './courseTypes';
 import type { LeaderboardCourse, LeaderboardEntry } from './leaderboardTypes';
 import { toInstant } from './dateTime';
-import { getCachedLeaderboard, setCachedLeaderboard } from './leaderboardStore';
-import { getCachedLeaderboardCourses, setCachedLeaderboardCourses } from './leaderboardCoursesStore';
+import { clearCachedLeaderboard, getCachedLeaderboard, setCachedLeaderboard } from './leaderboardStore';
+import { clearCachedLeaderboardCourses, getCachedLeaderboardCourses, setCachedLeaderboardCourses } from './leaderboardCoursesStore';
 import { getPreviousRanks, withRankChange } from './previousRankStore';
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number; error: string };
@@ -62,6 +62,28 @@ export async function loadJoinableCourses(token: string): Promise<ApiResult<{ co
  */
 export function joinCourseByCode(token: string, code: string): Promise<ApiResult<{ course: CourseMeta; alreadyMember: boolean }>> {
   return request<{ course: CourseMeta; alreadyMember: boolean }>('/api/courses/join', postJson({ code }), token);
+}
+
+/**
+ * DELETE /api/courses/{courseId}/enrollment — a student leaves a course they're enrolled in
+ * (GitHub #324/#325). On success, clears both session caches this page family reads
+ * (lib/leaderboardCoursesStore.ts and lib/leaderboardStore.ts) so the left course stops showing
+ * up on the dashboard/leaderboard immediately, the same invalidation
+ * app/activities/[slug]/play/page.tsx's handleFinishSummary already runs when the student's own
+ * score changes — a membership change is just as stale-cache-worthy as a score change.
+ */
+export function leaveCourse(token: string, courseId: string): Promise<ApiResult<{ courseId: string }>> {
+  return request<{ courseId: string }>(
+    `/api/courses/${encodeURIComponent(courseId)}/enrollment`,
+    { method: 'DELETE' },
+    token,
+  ).then((result) => {
+    if (result.ok) {
+      clearCachedLeaderboardCourses();
+      clearCachedLeaderboard();
+    }
+    return result;
+  });
 }
 
 /**
