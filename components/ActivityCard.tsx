@@ -10,10 +10,17 @@ const DIFFICULTY_LABEL: Record<Difficulty, string> = { 1: 'Easy', 2: 'Medium', 3
 // since this card's chips are a tinted-background/dark-text pill and that page's badge is
 // solid text on a neutral bg-white/10 pill, two different existing treatments for the same
 // three brand colors (green/gold/danger).
+//
+// The tinted pill background stays a literal hex value (not the bg-brand-* token) deliberately:
+// brand-* colors are `var(--rc-*)` references (tailwind.config.js), and Tailwind can only apply
+// an opacity modifier like /20 to a color it can resolve at build time — bg-brand-green/20
+// silently compiles to no rule at all, so the pill would have no background whatsoever. The hex
+// values match --rc-green/--rc-gold/--rc-danger in app/globals.css; the text half has no such
+// restriction, so it stays on the brand-*-dark tokens.
 const DIFFICULTY_CLASSES: Record<Difficulty, string> = {
-  1: 'bg-brand-green/20 text-brand-green-dark',
-  2: 'bg-brand-gold/25 text-brand-gold-dark',
-  3: 'bg-brand-danger/20 text-brand-danger',
+  1: 'bg-[#4ADE80]/20 text-brand-green-dark',
+  2: 'bg-[#FFD666]/25 text-brand-gold-dark',
+  3: 'bg-[#FF6B57]/20 text-brand-danger',
 };
 
 /**
