@@ -15,11 +15,15 @@ const DIFFICULTY_LABEL: Record<Difficulty, string> = { 1: 'Easy', 2: 'Medium', 3
 // brand-* colors are `var(--rc-*)` references (tailwind.config.js), and Tailwind can only apply
 // an opacity modifier like /20 to a color it can resolve at build time — bg-brand-green/20
 // silently compiles to no rule at all, so the pill would have no background whatsoever. The hex
-// values match --rc-green/--rc-gold/--rc-danger in app/globals.css; the text half has no such
-// restriction, so it stays on the brand-*-dark tokens.
+// values match --rc-green/--rc-gold-dark/--rc-danger in app/globals.css; the text half has no
+// such restriction, so it stays on the brand-* tokens.
+//
+// Level 2 uses the *other* yellow for its text: brand-gold (#FFD666, the bright one) rather than
+// brand-gold-dark (#8A6100, muddy/brownish) — swapped with the background from the earlier
+// version of this pill so the visible label reads as a clear yellow instead of dark gold-brown.
 const DIFFICULTY_CLASSES: Record<Difficulty, string> = {
   1: 'bg-[#4ADE80]/20 text-brand-green-dark',
-  2: 'bg-[#FFD666]/25 text-brand-gold-dark',
+  2: 'bg-[#8A6100]/25 text-brand-gold',
   3: 'bg-[#FF6B57]/20 text-brand-danger',
 };
 
