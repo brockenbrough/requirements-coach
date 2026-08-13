@@ -52,11 +52,11 @@ export default function ActivityDetailPage({
   const [current, setCurrent] = useState<CurrentSessionResult | null>(null);
   const [attempts, setAttempts] = useState<CompletedAttempt[] | null>(null);
   const [starting, setStarting] = useState(false);
-  // The level picked in LevelReplaySelector, if any — chosen ahead of time, not acted on until
-  // Start is clicked. null means "no replay chosen," i.e. Start uses the server's auto-advance
-  // level. Defaults to level 1 once it's known to be replayable (see the effect below);
-  // userPickedLevelRef stops that default from re-asserting itself after the student has
-  // explicitly chosen (or deliberately cleared) a level.
+  // The level picked in LevelReplaySelector — chosen ahead of time, not acted on until Start is
+  // clicked. null only ever means "nothing replayable yet" (no level passed, so Start uses the
+  // server's auto-advance level); once a level becomes selectable there is always exactly one
+  // selected and no way to clear it back to null — see the effect below and LevelReplaySelector's
+  // onSelect, which always replaces the selection rather than toggling it off.
   const [selectedLevel, setSelectedLevel] = useState<number | null>(null);
   const userPickedLevelRef = useRef(false);
   const [abandoning, setAbandoning] = useState(false);
@@ -75,8 +75,8 @@ export default function ActivityDetailPage({
   // Level 1 is the default replay selection once it's actually available — guarded by
   // highestPassedLevel so a student who hasn't passed anything yet still gets plain auto-advance
   // on Start, not a 403 for "replaying" a level they've never passed. userPickedLevelRef means
-  // this only ever sets the default once; it never re-asserts itself over an explicit choice
-  // (including an explicit deselect back to auto-advance).
+  // this only ever sets the default once; it never re-asserts itself over a level the student has
+  // since picked themselves.
   useEffect(() => {
     if (!userPickedLevelRef.current && highestPassedLevel >= 1) {
       setSelectedLevel(1);
@@ -266,10 +266,11 @@ export default function ActivityDetailPage({
             <LevelReplaySelector
               highestPassedLevel={highestPassedLevel}
               selectedLevel={selectedLevel}
-              // Clicking the already-selected level deselects it, back to auto-advance.
+              // A level, once replayable, is always selected — clicking a button switches the
+              // selection, it never clears it back to auto-advance.
               onSelect={(level) => {
                 userPickedLevelRef.current = true;
-                setSelectedLevel((current) => (current === level ? null : level));
+                setSelectedLevel(level);
               }}
               disabled={starting}
             />
