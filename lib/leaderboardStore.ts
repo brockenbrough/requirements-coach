@@ -5,6 +5,11 @@
 //
 // Holds other students' usernames and photos, exactly why instructorStudentsStore is cleared on
 // logout — clearCachedLeaderboard is registered in lib/clientCaches.ts for the same reason.
+//
+// Deliberately sessionStorage, not localStorage (GitHub #329): unlike the other eight caches in
+// CLAUDE.md's "Client-side caching" list, a stale leaderboard entry must not survive an app
+// restart — reopening the tab always gets exactly one fresh fetch, since sessionStorage starts
+// empty for a new tab/window regardless of what a previous session left behind.
 import type { LeaderboardEntry } from './leaderboardTypes';
 
 const STORAGE_KEY = 'rc_leaderboard_v1';
@@ -14,7 +19,7 @@ type LeaderboardStore = Partial<Record<string, LeaderboardEntry[]>>;
 function readStore(): LeaderboardStore {
   if (typeof window === 'undefined') return {};
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.sessionStorage.getItem(STORAGE_KEY);
     return raw ? (JSON.parse(raw) as LeaderboardStore) : {};
   } catch {
     return {};
@@ -23,7 +28,7 @@ function readStore(): LeaderboardStore {
 
 function writeStore(store: LeaderboardStore) {
   if (typeof window === 'undefined') return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+  window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(store));
 }
 
 export function getCachedLeaderboard(courseId: string): LeaderboardEntry[] | null {
@@ -45,5 +50,5 @@ export function setCachedLeaderboard(courseId: string, entries: LeaderboardEntry
  */
 export function clearCachedLeaderboard(): void {
   if (typeof window === 'undefined') return;
-  window.localStorage.removeItem(STORAGE_KEY);
+  window.sessionStorage.removeItem(STORAGE_KEY);
 }

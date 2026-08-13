@@ -83,7 +83,7 @@ type LeaderboardRow = {
  * returned entries have actually rendered, or the "since your last visit" delta would compare a
  * fetch against itself. See that function's own comment.
  *
- * Cached in localStorage (lib/leaderboardStore.ts) keyed by courseId, the same shape as
+ * Cached in sessionStorage (lib/leaderboardStore.ts) keyed by courseId, the same shape as
  * loadStudentScore: a plain call is served from the cache when present, forceRefresh bypasses it
  * and re-caches the server's answer. Nothing on this device learns when another student's score
  * changes their own leaderboard, the same staleness loadInstructorActivities documents — callers
