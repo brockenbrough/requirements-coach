@@ -20,7 +20,8 @@ type NavKey =
   | 'instructor'
   | 'instructor-questions'
   | 'instructor-settings'
-  | 'instructor-courses';
+  | 'instructor-courses'
+  | 'instructor-quizzes';
 
 // GitHub #242 (UI-2): 'courses' here is the student-facing browse/join page (app/courses/page.tsx)
 // — a distinct NavKey/route from the instructor's 'instructor-courses' (create/manage), same
@@ -50,10 +51,13 @@ const STUDENT_NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
 // at /instructor/acceptance-criteria is gone — that page's rows now live in the Instructor
 // Dashboard's own activity table alongside every other attempt, so a separate destination for
 // them would just be a second, stale way to reach the same data.
+// GitHub #347: 'instructor-quizzes' sits next to Question Bank — both are about the question
+// bank/quiz catalog side of the app, as opposed to Courses (rosters) or the Dashboard (activity).
 const INSTRUCTOR_NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
   { key: 'instructor', label: 'Instructor Dashboard', href: '/instructor' },
   { key: 'instructor-courses', label: 'Courses', href: '/instructor/courses' },
   { key: 'instructor-questions', label: 'Question Bank', href: '/instructor/questions' },
+  { key: 'instructor-quizzes', label: 'Quizzes', href: '/instructor/quizzes' },
   { key: 'profile', label: 'Profile', href: '/profile' },
   { key: 'instructor-settings', label: 'LLM Provider Settings', href: '/instructor/settings' },
 ];
@@ -128,6 +132,15 @@ function TrophyIcon() {
   );
 }
 
+function LayersIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="m12 3 9 5-9 5-9-5 9-5Z" />
+      <path d="m3 13 9 5 9-5" />
+    </svg>
+  );
+}
+
 function GearIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -182,6 +195,7 @@ const NAV_ICONS: Record<NavKey, () => JSX.Element> = {
   instructor: UsersIcon,
   'instructor-courses': GraduationCapIcon,
   'instructor-questions': BookIcon,
+  'instructor-quizzes': LayersIcon,
   'instructor-settings': GearIcon,
 };
 
