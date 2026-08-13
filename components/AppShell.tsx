@@ -7,6 +7,8 @@ import { getHighestTitleOverall } from '../lib/activityStore';
 import { loadStudentScore } from '../lib/sessionClient';
 import { Avatar } from './Avatar';
 import { LLMProviderSettingsModal } from './LLMProviderSettingsModal';
+import { OnboardingTour } from './OnboardingTour';
+import { useOnboardingTour } from './OnboardingTourProvider';
 import { useUser } from './UserProvider';
 
 type NavKey =
@@ -145,6 +147,16 @@ function LogoutIcon() {
   );
 }
 
+function HelpIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M9.3 9a2.7 2.7 0 0 1 5.3.8c0 1.8-2.6 2-2.6 3.7" />
+      <path d="M12 17h.01" strokeWidth={2.5} />
+    </svg>
+  );
+}
+
 function HamburgerIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
@@ -184,9 +196,17 @@ export function AppShell({
 }) {
   const router = useRouter();
   const { token, profile, signOut } = useUser();
+  const { active: tourActive, startTour } = useOnboardingTour();
   const [score, setScore] = useState<number | null>(null);
   const [levelLine, setLevelLine] = useState('Getting started');
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // GitHub #318: the tour highlights sidebar nav items, which are translated off-screen behind
+  // the mobile off-canvas drawer until it's opened — force it open for the duration of the tour
+  // so those targets are actually visible to highlight, the same as they always are on desktop.
+  useEffect(() => {
+    if (tourActive) setDrawerOpen(true);
+  }, [tourActive]);
   // GitHub #150: the gear icon opens this instead of navigating for instructors.
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const isInstructor = profile?.role === 'instructor';
@@ -304,12 +324,15 @@ export function AppShell({
             so showing it while loading would state something that may well be wrong. Score
             is a student concept, so an instructor doesn't get this pill at all. */}
         {isInstructor ? null : (
-          <div className="mb-5 rounded-full bg-[#7C4DFF] px-4 py-1.5 text-center text-sm font-extrabold text-white">
+          <div
+            data-tour="score"
+            className="mb-5 rounded-full bg-[#7C4DFF] px-4 py-1.5 text-center text-sm font-extrabold text-white"
+          >
             Score: {score === null ? '—' : score.toLocaleString()}
           </div>
         )}
 
-        <nav className="mb-5 flex flex-col gap-1">
+        <nav data-tour="nav" className="mb-5 flex flex-col gap-1">
           {visibleNavItems.map((item) => {
             const Icon = NAV_ICONS[item.key];
             const isActive = active === item.key;
@@ -318,6 +341,7 @@ export function AppShell({
                 key={item.key}
                 href={item.href}
                 onClick={closeDrawer}
+                data-tour={`nav-${item.key}`}
                 className={`flex min-h-[44px] items-center gap-2.5 rounded-[10px] px-3 py-2.5 text-sm font-bold ${
                   isActive ? 'bg-[#7C4DFF] text-white' : 'text-[#A79FC9] hover:bg-[#241f52] hover:text-white'
                 }`}
@@ -342,6 +366,7 @@ export function AppShell({
               }}
               title="Settings"
               aria-label="Settings"
+              data-tour="settings-gear"
               className="flex h-11 w-11 items-center justify-center rounded-[9px] border border-[#332b6b] bg-[#241f52] text-[#A79FC9] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#2DD4BF]"
             >
               <GearIcon />
@@ -354,6 +379,22 @@ export function AppShell({
               <GearIcon />
             </span>
           )}
+          {/* GitHub #318: always-visible alternative to the Profile page's "Show tour again" —
+              same startTour() from OnboardingTourProvider, so there is exactly one restart path,
+              just two ways to reach it. Visible for both roles, unlike the gear button above,
+              since both studentTourSteps and instructorTourSteps exist. */}
+          <button
+            type="button"
+            onClick={() => {
+              startTour();
+              closeDrawer();
+            }}
+            title="Take the tour again"
+            aria-label="Replay onboarding tour"
+            className="flex h-11 w-11 items-center justify-center rounded-[9px] border border-[#332b6b] bg-[#241f52] text-[#A79FC9] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#2DD4BF]"
+          >
+            <HelpIcon />
+          </button>
           <button
             onClick={handleLogout}
             title="Log out"
@@ -377,6 +418,8 @@ export function AppShell({
       {settingsModalOpen && isInstructor && token ? (
         <LLMProviderSettingsModal token={token} onClose={() => setSettingsModalOpen(false)} />
       ) : null}
+
+      <OnboardingTour />
     </div>
   );
 }
