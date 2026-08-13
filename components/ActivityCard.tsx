@@ -81,7 +81,10 @@ export function ActivityCard({
 
   return (
     <Link
-      href={`/activities/${activity.slug}`}
+      // The level query param lets the activity detail page (app/activities/[slug]/page.tsx)
+      // render this exact level on its first paint instead of a hardcoded easy-level default
+      // that then jumps once its own data finishes loading — see that page's initialLevel.
+      href={`/activities/${activity.slug}?level=${level}`}
       className="flex flex-col gap-3 rounded-2xl border border-[#332b6b] bg-[#1b1642] p-5 text-left text-[#F3F1FF] transition hover:-translate-y-0.5 hover:border-[#8b5cf6] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#2DD4BF]"
     >
       <span className={`flex h-11 w-11 items-center justify-center rounded-[10px] ${badgeBg}`}>
