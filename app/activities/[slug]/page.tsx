@@ -72,14 +72,13 @@ export default function ActivityDetailPage({
     ? Math.max(0, ...attempts.filter((attempt) => attempt.passed).map((attempt) => attempt.difficultyLevel))
     : 0;
 
-  // Level 1 is the default replay selection once it's actually available — guarded by
-  // highestPassedLevel so a student who hasn't passed anything yet still gets plain auto-advance
-  // on Start, not a 403 for "replaying" a level they've never passed. userPickedLevelRef means
-  // this only ever sets the default once; it never re-asserts itself over a level the student has
-  // since picked themselves.
+  // The highest passed level is the default replay selection — guarded by highestPassedLevel so
+  // a student who hasn't passed anything yet still gets plain auto-advance on Start, not a 403
+  // for "replaying" a level they've never passed. userPickedLevelRef means this only ever sets
+  // the default itself; it never re-asserts itself over a level the student has since picked.
   useEffect(() => {
     if (!userPickedLevelRef.current && highestPassedLevel >= 1) {
-      setSelectedLevel(1);
+      setSelectedLevel(highestPassedLevel);
     }
   }, [highestPassedLevel]);
 
