@@ -334,3 +334,24 @@ export async function isEnrolledInAnyCourse(supabase: SupabaseClient, userId: st
 
   return { enrolled: (data ?? []).length > 0, error: null };
 }
+
+/**
+ * Deletes a course (GitHub #327). One statement, not two: student_course is the only table in
+ * the schema with a foreign key to course, and fk_student_course_course carries ON DELETE
+ * CASCADE, so every enrollment goes with it inside the same transaction — there is no way to
+ * leave an orphaned student_course row behind.
+ *
+ * Nothing else is touched, because nothing else *can* be: session_log has no course_id at all
+ * (a session belongs to a (user_id, activity_type) pair), and neither does question, whose
+ * user_id names its author rather than a course. A student's attempt history, score, title and
+ * streak therefore survive the deletion of a course they were in — which is what #327's own
+ * "keep session rows, only remove enrollment and visibility" recommendation asks for.
+ *
+ * Not idempotent the way unenrollStudent is: callers run findOwnedCourse first, so a second
+ * delete of the same course is a 404 there rather than a silent no-op here.
+ */
+export async function deleteCourse(supabase: SupabaseClient, courseId: string) {
+  const { error } = await supabase.from('course').delete().eq('course_id', courseId);
+
+  return { error };
+}

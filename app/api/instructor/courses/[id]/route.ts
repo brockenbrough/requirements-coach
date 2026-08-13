@@ -1,6 +1,6 @@
 import { getSupabaseClient } from '../../../../../lib/supabase';
 import { requireInstructor } from '../../../../../lib/instructorAuth';
-import { findOwnedCourse, loadEnrolledStudents, updateCourseName } from '../../../../../lib/courseQueries';
+import { deleteCourse, findOwnedCourse, loadEnrolledStudents, updateCourseName } from '../../../../../lib/courseQueries';
 import { loadStudentActivityForIds } from '../../../../../lib/sessionQueries';
 import { summarizeStudents, toStudentActivitySummary } from '../../../../../lib/activityLogTypes';
 
@@ -135,4 +135,43 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     { course: { id: updated.course_id, name: updated.course_name, code: updated.course_code, createdAt: updated.created_at } },
     { status: 200 },
   );
+}
+
+/**
+ * DELETE /api/instructor/courses/{id} — deletes a course and, by cascade, every enrollment in it
+ * (GitHub #326/#327).
+ *
+ * What survives, deliberately: the students' own session_log rows, and with them their scores,
+ * titles, streaks and activity log. session_log has no course_id — a session belongs to a
+ * (user_id, activity_type) pair — so "this course's history" isn't a thing that could be deleted
+ * even if it should be, and deleting the enrolled students' sessions outright would wipe their
+ * progress in every *other* course too. See deleteCourse's docblock (lib/courseQueries.ts) and
+ * #327's own "keep session rows, only remove enrollment and visibility" recommendation.
+ *
+ * What that costs: GET /api/instructor/courses/{id}/export (REQ-PL-3.4.3) derives its roster from
+ * student_course at request time, so the CSV report for this course is gone for good even though
+ * every attempt it would have listed still exists. The confirmation dialog
+ * (components/DeleteCourseModal.tsx) says so before the instructor commits.
+ *
+ * unenrolledCount is counted *before* the delete — afterwards the cascade has already removed
+ * the rows there would be to count.
+ *
+ * - 401/403/404/403(not owner) — see authorizeCourse
+ * - 200 { courseId, unenrolledCount }
+ * - 500 on a roster or delete failure
+ */
+export async function DELETE(request: Request, { params }: { params: { id: string } }) {
+  const authz = await authorizeCourse(request, params.id);
+  if (!authz.ok) return authz.response;
+  const { supabase } = authz;
+
+  const { students, error: rosterError } = await loadEnrolledStudents(supabase, params.id);
+  if (rosterError || !students) {
+    return Response.json({ error: rosterError?.message ?? 'Could not load roster.' }, { status: 500 });
+  }
+
+  const { error } = await deleteCourse(supabase, params.id);
+  if (error) return Response.json({ error: error.message }, { status: 500 });
+
+  return Response.json({ courseId: params.id, unenrolledCount: students.length }, { status: 200 });
 }

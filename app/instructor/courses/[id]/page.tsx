@@ -1,11 +1,13 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../../../components/AppShell';
 import { AddStudentForm } from '../../../../components/AddStudentForm';
 import { CopyCodeButton } from '../../../../components/CopyCodeButton';
 import { CourseStudentList } from '../../../../components/CourseStudentList';
+import { DeleteCourseModal } from '../../../../components/DeleteCourseModal';
 import { EditCourseModal } from '../../../../components/EditCourseModal';
 import { exportCourseReport, loadCourse, removeStudentFromCourse, type CourseDetail, type CourseStudent } from '../../../../lib/courseClient';
 import { useRequireRole } from '../../../../lib/useRequireRole';
@@ -29,6 +31,17 @@ function DownloadIcon() {
   );
 }
 
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 6h18" />
+      <path d="M8 6V4h8v2" />
+      <path d="M19 6l-1 14H6L5 6" />
+      <path d="M10 11v6M14 11v6" />
+    </svg>
+  );
+}
+
 /**
  * GitHub #241 follow-up: one course's detail view — code + roster management. Fully real
  * (lib/courseClient.ts, REQ-DL-5): GET /api/instructor/courses/{id} already embeds the roster
@@ -38,11 +51,13 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
   // Same guard as every other /instructor/* page (GitHub #82/#169) — a student hitting this
   // URL directly is redirected, never shown the roster or edit/remove controls.
   const { token, profile, loading, authorized } = useRequireRole('instructor');
+  const router = useRouter();
 
   const [course, setCourse] = useState<CourseDetail | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [editModalOpen, setEditModalOpen] = useState(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [error, setError] = useState('');
   const [exporting, setExporting] = useState(false);
 
@@ -139,6 +154,19 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
                 >
                   <EditIcon />
                 </button>
+                {/*
+                  Labelled, unlike the icon-only Edit button next to it: this is the one
+                  irreversible action on the page, and an unlabelled trash can is exactly the
+                  control someone clicks to find out what it does.
+                */}
+                <button
+                  type="button"
+                  onClick={() => setDeleteModalOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-full border border-brand-danger/40 bg-white px-4 py-2 text-sm font-extrabold text-brand-danger transition hover:border-brand-danger"
+                >
+                  <TrashIcon />
+                  Delete course
+                </button>
               </div>
             </div>
 
@@ -171,6 +199,18 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
           token={token}
           onClose={() => setEditModalOpen(false)}
           onSaved={(updated) => setCourse((current) => (current ? { ...current, name: updated.name, code: updated.code } : current))}
+        />
+      ) : null}
+
+      {deleteModalOpen && course ? (
+        <DeleteCourseModal
+          course={course}
+          token={token}
+          onClose={() => setDeleteModalOpen(false)}
+          // Back to the list rather than staying on a page whose course no longer exists. The
+          // list refetches on mount (its effect depends on token/retryCount), so the deleted
+          // course is gone from it without any cache to invalidate.
+          onDeleted={() => router.push('/instructor/courses')}
         />
       ) : null}
     </AppShell>
