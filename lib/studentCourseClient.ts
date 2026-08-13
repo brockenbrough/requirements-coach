@@ -5,7 +5,10 @@
 // app/courses/page.tsx, components/StudentCourseCard.tsx, and components/MyCoursesSection.tsx.
 
 import type { CourseMeta, JoinableCourse } from './courseTypes';
+import type { LeaderboardEntry } from './leaderboardTypes';
 import { toInstant } from './dateTime';
+import { getCachedLeaderboard, setCachedLeaderboard } from './leaderboardStore';
+import { getPreviousRanks, withRankChange } from './previousRankStore';
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number; error: string };
 
@@ -58,4 +61,56 @@ export async function loadJoinableCourses(token: string): Promise<ApiResult<{ co
  */
 export function joinCourseByCode(token: string, code: string): Promise<ApiResult<{ course: CourseMeta; alreadyMember: boolean }>> {
   return request<{ course: CourseMeta; alreadyMember: boolean }>('/api/courses/join', postJson({ code }), token);
+}
+
+/** The wire shape of GET /api/courses/{courseId}/leaderboard — no rankChange; see below. */
+type LeaderboardRow = {
+  rank: number;
+  studentId: string;
+  username: string;
+  avatarUrl: string | null;
+  points: number;
+  streak: number;
+};
+
+/**
+ * One course's leaderboard (GET /api/courses/{courseId}/leaderboard).
+ *
+ * rankChange is not part of the server response (see LeaderboardEntry's own doc) — it is
+ * attached here from lib/previousRankStore.ts's last-recorded snapshot for this course.
+ * Recording the CURRENT ranks as the new snapshot is a deliberate separate step
+ * (recordLeaderboardRanks) that this function does NOT perform; callers must run it once the
+ * returned entries have actually rendered, or the "since your last visit" delta would compare a
+ * fetch against itself. See that function's own comment.
+ *
+ * Cached in localStorage (lib/leaderboardStore.ts) keyed by courseId, the same shape as
+ * loadStudentScore: a plain call is served from the cache when present, forceRefresh bypasses it
+ * and re-caches the server's answer. Nothing on this device learns when another student's score
+ * changes their own leaderboard, the same staleness loadInstructorActivities documents — callers
+ * refresh explicitly, either via a Refresh control or when the signed-in student's own score
+ * changes (a completed session, see app/activities/[slug]/play/page.tsx's handleFinishSummary).
+ */
+export function loadCourseLeaderboard(
+  token: string,
+  courseId: string,
+  options: { forceRefresh?: boolean } = {},
+): Promise<ApiResult<{ entries: LeaderboardEntry[] }>> {
+  if (!options.forceRefresh) {
+    const cached = getCachedLeaderboard(courseId);
+    if (cached !== null) {
+      return Promise.resolve({ ok: true, data: { entries: cached } });
+    }
+  }
+
+  return request<{ entries: LeaderboardRow[] }>(
+    `/api/courses/${encodeURIComponent(courseId)}/leaderboard`,
+    { method: 'GET' },
+    token,
+  ).then((result) => {
+    if (!result.ok) return result;
+
+    const entries = withRankChange(result.data.entries, getPreviousRanks(courseId));
+    setCachedLeaderboard(courseId, entries);
+    return { ok: true as const, data: { entries } };
+  });
 }

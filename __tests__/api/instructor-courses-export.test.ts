@@ -144,8 +144,8 @@ describe('GET /api/instructor/courses/[id]/export', () => {
     const csv = await res.text();
     expect(csv).not.toMatch(/Alex|Chen|achen/);
     expect(csv).toBe(
-      'studentId,sessionId,activityType,difficultyLevel,status,startedAt,endedAt,cumulativeScore,maxScore,passed,questionCount,answeredCount,badgeId\r\n' +
-        'student-1,session-1,IDENTIFY_WEAK_USER_STORIES,1,completed,2026-08-01T10:00:00Z,2026-08-01T10:10:00Z,3,4,true,0,0,\r\n',
+      'studentId,activityType,difficultyLevel,status,startedAt,endedAt,cumulativeScore,maxScore,passed,questionCount,answeredCount,badgeId\r\n' +
+        'student-1,IDENTIFY_WEAK_USER_STORIES,1,completed,2026-08-01T10:00:00Z,2026-08-01T10:10:00Z,3,4,true,0,0,\r\n',
     );
   });
 
@@ -158,7 +158,7 @@ describe('GET /api/instructor/courses/[id]/export', () => {
     expect(res.status).toBe(200);
     const csv = await res.text();
     expect(csv).toBe(
-      'studentId,sessionId,activityType,difficultyLevel,status,startedAt,endedAt,cumulativeScore,maxScore,passed,questionCount,answeredCount,badgeId\r\n',
+      'studentId,activityType,difficultyLevel,status,startedAt,endedAt,cumulativeScore,maxScore,passed,questionCount,answeredCount,badgeId\r\n',
     );
     expect(h.state.tables).not.toContain('session_log');
   });

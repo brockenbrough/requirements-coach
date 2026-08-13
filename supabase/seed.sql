@@ -39,7 +39,8 @@
 
 INSERT INTO activity_type (activity_type) VALUES
 ('IDENTIFY_WEAK_USER_STORIES'),
-('IDENTIFY_WEAK_ACCEPTANCE_CRITERIA');
+('IDENTIFY_WEAK_ACCEPTANCE_CRITERIA'),
+('WRITE_ACCEPTANCE_CRITERIA');
 
 
 -- #####################################################################

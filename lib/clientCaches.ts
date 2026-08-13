@@ -3,10 +3,11 @@
 // One place that knows every localStorage cache the app keeps, so logout can drop them all.
 //
 // Without this the caches outlive the session: the next person to sign in on the same machine
-// finds the previous account's data already on screen before the first fetch returns. Two of
-// these hold *other people's* data — instructorStudentsStore has the class roster by name, and
-// acceptanceCriteriaSubmissionsStore has students' written answers and grades — so leaving them
-// behind is a disclosure, not just a stale-data bug.
+// finds the previous account's data already on screen before the first fetch returns. Some of
+// these hold *other people's* data — instructorStudentsStore has the class roster by name,
+// acceptanceCriteriaSubmissionsStore has students' written answers and grades, and
+// leaderboardStore/previousRankStore have classmates' usernames, photos and ranks — so leaving
+// them behind is a disclosure, not just a stale-data bug.
 //
 // Each store exports its own clear function rather than exposing its STORAGE_KEY, keeping to the
 // rule those modules already follow: only typed accessors leave the module, never the raw store.
@@ -18,8 +19,10 @@ import { clearCachedCompletedSessions } from './completedSessionsStore';
 import { clearCachedInstructorActivities } from './instructorActivityStore';
 import { clearCachedInstructorQuestions } from './instructorQuestionsStore';
 import { clearCachedInstructorStudents } from './instructorStudentsStore';
+import { clearCachedLeaderboard } from './leaderboardStore';
 import { clearCachedLlmConfig } from './instructorLlmConfigStore';
 import { clearCachedScore } from './scoreStore';
+import { clearPreviousRanks } from './previousRankStore';
 
 /**
  * Clears every cache that fronts an API call. Called from clearStoredAccessToken
@@ -44,4 +47,6 @@ export function clearAllClientCaches(): void {
   clearCachedInstructorQuestions();
   clearCachedAcceptanceCriteriaSubmissions();
   clearCachedLlmConfig();
+  clearCachedLeaderboard();
+  clearPreviousRanks();
 }

@@ -12,10 +12,9 @@ function getToken(request: Request): string | null {
 
 // studentId is the "user"."user_id" UUID, never studentName — this is the depersonalization
 // REQ-PL-3.4.3 asks for: a consistent per-student ID a researcher can group by, with no name
-// column anywhere in the file. sessionId is likewise just an opaque per-attempt identifier.
+// column anywhere in the file.
 const EXPORT_COLUMNS = [
   'studentId',
-  'sessionId',
   'activityType',
   'difficultyLevel',
   'status',
@@ -81,7 +80,6 @@ export async function GET(request: Request, { params }: { params: { id: string }
 
   const rows = activities.map((a) => [
     a.studentId,
-    a.session_id,
     a.activity_type,
     a.difficulty_level,
     a.status,

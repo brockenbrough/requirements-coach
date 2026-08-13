@@ -1,11 +1,18 @@
 import { getSupabaseAdminClient } from "../../../../lib/supabase";
 
-// GitHub #82: hardcoded rather than an environment variable (team decision — no env changes
-// for this feature). Still compared only ever on the server below, so it's exactly as
-// invisible to the browser as an env var would have been; the trade-off is that rotating it
-// now needs a code change + deploy instead of an env var edit.
-// CHANGE THIS before relying on it for real access control.
-const INSTRUCTOR_SIGNUP_CODE = "CHANGE-ME-instructor-2026";
+// GitHub #280: was a hardcoded literal here (GitHub #82's original "no env changes for this
+// feature" decision) — a real access-control secret sitting in plaintext in version control,
+// rotatable only by a code change + deploy. Read from the environment instead, exactly like
+// every Supabase credential in lib/supabase.ts; see isConfiguredInstructorCode below for what
+// happens when it's missing.
+function isConfiguredInstructorCode(value: string | undefined): value is string {
+  if (!value) return false;
+  const trimmed = value.trim();
+  // Rejects the leaked default (and any other CHANGE-ME-style placeholder someone pastes in)
+  // even if it's somehow set as the env var itself — a safety net behind the "don't hardcode
+  // it" fix, not a replacement for it.
+  return trimmed.length > 0 && !trimmed.toUpperCase().startsWith("CHANGE-ME");
+}
 
 export async function POST(request: Request) {
   try {
@@ -24,12 +31,35 @@ export async function POST(request: Request) {
     }
 
     // GitHub #82: the only check that matters, and it only ever runs here on the server —
-    // correct code grants 'instructor', anything else (wrong code, no code) silently stays
-    // 'student' — cannot be read or bypassed from client-side JavaScript. The role travels in
-    // the auth user's metadata because the "user" profile row (where role actually lives, see
-    // supabase/schema.sql) isn't created until the student fills in the profile form later;
-    // app/api/profile/route.ts reads it back from there at that point.
-    const role = instructorCode === INSTRUCTOR_SIGNUP_CODE ? "instructor" : "student";
+    // correct code grants 'instructor', wrong code silently stays 'student' — cannot be read or
+    // bypassed from client-side JavaScript. The role travels in the auth user's metadata
+    // because the "user" profile row (where role actually lives, see supabase/schema.sql) isn't
+    // created until the student fills in the profile form later; app/api/profile/route.ts reads
+    // it back from there at that point.
+    //
+    // No instructorCode at all is the ordinary student signup path and must not be affected by
+    // whether instructor signup happens to be configured — only an actual attempt to claim the
+    // instructor role (a non-empty instructorCode) needs a configured secret to check it
+    // against. GitHub #280: a missing/placeholder INSTRUCTOR_SIGNUP_CODE must never silently
+    // fall back to granting (or to comparing against) a built-in default — that attempt is
+    // rejected outright instead.
+    let role: "student" | "instructor" = "student";
+
+    if (instructorCode) {
+      const configuredCode = process.env.INSTRUCTOR_SIGNUP_CODE;
+
+      if (!isConfiguredInstructorCode(configuredCode)) {
+        console.error(
+          "INSTRUCTOR_SIGNUP_CODE not configured — rejecting instructor signup attempt.",
+        );
+        return Response.json(
+          { error: "Registration is temporarily unavailable. Please try again later." },
+          { status: 500 },
+        );
+      }
+
+      role = instructorCode === configuredCode ? "instructor" : "student";
+    }
 
     // Registration goes through the admin API, so the service role key is
     // mandatory here — the anon key cannot create users.

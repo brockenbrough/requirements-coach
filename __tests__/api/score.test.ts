@@ -96,6 +96,28 @@ describe('GET /api/students/{studentId}/score', () => {
 
     expect(response.status).toBe(200);
     expect(body.score).toBe(0);
+    expect(body.sessionsCompleted).toBe(0);
+  });
+
+  // GitHub #39: sessionsCompleted is the row count behind the same query the score is summed
+  // from — every completed session counts once here, even though a weaker retake at the same
+  // level doesn't raise the score.
+  it('counts every completed session for sessionsCompleted, including a weaker retake', async () => {
+    queue('session_log', {
+      data: [
+        { activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 1, cumulative_score: 100 },
+        { activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 1, cumulative_score: 75 },
+        { activity_type: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', difficulty_level: 1, cumulative_score: 50 },
+      ],
+      error: null,
+    });
+
+    const response = await GET(req(), ctx);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.score).toBe(150); // best-per-level sum: 100 + 50
+    expect(body.sessionsCompleted).toBe(3); // every completed session counts
   });
 
   // REQ-GAM-DL-1 counts completed sessions, not passed ones: the query filters on status,

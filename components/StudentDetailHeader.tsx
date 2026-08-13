@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getInitials } from '../lib/initials';
+import { Avatar } from './Avatar';
 
 /** GitHub #127: header for the student detail page — name, avatar, "Needs attention" badge, back link. */
 export function StudentDetailHeader({
@@ -19,9 +19,9 @@ export function StudentDetailHeader({
 
       <div className="mb-7 flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-3.5">
-          <div className="flex h-14 w-14 flex-none items-center justify-center rounded-full border-[3px] border-brand-gold bg-brand-navy-2 text-lg font-extrabold text-brand-gold">
-            {getInitials(null, null, studentName)}
-          </div>
+          {/* No avatarUrl to pass: this page's data is still lib/mockStudentAttempts.ts, which
+              carries no photo — initials only, exactly as before. */}
+          <Avatar fallbackName={studentName} size="md" />
           <div>
             <div className="flex flex-wrap items-center gap-2.5">
               <h1 className="text-2xl font-extrabold text-brand-navy">{studentName}</h1>
