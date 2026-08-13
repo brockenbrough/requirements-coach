@@ -130,13 +130,21 @@ export async function POST(request: Request) {
 
   const { activityType } = (body ?? {}) as { activityType?: unknown };
 
-  // AC 4: unknown activity type is a client error.
-  if (!isActivityType(activityType)) {
+  // AC 4: unknown activity type is a client error. Narrows activityType to string for the rest
+  // of the function — isActivityType's async check below can no longer double as a type
+  // predicate the way the old synchronous version did.
+  if (typeof activityType !== 'string') {
     return Response.json({ error: 'Unknown activity type.' }, { status: 400 });
   }
 
   const supabase = getSupabaseClient();
   if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
+
+  const { valid: validActivityType, error: activityTypeError } = await isActivityType(supabase, activityType);
+  if (activityTypeError) return Response.json({ error: activityTypeError.message }, { status: 500 });
+  if (!validActivityType) {
+    return Response.json({ error: 'Unknown activity type.' }, { status: 400 });
+  }
 
   // AC 6: the student id comes from the auth session, never from the request body.
   const { data: { user }, error: authError } = await supabase.auth.getUser(token);

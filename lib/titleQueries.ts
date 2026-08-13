@@ -2,7 +2,6 @@
 // so the student-facing titles route and any future consumer (e.g. the "new title earned"
 // notification from REQ-GAM-PL-2.4) cannot drift apart.
 
-import { ACTIVITY_TYPES } from './activityTypes';
 import { highestPassedLevelByType, type PassedSessionRow } from './sessionRules';
 import type { SupabaseClient } from './sessionQueries';
 
@@ -44,8 +43,12 @@ export async function computeStudentTitles(supabase: SupabaseClient, userId: str
 
   const highestPassed = highestPassedLevelByType(sessions);
 
-  // ACTIVITY_TYPES order keeps the response deterministic regardless of session_log row order.
-  const titles: StudentTitle[] = ACTIVITY_TYPES.filter((type) => attempted.has(type)).map((activityType) => {
+  // GitHub #347: activity types are no longer a fixed compile-time list (instructors can create
+  // their own quizzes), so "canonical order" is now alphabetical rather than a hardcoded array's
+  // declaration order — still deterministic regardless of session_log row order, and unlike the
+  // old ACTIVITY_TYPES.filter(...) it no longer silently drops an attempted type that isn't one
+  // of the three built-ins.
+  const titles: StudentTitle[] = [...attempted].sort().map((activityType) => {
     const level = highestPassed.get(activityType) ?? null;
     const title = level === null ? NOT_STARTED : titleByKey.get(`${activityType}:${level}`) ?? null;
     return { activityType, difficultyLevel: level, title };

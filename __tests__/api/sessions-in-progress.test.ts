@@ -82,6 +82,11 @@ const drawnQuestions = [
   { session_id: 'session-1', position: 1, question_id: 'q-2' },
 ];
 
+/** Queues a successful activity_type lookup (GitHub #347: isActivityType is now a DB read). */
+function queueValidActivityType(activityType = ACTIVITY_TYPE) {
+  queue('activity_type', { data: { activity_type: activityType }, error: null });
+}
+
 function req(query = '', token: string | null = 'valid-token') {
   return new Request(`http://localhost/api/sessions/in-progress${query}`, {
     headers: token ? { authorization: `Bearer ${token}` } : {},
@@ -100,6 +105,7 @@ describe('GET /api/sessions/in-progress', () => {
   });
 
   it('returns 401 for an invalid token', async () => {
+    queueValidActivityType();
     expect((await GET(req(`?activityType=${ACTIVITY_TYPE}`, 'bad-token'))).status).toBe(401);
   });
 
@@ -107,11 +113,13 @@ describe('GET /api/sessions/in-progress', () => {
     const response = await GET(req('?activityType=NOT_AN_ACTIVITY'));
 
     expect(response.status).toBe(400);
-    expect(h.state.tables).toHaveLength(0);
+    // The lookup itself still ran (against the activity_type table) — it just found nothing.
+    expect(h.state.tables).toEqual(['activity_type']);
   });
 
   // AC 1: status, difficulty level, cumulative score, the 4 question ids, last question index.
   it('returns the in-progress session for the activity type', async () => {
+    queueValidActivityType();
     queue('session_log', { data: [sessionRow()], error: null });
     queue('session_to_question', { data: drawnQuestions, error: null });
     queue('answered_question_log', {
@@ -142,6 +150,7 @@ describe('GET /api/sessions/in-progress', () => {
   });
 
   it('reports a null last question index while nothing is answered', async () => {
+    queueValidActivityType();
     queue('session_log', { data: [sessionRow({ cumulative_score: 0 })], error: null });
     queue('session_to_question', { data: drawnQuestions, error: null });
     queue('answered_question_log', { data: [], error: null });
@@ -154,18 +163,20 @@ describe('GET /api/sessions/in-progress', () => {
 
   // AC 2.
   it('returns 404 when no session is in progress for that activity type', async () => {
+    queueValidActivityType();
     queue('session_log', { data: [], error: null });
 
     const response = await GET(req(`?activityType=${ACTIVITY_TYPE}`));
 
     expect(response.status).toBe(404);
-    // Nothing to look up once there is no session.
-    expect(h.state.tables).toEqual(['session_log']);
+    // Nothing further to look up once there is no session.
+    expect(h.state.tables).toEqual(['activity_type', 'session_log']);
   });
 
   // AC 3: the filter is on the id from the token, so a foreign session is simply not returned
   // and looks exactly like a missing one.
   it("returns 404 for another student's session", async () => {
+    queueValidActivityType();
     queue('session_log', { data: [], error: null });
 
     expect((await GET(req(`?activityType=${ACTIVITY_TYPE}`))).status).toBe(404);
@@ -215,12 +226,14 @@ describe('GET /api/sessions/in-progress', () => {
   });
 
   it('returns 500 when the session lookup fails', async () => {
+    queueValidActivityType();
     queue('session_log', { data: null, error: { message: 'boom' } });
 
     expect((await GET(req(`?activityType=${ACTIVITY_TYPE}`))).status).toBe(500);
   });
 
   it('never writes', async () => {
+    queueValidActivityType();
     queue('session_log', { data: [sessionRow()], error: null });
     queue('session_to_question', { data: drawnQuestions, error: null });
     queue('answered_question_log', { data: [], error: null });

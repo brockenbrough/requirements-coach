@@ -37,10 +37,13 @@
 -- To re-run: DELETE FROM activity_type;
 -- #####################################################################
 
-INSERT INTO activity_type (activity_type) VALUES
-('IDENTIFY_WEAK_USER_STORIES'),
-('IDENTIFY_WEAK_ACCEPTANCE_CRITERIA'),
-('WRITE_ACCEPTANCE_CRITERIA');
+-- GitHub #347: quiz_name backfilled from lib/activityContent.ts's ACTIVITIES[].name — the exact
+-- names the app already shows for these three activities everywhere else. description and
+-- creator_id are left at their defaults (NULL) — these three are the "Built-in" quizzes.
+INSERT INTO activity_type (activity_type, quiz_name) VALUES
+('IDENTIFY_WEAK_USER_STORIES', 'Identify Weak User Stories'),
+('IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 'Identify Weak Acceptance Criteria'),
+('WRITE_ACCEPTANCE_CRITERIA', 'Write Acceptance Criteria');
 
 
 -- #####################################################################

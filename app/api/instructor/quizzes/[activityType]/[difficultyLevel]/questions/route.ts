@@ -61,7 +61,14 @@ export async function GET(
 
   // An unknown activityType or an out-of-range difficultyLevel can never match a real question,
   // so it is indistinguishable from "this quiz does not exist" — no separate 400 branch needed.
-  if (!isActivityType(activityType) || !VALID_DIFFICULTY_LEVELS.includes(difficultyLevel)) {
+  // difficultyLevel is checked first since it needs no database round trip.
+  if (!VALID_DIFFICULTY_LEVELS.includes(difficultyLevel)) {
+    return Response.json({ error: 'Quiz not found.' }, { status: 404 });
+  }
+
+  const { valid: validActivityType, error: activityTypeError } = await isActivityType(supabase, activityType);
+  if (activityTypeError) return Response.json({ error: activityTypeError.message }, { status: 500 });
+  if (!validActivityType) {
     return Response.json({ error: 'Quiz not found.' }, { status: 404 });
   }
 

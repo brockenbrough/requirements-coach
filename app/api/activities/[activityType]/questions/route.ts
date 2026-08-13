@@ -43,7 +43,9 @@ export async function GET(
   const { data: { user }, error: authError } = await supabase.auth.getUser(token);
   if (authError || !user) return Response.json({ error: 'Invalid or expired token.' }, { status: 401 });
 
-  if (!isActivityType(activityType)) {
+  const { valid: validActivityType, error: activityTypeError } = await isActivityType(supabase, activityType);
+  if (activityTypeError) return Response.json({ error: activityTypeError.message }, { status: 500 });
+  if (!validActivityType) {
     return Response.json({ error: 'Unknown activity type.' }, { status: 400 });
   }
 

@@ -44,8 +44,12 @@ export async function GET(request: Request, { params }: { params: { studentId: s
   }
 
   const activityType = new URL(request.url).searchParams.get('activityType');
-  if (activityType !== null && !isActivityType(activityType)) {
-    return Response.json({ error: 'Unknown activity type.' }, { status: 400 });
+  if (activityType !== null) {
+    const { valid: validActivityType, error: activityTypeError } = await isActivityType(supabase, activityType);
+    if (activityTypeError) return Response.json({ error: activityTypeError.message }, { status: 500 });
+    if (!validActivityType) {
+      return Response.json({ error: 'Unknown activity type.' }, { status: 400 });
+    }
   }
 
   const { data: student, error: studentError } = await supabase

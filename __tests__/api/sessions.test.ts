@@ -108,12 +108,18 @@ function req(body?: object, token: string | null = 'valid-token') {
   });
 }
 
+/** Queues a successful activity_type lookup (GitHub #347: isActivityType is now a DB read). */
+function queueValidActivityType(activityType = 'IDENTIFY_WEAK_USER_STORIES') {
+  queue('activity_type', { data: { activity_type: activityType }, error: null });
+}
+
 /**
- * Queues the two session_log reads that precede every fresh-draw path: no session in progress
- * (findInProgressSession), and no prior passed sessions (findStartDifficultyLevel), so the draw
- * starts at level 1.
+ * Queues the activity_type lookup plus the two session_log reads that precede every fresh-draw
+ * path: no session in progress (findInProgressSession), and no prior passed sessions
+ * (findStartDifficultyLevel), so the draw starts at level 1.
  */
 function queueFreshSessionStart() {
+  queueValidActivityType();
   queue('session_log', { data: null, error: null }); // findInProgressSession: none in progress
   queue('session_log', { data: [], error: null });   // findStartDifficultyLevel: no prior sessions -> level 1
 }
@@ -142,6 +148,7 @@ describe('POST /api/sessions', () => {
   });
 
   it('returns 401 for an invalid token', async () => {
+    queueValidActivityType();
     const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES' }, 'bad-token'));
     expect(response.status).toBe(401);
   });
@@ -151,6 +158,33 @@ describe('POST /api/sessions', () => {
     const response = await POST(req({ activityType: 'NOT_A_REAL_ACTIVITY' }));
     expect(response.status).toBe(400);
     expect(h.state.inserts).toHaveLength(0);
+  });
+
+  // GitHub #347: isActivityType now checks the activity_type table at request time instead of a
+  // hardcoded compile-time list, so a quiz an instructor created after the app was built is
+  // accepted here too — it reaches the "not enough questions" check below (400, but a different
+  // reason), rather than being rejected as "unknown" the way it would under the old union.
+  it('accepts an instructor-created activity type that only exists in the activity_type table', async () => {
+    queueValidActivityType('MY_CUSTOM_QUIZ');
+    queue('session_log', { data: null, error: null }); // no session in progress
+    queue('session_log', { data: [], error: null }); // no prior passed sessions
+    queue('question', { data: [], error: null }); // no questions seeded yet for this new quiz
+
+    const response = await POST(req({ activityType: 'MY_CUSTOM_QUIZ' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toMatch(/at least \d+ questions/i);
+  });
+
+  it('returns 500 when the activity_type lookup itself fails, not a 400', async () => {
+    queue('activity_type', { data: null, error: { message: 'connection refused' } });
+
+    const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body.error).toBe('connection refused');
   });
 
   it('returns 400 when activityType is missing', async () => {
@@ -211,6 +245,7 @@ describe('POST /api/sessions', () => {
   });
 
   it('starts the next session at the next difficulty level once the current one is passed', async () => {
+    queueValidActivityType();
     queue('session_log', { data: null, error: null }); // no session in progress
     queue('session_log', {
       data: [{ activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 1, passed: true }],
@@ -230,6 +265,7 @@ describe('POST /api/sessions', () => {
   });
 
   it('caps the next session at MAX_DIFFICULTY_LEVEL once the top level is already passed', async () => {
+    queueValidActivityType();
     queue('session_log', { data: null, error: null }); // no session in progress
     queue('session_log', {
       data: [{ activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 3, passed: true }],
@@ -280,6 +316,7 @@ describe('POST /api/sessions', () => {
 
   // REQ-PL-2.1: start and resume are the same, idempotent call.
   it('returns the running session instead of creating a second one', async () => {
+    queueValidActivityType();
     queue('session_log', { data: sessionRow, error: null });
     queue('session_to_question', { data: drawnQuestions, error: null });
 

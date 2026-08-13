@@ -86,6 +86,11 @@ function queueRole(role: string) {
   queue('user', { data: { role }, error: null });
 }
 
+/** Queues a successful activity_type lookup (GitHub #347: isActivityType is now a DB read). */
+function queueValidActivityType(activityType = 'IDENTIFY_WEAK_USER_STORIES') {
+  queue('activity_type', { data: { activity_type: activityType }, error: null });
+}
+
 function request(token?: string) {
   return new Request('http://localhost/api/instructor/questions', {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -268,18 +273,21 @@ describe('POST /api/instructor/questions', () => {
 
   it('rejects an invalid difficultyLevel with 400', async () => {
     queueRole('instructor');
+    queueValidActivityType();
     const res = await POST(postRequest(validBody({ difficultyLevel: 9 })));
     expect(res.status).toBe(400);
   });
 
   it('rejects fewer than 2 answers with 400', async () => {
     queueRole('instructor');
+    queueValidActivityType();
     const res = await POST(postRequest(validBody({ answers: [validAnswers()[0]] })));
     expect(res.status).toBe(400);
   });
 
   it('rejects zero correct answers with 400', async () => {
     queueRole('instructor');
+    queueValidActivityType();
     const answers = validAnswers().map((a) => ({ ...a, isCorrect: false }));
     const res = await POST(postRequest(validBody({ answers })));
     expect(res.status).toBe(400);
@@ -289,6 +297,7 @@ describe('POST /api/instructor/questions', () => {
 
   it('rejects two correct answers with 400', async () => {
     queueRole('instructor');
+    queueValidActivityType();
     const answers = validAnswers().map((a) => ({ ...a, isCorrect: true }));
     const res = await POST(postRequest(validBody({ answers })));
     expect(res.status).toBe(400);
@@ -298,6 +307,7 @@ describe('POST /api/instructor/questions', () => {
 
   it('creates the question and its answers, assigning order_number and max_score server-side', async () => {
     queueRole('instructor');
+    queueValidActivityType();
     queue('question', { data: null, error: null }); // MAX(order_number) — empty pool
     queue('question', { data: null, error: null }); // question insert
     queue('answer', { data: null, error: null }); // answer 1 insert
@@ -325,6 +335,7 @@ describe('POST /api/instructor/questions', () => {
 
   it('assigns order_number as MAX + 1, scoped to the activity type', async () => {
     queueRole('instructor');
+    queueValidActivityType();
     queue('question', { data: { order_number: 7 }, error: null }); // MAX(order_number) = 7
     queue('question', { data: null, error: null });
     queue('answer', { data: null, error: null });
@@ -345,6 +356,7 @@ describe('POST /api/instructor/questions', () => {
 
   it('rolls back the question when an answer insert fails partway through', async () => {
     queueRole('instructor');
+    queueValidActivityType();
     queue('question', { data: null, error: null }); // MAX(order_number)
     queue('question', { data: null, error: null }); // question insert
     queue('answer', { data: null, error: null }); // answer 1 insert succeeds
@@ -367,6 +379,7 @@ describe('POST /api/instructor/questions', () => {
 
   it('rolls back the question when the question_to_answer link insert fails', async () => {
     queueRole('instructor');
+    queueValidActivityType();
     queue('question', { data: null, error: null }); // MAX(order_number)
     queue('question', { data: null, error: null }); // question insert
     queue('answer', { data: null, error: null }); // answer 1 insert succeeds

@@ -114,8 +114,9 @@ describe('GET /api/instructor/students/:studentId/history', () => {
     const response = await GET(req('?activityType=NOT_A_REAL_ACTIVITY'), PARAMS);
 
     expect(response.status).toBe(400);
-    // Rejected before the existence check or any session_log read.
-    expect(h.state.tables).toEqual(['user']);
+    // Rejected before the existence check or any session_log read — the activity_type lookup
+    // itself still ran (GitHub #347: isActivityType is now a DB read), it just found nothing.
+    expect(h.state.tables).toEqual(['user', 'activity_type']);
   });
 
   it('returns 404 when the student does not exist', async () => {
@@ -187,6 +188,7 @@ describe('GET /api/instructor/students/:studentId/history', () => {
 
   it('filters by activity type when the query parameter is given', async () => {
     queueCallerRole('instructor');
+    queue('activity_type', { data: { activity_type: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA' }, error: null });
     queueStudent();
     queue('session_log', { data: [], error: null });
 

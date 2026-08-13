@@ -37,12 +37,16 @@ export async function GET(request: Request) {
 
   const activityType = new URL(request.url).searchParams.get('activityType');
 
-  if (activityType !== null && !isActivityType(activityType)) {
-    return Response.json({ error: 'Unknown activity type.' }, { status: 400 });
-  }
-
   const supabase = getSupabaseClient();
   if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
+
+  if (activityType !== null) {
+    const { valid: validActivityType, error: activityTypeError } = await isActivityType(supabase, activityType);
+    if (activityTypeError) return Response.json({ error: activityTypeError.message }, { status: 500 });
+    if (!validActivityType) {
+      return Response.json({ error: 'Unknown activity type.' }, { status: 400 });
+    }
+  }
 
   // The student id comes from the auth session, never from the query string — this is the
   // whole of "only returns sessions belonging to the requesting student".
