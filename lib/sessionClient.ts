@@ -172,9 +172,18 @@ function patchJson(payload: unknown): RequestInit {
  * There is deliberately no separate "resume" call: uq_session_log_one_active allows a
  * student one in-progress session per activity type, so the route answers 201 for a fresh
  * draw and 200 with resumed: true for the existing one. Both are success.
+ *
+ * options.difficultyLevel is the replay override: omitted, the server picks the next unpassed
+ * level (Story 2's auto-advance); passed, the server starts at that level instead — but only if
+ * the student has already passed it (403 otherwise). Conditionally spread rather than always
+ * sent, so an omitted level can't be confused with an explicit one server-side.
  */
-export function startSession(token: string, activityType: ActivityType) {
-  return request<StartSessionResult>('/api/sessions', postJson({ activityType }), token);
+export function startSession(token: string, activityType: ActivityType, options: { difficultyLevel?: number } = {}) {
+  return request<StartSessionResult>(
+    '/api/sessions',
+    postJson({ activityType, ...(options.difficultyLevel !== undefined ? { difficultyLevel: options.difficultyLevel } : {}) }),
+    token,
+  );
 }
 
 /**
