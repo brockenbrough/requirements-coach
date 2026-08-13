@@ -1,5 +1,9 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { requireInstructor } from '../../../../lib/instructorAuth';
+import { slugifyQuizName } from '../../../../lib/activityTypes';
+
+// Matches activity_type.activity_type varchar(50) in supabase/schema.sql.
+const MAX_KEY_LENGTH = 50;
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -7,13 +11,21 @@ function getToken(request: Request): string | null {
 }
 
 /**
- * POST /api/activities/types
+ * POST /api/activities/types — creates a named quiz (GitHub #347), i.e. a new row in the
+ * activity_type lookup table every question/session_log/title_definition already keys on.
  *
- * Creates a new activity type in the activity_type lookup table.
- * Only instructors can create activity types.
+ * Body: { name: string, description?: string }. The stored key (activity_type) is *derived* from
+ * name via slugifyQuizName — upper-cased, non-alphanumeric runs collapsed to one underscore, the
+ * same format the three built-in keys already have — never client-supplied directly, so an
+ * instructor names their quiz the same way they'd name anything else in the app.
  *
- * Body: { activityType: string }
- * Returns: { activity_type: string }
+ * The key must be unique. A collision is reported as 409, not silently resolved with a suffix —
+ * the instructor picks a different name themselves, same as a duplicate username or course code
+ * anywhere else in the app.
+ *
+ * creator_id comes from the authenticated instructor (guard.user_id), never the request body.
+ *
+ * Returns: { quiz: { activityType, name, description } }
  */
 export async function POST(request: Request) {
   const supabase = getSupabaseClient();
@@ -33,29 +45,52 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Invalid JSON body.' }, { status: 400 });
   }
 
-  const { activityType } = (body ?? {}) as { activityType?: unknown };
+  const { name, description } = (body ?? {}) as { name?: unknown; description?: unknown };
 
-  if (typeof activityType !== 'string' || activityType.trim() === '') {
-    return Response.json({ error: 'activityType is required.' }, { status: 400 });
+  if (typeof name !== 'string' || name.trim() === '') {
+    return Response.json({ error: 'name is required.' }, { status: 400 });
   }
 
-  const trimmed = activityType.trim();
-  if (trimmed.length > 50) {
-    return Response.json({ error: 'activityType must be 50 characters or fewer.' }, { status: 400 });
+  if (description !== undefined && description !== null && typeof description !== 'string') {
+    return Response.json({ error: 'description must be a string.' }, { status: 400 });
   }
+
+  const key = slugifyQuizName(name);
+
+  if (key === '') {
+    return Response.json({ error: 'name must contain at least one letter or number.' }, { status: 400 });
+  }
+  if (key.length > MAX_KEY_LENGTH) {
+    return Response.json(
+      { error: `name is too long — the derived key must be ${MAX_KEY_LENGTH} characters or fewer.` },
+      { status: 400 },
+    );
+  }
+
+  const trimmedDescription = typeof description === 'string' && description.trim() !== '' ? description.trim() : null;
 
   const { data, error } = await supabase
     .from('activity_type')
-    .insert({ activity_type: trimmed })
-    .select('activity_type')
+    .insert({
+      activity_type: key,
+      quiz_name: name.trim(),
+      description: trimmedDescription,
+      creator_id: guard.user_id,
+    })
+    .select('activity_type, quiz_name, description')
     .maybeSingle();
 
   if (error) {
     if (error.code === '23505') {
-      return Response.json({ error: 'Activity type already exists.' }, { status: 409 });
+      return Response.json({ error: 'A quiz with this name already exists. Choose a different name.' }, { status: 409 });
     }
     return Response.json({ error: error.message }, { status: 500 });
   }
 
-  return Response.json({ activity_type: (data as { activity_type: string }).activity_type }, { status: 201 });
+  const row = data as { activity_type: string; quiz_name: string; description: string | null };
+
+  return Response.json(
+    { quiz: { activityType: row.activity_type, name: row.quiz_name, description: row.description } },
+    { status: 201 },
+  );
 }
