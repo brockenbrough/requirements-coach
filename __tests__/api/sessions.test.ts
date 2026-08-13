@@ -250,7 +250,8 @@ describe('POST /api/sessions', () => {
 
   // Replay: a student may choose any level they have already passed instead of the auto-advance
   // level, to practice an easier one without being forced back to level 1 or stuck at the current
-  // level.
+  // level. The ceiling for the override is the auto-advance level itself (findStartDifficultyLevel),
+  // not just already-passed levels, so a level shown as "next" in the picker is a legal request too.
   it('accepts a requested difficultyLevel at or below the highest passed level', async () => {
     queue('session_log', { data: null, error: null }); // no session in progress
     queue('session_log', {
@@ -280,24 +281,43 @@ describe('POST /api/sessions', () => {
     links.forEach((l) => expect(level1Pool.map((q) => q.question_id)).toContain(l.question_id));
   });
 
-  it('rejects a requested difficultyLevel above the highest passed level', async () => {
+  it('accepts a requested difficultyLevel equal to the auto-advance level, even though it was never passed', async () => {
     queue('session_log', { data: null, error: null }); // no session in progress
     queue('session_log', {
       data: [{ activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 1, passed: true }],
       error: null,
-    }); // highestPassedLevel: 1
+    }); // highestPassedLevel: 1 -> auto-advance ceiling is 2
+    queue('question', { data: pool, error: null });
+    queue('session_log', { data: { ...sessionRow, difficulty_level: 2 }, error: null }); // insert
+    queue('session_to_question', { data: null, error: null });
+    queue('session_to_question', { data: drawnQuestions, error: null });
 
     const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES', difficultyLevel: 2 }));
+    expect(response.status).toBe(201);
+
+    const sessionInsert = h.state.inserts.find((i) => i.table === 'session_log')!
+      .payload as Record<string, unknown>;
+    expect(sessionInsert).toMatchObject({ difficulty_level: 2 });
+  });
+
+  it('rejects a requested difficultyLevel above the auto-advance ceiling', async () => {
+    queue('session_log', { data: null, error: null }); // no session in progress
+    queue('session_log', {
+      data: [{ activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 1, passed: true }],
+      error: null,
+    }); // highestPassedLevel: 1 -> auto-advance ceiling is 2
+
+    const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES', difficultyLevel: 3 }));
 
     expect(response.status).toBe(403);
     expect(h.state.inserts).toHaveLength(0);
   });
 
-  it('rejects a requested difficultyLevel when nothing has been passed yet', async () => {
+  it('rejects a requested difficultyLevel above the ceiling when nothing has been passed yet', async () => {
     queue('session_log', { data: null, error: null }); // no session in progress
-    queue('session_log', { data: [], error: null }); // nothing passed
+    queue('session_log', { data: [], error: null }); // nothing passed -> auto-advance ceiling is 1
 
-    const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES', difficultyLevel: 1 }));
+    const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES', difficultyLevel: 2 }));
 
     expect(response.status).toBe(403);
     expect(h.state.inserts).toHaveLength(0);
