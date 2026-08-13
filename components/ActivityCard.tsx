@@ -5,10 +5,15 @@ import { activityCardStatusLabel, type ActivityCardStatus } from '../lib/activit
 import type { ActivitySlug, Difficulty } from '../lib/activityContent';
 
 const DIFFICULTY_LABEL: Record<Difficulty, string> = { 1: 'Easy', 2: 'Medium', 3: 'Hard' };
+// Same green-to-orange difficulty color schema as the activity detail page
+// (app/activities/[slug]/page.tsx's DIFFICULTY_COLOR) — kept in sync there rather than shared,
+// since this card's chips are a tinted-background/dark-text pill and that page's badge is
+// solid text on a neutral bg-white/10 pill, two different existing treatments for the same
+// three brand colors (green/gold/danger).
 const DIFFICULTY_CLASSES: Record<Difficulty, string> = {
-  1: 'bg-[#4ADE80]/20 text-[#1e8f52]',
-  2: 'bg-[#2DD4BF]/20 text-[#0f7d70]',
-  3: 'bg-[#FFD666]/25 text-[#8a6100]',
+  1: 'bg-brand-green/20 text-brand-green-dark',
+  2: 'bg-brand-gold/25 text-brand-gold-dark',
+  3: 'bg-brand-danger/20 text-brand-danger',
 };
 
 /**
