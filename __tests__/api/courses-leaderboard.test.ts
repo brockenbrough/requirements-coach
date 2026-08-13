@@ -26,6 +26,7 @@ const h = vi.hoisted(() => {
         return builder;
       },
       order: () => builder,
+      limit: () => builder,
       maybeSingle: async () => result,
       // PostgrestFilterBuilder is thenable — queries without .single()/.maybeSingle() resolve too.
       then: (onOk: (r: Result) => unknown, onErr?: (e: unknown) => unknown) =>
@@ -101,7 +102,7 @@ describe('GET /api/courses/{courseId}/leaderboard', () => {
   // AC: the caller must themselves be enrolled — a leaderboard discloses other students' data.
   it('returns 403 when the caller is not enrolled in an existing course', async () => {
     queue('course', { data: { course_id: COURSE_ID }, error: null });
-    queue('student_course', { data: null, error: null }); // membership check: no row
+    queue('student_course', { data: [], error: null }); // membership check: no matching row
 
     const response = await GET(req(), ctx);
 
@@ -113,7 +114,7 @@ describe('GET /api/courses/{courseId}/leaderboard', () => {
   // AC: an empty (or fully unattempted) course is 200 [], not 404 — the course itself is real.
   it('returns 200 with an empty list for a course with no enrolled students', async () => {
     queue('course', { data: { course_id: COURSE_ID }, error: null });
-    queue('student_course', { data: { user_id: 'student-1' }, error: null }); // membership check: caller is enrolled
+    queue('student_course', { data: [{ course_id: COURSE_ID }], error: null }); // membership check: caller is enrolled
     queue('student_course', { data: [], error: null }); // roster read inside computeCourseLeaderboard
 
     const response = await GET(req(), ctx);
@@ -125,7 +126,7 @@ describe('GET /api/courses/{courseId}/leaderboard', () => {
 
   it('returns the ranked roster for an enrolled caller', async () => {
     queue('course', { data: { course_id: COURSE_ID }, error: null });
-    queue('student_course', { data: { user_id: 'student-1' }, error: null }); // membership check
+    queue('student_course', { data: [{ course_id: COURSE_ID }], error: null }); // membership check
     queue('student_course', {
       data: [{ user_id: 'student-1', student: { username: 'ada', avatar_url: null, role: 'student' } }],
       error: null,
@@ -168,7 +169,7 @@ describe('GET /api/courses/{courseId}/leaderboard', () => {
 
   it('returns 500 when the leaderboard query itself fails', async () => {
     queue('course', { data: { course_id: COURSE_ID }, error: null });
-    queue('student_course', { data: { user_id: 'student-1' }, error: null });
+    queue('student_course', { data: [{ course_id: COURSE_ID }], error: null });
     queue('student_course', { data: null, error: { message: 'db down' } });
 
     const response = await GET(req(), ctx);

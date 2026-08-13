@@ -1,6 +1,6 @@
-// Query for the real course leaderboard (GET /api/courses/{courseId}/leaderboard), replacing
-// lib/mockLeaderboard.ts as the leaderboard page and dashboard preview's data source. See
-// lib/scoreQueries.ts's sumBestScores and lib/streakQueries.ts's computeStreakFromSessions,
+// Query for the real course leaderboard (GET /api/courses/{courseId}/leaderboard), the
+// leaderboard page and dashboard preview's data source. See lib/scoreQueries.ts's sumBestScores
+// and lib/streakQueries.ts's computeStreakFromSessions,
 // both reused here so a leaderboard row can never disagree with the sidebar score pill or
 // GET /api/students/{id}/streak about what "points" or "streak" mean.
 

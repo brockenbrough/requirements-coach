@@ -296,3 +296,41 @@ export async function listJoinableCourses(supabase: SupabaseClient, userId: stri
 
   return { courses, error: null };
 }
+
+/**
+ * Every course a user is enrolled in (student_course), as bare ids. The building block for
+ * "does this student share a course with that one" — GET /api/students/{id}/public-profile uses
+ * this to get the target's course list before checking the caller against it (isEnrolledInAnyCourse
+ * below), the same two-step shape listJoinableCourses already uses for its own membership check.
+ */
+export async function getEnrolledCourseIds(supabase: SupabaseClient, userId: string) {
+  const { data, error } = await supabase.from('student_course').select('course_id').eq('user_id', userId);
+
+  if (error) return { courseIds: null, error };
+
+  return { courseIds: ((data ?? []) as { course_id: string }[]).map((row) => row.course_id), error: null };
+}
+
+/**
+ * Whether a user is enrolled in any of the given courses — the one membership check
+ * GET /api/courses/{courseId}/leaderboard (a single-course list: "is the caller in *this*
+ * course") and GET /api/students/{id}/public-profile (the target's full course list: "does the
+ * caller share *any* course with them") both reduce to, so a change to what "enrolled" means
+ * can't drift between the two routes.
+ *
+ * courseIds: [] short-circuits to not-enrolled without a query — nothing to be a member of.
+ */
+export async function isEnrolledInAnyCourse(supabase: SupabaseClient, userId: string, courseIds: string[]) {
+  if (courseIds.length === 0) return { enrolled: false, error: null };
+
+  const { data, error } = await supabase
+    .from('student_course')
+    .select('course_id')
+    .eq('user_id', userId)
+    .in('course_id', courseIds)
+    .limit(1);
+
+  if (error) return { enrolled: false, error };
+
+  return { enrolled: (data ?? []).length > 0, error: null };
+}
