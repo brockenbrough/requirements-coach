@@ -8,6 +8,7 @@ import {
 } from '../../../lib/sessionRules';
 import {
   type SupabaseClient,
+  findHighestPassedLevel,
   findInProgressSession,
   findStartDifficultyLevel,
   loadProgressForSessions,
@@ -128,11 +129,19 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Invalid JSON body.' }, { status: 400 });
   }
 
-  const { activityType } = (body ?? {}) as { activityType?: unknown };
+  const { activityType, difficultyLevel } = (body ?? {}) as { activityType?: unknown; difficultyLevel?: unknown };
 
   // AC 4: unknown activity type is a client error.
   if (!isActivityType(activityType)) {
     return Response.json({ error: 'Unknown activity type.' }, { status: 400 });
+  }
+
+  // Replay override (optional): a student may ask to start at a specific level instead of the
+  // computed next-unpassed one, but only a level they have already passed — a malformed value is
+  // a bad request, but "you haven't earned this level yet" is an authorization failure, not one.
+  const hasReplayLevel = difficultyLevel !== undefined;
+  if (hasReplayLevel && (typeof difficultyLevel !== 'number' || !Number.isInteger(difficultyLevel) || difficultyLevel < 1)) {
+    return Response.json({ error: 'Invalid difficulty level.' }, { status: 400 });
   }
 
   const supabase = getSupabaseClient();
@@ -146,10 +155,24 @@ export async function POST(request: Request) {
   if (existing.error) return Response.json({ error: existing.error.message }, { status: 500 });
   if (existing.session) return respondWithSession(supabase, existing.session, { created: false });
 
-  // The student's next unpassed level for this activity: one past the highest difficulty_level
-  // they've passed, capped at MAX_DIFFICULTY_LEVEL. No prior passed session -> level 1.
-  const { startLevel, error: levelError } = await findStartDifficultyLevel(supabase, user.id, activityType);
-  if (levelError) return Response.json({ error: levelError.message }, { status: 500 });
+  let startLevel: number;
+
+  if (hasReplayLevel) {
+    // A student may replay any level they have already passed, to practice an easier one
+    // without being forced back to level 1 or stuck at their current auto-advance level.
+    const { highestPassedLevel, error: levelError } = await findHighestPassedLevel(supabase, user.id, activityType);
+    if (levelError) return Response.json({ error: levelError.message }, { status: 500 });
+    if (highestPassedLevel === null || (difficultyLevel as number) > highestPassedLevel) {
+      return Response.json({ error: 'You have not passed that difficulty level yet.' }, { status: 403 });
+    }
+    startLevel = difficultyLevel as number;
+  } else {
+    // The student's next unpassed level for this activity: one past the highest difficulty_level
+    // they've passed, capped at MAX_DIFFICULTY_LEVEL. No prior passed session -> level 1.
+    const { startLevel: computedLevel, error: levelError } = await findStartDifficultyLevel(supabase, user.id, activityType);
+    if (levelError) return Response.json({ error: levelError.message }, { status: 500 });
+    startLevel = computedLevel!;
+  }
 
   // AC 1: draw QUESTIONS_PER_SESSION questions matching activity type and the computed level.
   // GitHub #124: filtered through an inner join against the activity_type table (#122/#123)

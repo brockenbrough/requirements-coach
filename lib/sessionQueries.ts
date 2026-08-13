@@ -86,11 +86,12 @@ export async function findInProgressSession(
 }
 
 /**
- * Where a new session for activityType should start: one level past the highest difficulty_level
- * this student has passed for that activity type, capped at MAX_DIFFICULTY_LEVEL. No prior passed
- * session -> START_DIFFICULTY_LEVEL, unchanged.
+ * The highest difficulty_level this student has passed for one activity type, or null if none
+ * has been. Split out of findStartDifficultyLevel so a caller that needs to validate a
+ * client-requested level (POST /api/sessions's replay override) can get this value directly,
+ * without re-running the same session_log query findStartDifficultyLevel already does.
  */
-export async function findStartDifficultyLevel(
+export async function findHighestPassedLevel(
   supabase: SupabaseClient,
   userId: string,
   activityType: string,
@@ -101,13 +102,27 @@ export async function findStartDifficultyLevel(
     .eq('user_id', userId)
     .eq('activity_type', activityType);
 
-  if (error) return { startLevel: null, error };
+  if (error) return { highestPassedLevel: null, error };
 
   const highestPassed = highestPassedLevelByType((data ?? []) as PassedSessionRow[]);
-  const highestPassedLevel = highestPassed.get(activityType) ?? null;
-  const startLevel = nextDifficultyLevel(highestPassedLevel);
 
-  return { startLevel, error: null };
+  return { highestPassedLevel: highestPassed.get(activityType) ?? null, error: null };
+}
+
+/**
+ * Where a new session for activityType should start: one level past the highest difficulty_level
+ * this student has passed for that activity type, capped at MAX_DIFFICULTY_LEVEL. No prior passed
+ * session -> START_DIFFICULTY_LEVEL, unchanged.
+ */
+export async function findStartDifficultyLevel(
+  supabase: SupabaseClient,
+  userId: string,
+  activityType: string,
+) {
+  const { highestPassedLevel, error } = await findHighestPassedLevel(supabase, userId, activityType);
+  if (error) return { startLevel: null, error };
+
+  return { startLevel: nextDifficultyLevel(highestPassedLevel), error: null };
 }
 
 /**
