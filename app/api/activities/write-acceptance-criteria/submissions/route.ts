@@ -149,10 +149,17 @@ export async function POST(request: Request) {
   if (storyError) return Response.json({ error: storyError.message }, { status: 500 });
   if (!story) return Response.json({ error: "User story not found." }, { status: 404 });
 
+  const creatorId = (story as UserStoryRow).creator_id;
+  if (!creatorId)
+    return Response.json(
+      { error: "The instructor who created this prompt has not configured an LLM provider." },
+      { status: 500 },
+    );
+
   const { data: config, error: configError } = await supabase
     .from("instructor_llm_config")
     .select("provider, api_key, model")
-    .eq("user_id", (story as UserStoryRow).creator_id)
+    .eq("user_id", creatorId)
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle();

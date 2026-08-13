@@ -74,6 +74,12 @@ export default function WriteAcceptanceCriteriaPlayPage() {
     setNextPosition(result.data.nextPosition);
     setAnsweredCount(result.data.answeredCount);
     setOutcome(null);
+
+    // All stories answered but session not formally completed yet (e.g. LLM error interrupted
+    // the last submission before completeAcSession ran). Show summary instead of blank page.
+    if (result.data.nextPosition === null) {
+      setShowSummary(true);
+    }
   }, [token, router, showSummary]);
 
   useEffect(() => {
