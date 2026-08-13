@@ -1,6 +1,7 @@
 import { getSupabaseClient } from '../../../lib/supabase';
 
-const PROFILE_COLUMNS = 'user_id, username, biography, avatar_url, role, first_name, last_name, age, semester';
+const PROFILE_COLUMNS =
+  'user_id, username, biography, avatar_url, role, first_name, last_name, age, semester, has_seen_onboarding_tour';
 
 const MIN_AGE = 1;
 const MAX_AGE = 129;
@@ -114,12 +115,13 @@ export async function PATCH(request: Request) {
   if (!user) return Response.json({ error: 'Invalid or expired token.' }, { status: 401 });
 
   const body = await request.json();
-  const { biography, first_name, last_name, age, semester } = body as {
+  const { biography, first_name, last_name, age, semester, has_seen_onboarding_tour } = body as {
     biography?: string;
     first_name?: string;
     last_name?: string;
     age?: number | null;
     semester?: number | null;
+    has_seen_onboarding_tour?: boolean;
   };
 
   const updates: Record<string, unknown> = {};
@@ -145,6 +147,11 @@ export async function PATCH(request: Request) {
     if (semesterError) return Response.json({ error: semesterError }, { status: 400 });
     updates.semester = semester;
   }
+
+  // GitHub #318: set once the guided tour is finished or skipped (or explicitly replayed and
+  // re-finished) — never unset by this route, but not rejected either; there's no harm in it,
+  // and it keeps this route's validation from having to know about the tour's own state machine.
+  if (has_seen_onboarding_tour !== undefined) updates.has_seen_onboarding_tour = has_seen_onboarding_tour;
 
   if (Object.keys(updates).length === 0) {
     return Response.json({ error: 'No fields to update.' }, { status: 400 });

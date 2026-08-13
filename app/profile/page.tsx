@@ -9,6 +9,7 @@ import { EditableField } from '../../components/EditableField';
 import { ImageCropModal } from '../../components/ImageCropModal';
 import { MasteryProgressSection } from '../../components/MasteryProgressSection';
 import { MyCoursesSection } from '../../components/MyCoursesSection';
+import { useOnboardingTour } from '../../components/OnboardingTourProvider';
 import { useUser } from '../../components/UserProvider';
 import {
   AVATAR_ACCEPT_ATTRIBUTE,
@@ -49,9 +50,19 @@ function LockIcon() {
   );
 }
 
+function CompassIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" />
+      <path d="m14.5 9.5-1.8 4.7-4.7 1.8 1.8-4.7 4.7-1.8Z" />
+    </svg>
+  );
+}
+
 export default function ProfilePage() {
   const router = useRouter();
   const { token, profile, loading, setProfile } = useUser();
+  const { startTour } = useOnboardingTour();
   const [error, setError] = useState('');
 
   // Role is known from profile once it exists; before that (create flow) it lives in the
@@ -498,6 +509,21 @@ export default function ProfilePage() {
                   Change Password
                 </button>
               )}
+            </div>
+
+            {/* GitHub #318: available to both roles, same as Change Password above — the guided
+                tour has a step list for students and a separate one for instructors, so replaying
+                it makes sense regardless of which one this account gets. */}
+            <div className="mt-6 border-t border-gray-100 pt-6">
+              <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Guided Tour</p>
+              <button
+                type="button"
+                onClick={startTour}
+                className="mt-3 flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-extrabold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple"
+              >
+                <CompassIcon />
+                Show tour again
+              </button>
             </div>
 
             {/* GitHub #39: cumulative score and mastery titles are a student concept, same as
