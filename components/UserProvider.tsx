@@ -15,6 +15,8 @@ export type Profile = {
   last_name: string;
   age: number | null;
   semester: number | null;
+  /** GitHub #318: has the first-login guided tour been finished or skipped yet. */
+  has_seen_onboarding_tour: boolean;
 };
 
 type UserContextValue = {

@@ -118,4 +118,17 @@ describe('Profile API routes', () => {
     const response = await PATCH(req('PATCH', {}));
     expect(response.status).toBe(400);
   });
+
+  // GitHub #318: the guided tour's "finished/skipped/replayed" flag goes through the same
+  // generic PATCH as every other profile field, rather than a dedicated route.
+  it('PATCH updates has_seen_onboarding_tour', async () => {
+    const response = await PATCH(req('PATCH', { has_seen_onboarding_tour: true }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ profile: mockProfile });
+  });
+
+  it('PATCH sends has_seen_onboarding_tour through to the update call', async () => {
+    await PATCH(req('PATCH', { has_seen_onboarding_tour: true }));
+    expect(mockBuilder.update).toHaveBeenCalledWith(expect.objectContaining({ has_seen_onboarding_tour: true }));
+  });
 });
