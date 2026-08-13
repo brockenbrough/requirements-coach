@@ -17,6 +17,7 @@ import { QUESTIONS_PER_SESSION } from './sessionRules';
 
 export type ActivityCardStatus =
   | { kind: 'in-progress'; answered: number; total: number }
+  | { kind: 'mastered' }
   | { kind: 'best-score'; score: number; maxScore: number }
   | { kind: 'not-attempted' };
 
@@ -25,6 +26,8 @@ export function activityCardStatusLabel(status: ActivityCardStatus): string {
   switch (status.kind) {
     case 'in-progress':
       return `In progress · ${status.answered} of ${status.total}`;
+    case 'mastered':
+      return 'All levels completed!';
     case 'best-score':
       return `Best score: ${status.score} / ${status.maxScore}`;
     case 'not-attempted':
@@ -35,12 +38,13 @@ export function activityCardStatusLabel(status: ActivityCardStatus): string {
 }
 
 /**
- * Which of the three states a card is in.
+ * Which of the four states a card is in.
  *
- * A running session outranks a best score: the student's next click resumes it, so that is the
- * more useful thing to show even when they have finished this activity before. A best score
- * outranks the empty state for the same reason the empty state exists at all — it is only
- * honest when there is genuinely nothing behind it.
+ * A running session outranks everything else: the student's next click resumes it, so that is
+ * the more useful thing to show even when they have finished this activity before, or mastered
+ * it. Mastered (every level passed) outranks a plain best score — it is strictly more complete
+ * information about the same history. A best score outranks the empty state for the same reason
+ * the empty state exists at all — it is only honest when there is genuinely nothing behind it.
  *
  * questionCount falls back to QUESTIONS_PER_SESSION rather than rendering "of 0": a session with
  * no linked questions shouldn't be able to exist, and if one does, the constant is closer to the
@@ -49,6 +53,7 @@ export function activityCardStatusLabel(status: ActivityCardStatus): string {
 export function deriveActivityCardStatus(
   inProgress: { answeredCount: number; questionCount: number } | null,
   bestScore: { score: number; maxScore: number } | null,
+  isMastered: boolean,
 ): ActivityCardStatus {
   if (inProgress) {
     return {
@@ -56,6 +61,10 @@ export function deriveActivityCardStatus(
       answered: inProgress.answeredCount,
       total: inProgress.questionCount || QUESTIONS_PER_SESSION,
     };
+  }
+
+  if (isMastered) {
+    return { kind: 'mastered' };
   }
 
   if (bestScore) {

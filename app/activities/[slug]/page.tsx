@@ -159,9 +159,9 @@ export default function ActivityDetailPage({
   const session = current?.session ?? null;
   const totalQuestions = current?.questions.length ?? 0;
   const answeredCount = current?.answers.length ?? 0;
-  // Every new session is currently drawn at START_DIFFICULTY_LEVEL (see POST /api/sessions) —
-  // real level progression isn't implemented server-side yet, so this always matches what
-  // clicking Start would actually produce, and the running session's own level once one exists.
+  // POST /api/sessions now computes the actual starting level from pass history server-side; this
+  // fallback only covers the moment before a session exists, when there's nothing to read a level
+  // from yet, so it shows the easy-level default rather than guessing what Start would produce.
   const displayLevel = session?.difficulty_level ?? START_DIFFICULTY_LEVEL;
 
   return (

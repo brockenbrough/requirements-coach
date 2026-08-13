@@ -372,6 +372,7 @@ ALTER TABLE title_definition ADD CONSTRAINT ck_title_definition_difficulty_level
 ALTER TABLE title_definition ADD CONSTRAINT uq_title_definition_activity_level UNIQUE (activity_type, difficulty_level);
 
 ALTER TABLE session_log ADD CONSTRAINT ck_session_log_status CHECK (status IN ('in-progress', 'completed', 'abandoned'));
+ALTER TABLE session_log ADD CONSTRAINT ck_session_log_difficulty_level CHECK (difficulty_level BETWEEN 1 AND 3);
 
 -- GitHub #82: the only two roles the app understands. Set at profile-creation time from
 -- auth.users.raw_user_meta_data.role (see app/api/profile/route.ts) — INSTRUCTOR_SIGNUP_CODE
@@ -602,6 +603,12 @@ CREATE POLICY own_submissions_insert ON submission
 --
 --   ALTER TABLE "user" ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'student';
 --   ALTER TABLE "user" ADD CONSTRAINT ck_user_role CHECK (role IN ('student', 'instructor'));
+
+-- Fix (session difficulty level bug): session_log.difficulty_level has always existed (DEFAULT 1),
+-- so no column change is needed here -- only the missing CHECK constraint. Safe to add against
+-- existing rows: every session was previously inserted at level 1 regardless of activity type.
+--
+--   ALTER TABLE session_log ADD CONSTRAINT ck_session_log_difficulty_level CHECK (difficulty_level BETWEEN 1 AND 3);
 
 -- GitHub #96 (answered_question_log.answer_id renamed to submitted_option, so the column name
 -- says what it holds — the option the student picked, not a row in the answer table). RENAME
