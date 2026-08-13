@@ -16,6 +16,7 @@ const h = vi.hoisted(() => {
         state.filters.push({ column, value });
         return builder;
       },
+      maybeSingle: async () => result,
       then: (onOk: (r: Result) => unknown, onErr?: (e: unknown) => unknown) =>
         Promise.resolve(result).then(onOk, onErr),
     };
@@ -27,6 +28,11 @@ const h = vi.hoisted(() => {
 
 function queue(table: string, result: Result) {
   (h.state.queues[table] ??= []).push(result);
+}
+
+/** Queues a successful activity_type lookup (GitHub #347: isActivityType is now a DB read). */
+function queueValidActivityType(activityType: string) {
+  queue('activity_type', { data: { activity_type: activityType }, error: null });
 }
 
 vi.mock('../../lib/supabase', () => ({
@@ -72,6 +78,9 @@ describe('GET /api/activities/:activityType/questions', () => {
   });
 
   it('returns 400 for an unknown activity type', async () => {
+    // Overrides this file's default `{ data: [] }` — isActivityType needs an explicit "not
+    // found" (`data: null`) to tell "no such row" apart from "found an empty list".
+    queue('activity_type', { data: null, error: null });
     const res = await GET(makeRequest('UNKNOWN_ACTIVITY', '1'), PARAMS('UNKNOWN_ACTIVITY'));
     expect(res.status).toBe(400);
     const body = await res.json();
@@ -79,6 +88,7 @@ describe('GET /api/activities/:activityType/questions', () => {
   });
 
   it('returns 400 when difficulty is missing', async () => {
+    queueValidActivityType('IDENTIFY_WEAK_USER_STORIES');
     const res = await GET(makeRequest('IDENTIFY_WEAK_USER_STORIES'), PARAMS('IDENTIFY_WEAK_USER_STORIES'));
     expect(res.status).toBe(400);
     const body = await res.json();
@@ -86,6 +96,7 @@ describe('GET /api/activities/:activityType/questions', () => {
   });
 
   it('returns 400 when difficulty is not 1, 2, or 3', async () => {
+    queueValidActivityType('IDENTIFY_WEAK_USER_STORIES');
     const res = await GET(makeRequest('IDENTIFY_WEAK_USER_STORIES', '5'), PARAMS('IDENTIFY_WEAK_USER_STORIES'));
     expect(res.status).toBe(400);
     const body = await res.json();
@@ -93,6 +104,7 @@ describe('GET /api/activities/:activityType/questions', () => {
   });
 
   it('returns an empty array when no questions exist for the combination', async () => {
+    queueValidActivityType('IDENTIFY_WEAK_USER_STORIES');
     queue('question', { data: [], error: null });
     const res = await GET(makeRequest('IDENTIFY_WEAK_USER_STORIES', '1'), PARAMS('IDENTIFY_WEAK_USER_STORIES'));
     expect(res.status).toBe(200);
@@ -101,6 +113,7 @@ describe('GET /api/activities/:activityType/questions', () => {
   });
 
   it('returns matching questions with the correct fields', async () => {
+    queueValidActivityType('IDENTIFY_WEAK_USER_STORIES');
     const mockQuestions = [
       { question_id: 'q-1', question_prompt: 'Which story is weakest?', difficulty_level: 1, max_score: 25 },
       { question_id: 'q-2', question_prompt: 'Pick the worst story.', difficulty_level: 1, max_score: 25 },
@@ -120,6 +133,7 @@ describe('GET /api/activities/:activityType/questions', () => {
   });
 
   it('filters by activity type and difficulty level', async () => {
+    queueValidActivityType('IDENTIFY_WEAK_ACCEPTANCE_CRITERIA');
     queue('question', { data: [], error: null });
     await GET(makeRequest('IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', '2'), PARAMS('IDENTIFY_WEAK_ACCEPTANCE_CRITERIA'));
     // GitHub #124: filtered via the inner join alias, not the plain column.
@@ -128,6 +142,7 @@ describe('GET /api/activities/:activityType/questions', () => {
   });
 
   it('returns 500 when the database returns an error', async () => {
+    queueValidActivityType('IDENTIFY_WEAK_USER_STORIES');
     queue('question', { data: null, error: { message: 'DB error' } });
     const res = await GET(makeRequest('IDENTIFY_WEAK_USER_STORIES', '1'), PARAMS('IDENTIFY_WEAK_USER_STORIES'));
     expect(res.status).toBe(500);

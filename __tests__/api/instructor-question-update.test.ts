@@ -78,6 +78,11 @@ function queueRole(role: string) {
   queue('user', { data: { role }, error: null });
 }
 
+/** Queues a successful activity_type lookup (GitHub #347: isActivityType is now a DB read). */
+function queueValidActivityType(activityType = 'IDENTIFY_WEAK_USER_STORIES') {
+  queue('activity_type', { data: { activity_type: activityType }, error: null });
+}
+
 function queueOwnedQuestion(userId = 'instructor-1') {
   queue('question', { data: { question_id: 'q-1', user_id: userId }, error: null });
 }
@@ -171,18 +176,21 @@ describe('PATCH /api/instructor/questions/[questionId]', () => {
 
   it('rejects an invalid difficultyLevel with 400', async () => {
     queueRole('instructor');
+    queueValidActivityType();
     const res = await call(validBody({ difficultyLevel: 9 }));
     expect(res.status).toBe(400);
   });
 
   it('rejects fewer than 2 answers with 400', async () => {
     queueRole('instructor');
+    queueValidActivityType();
     const res = await call(validBody({ answers: [validAnswers()[0]] }));
     expect(res.status).toBe(400);
   });
 
   it('rejects an answer with no id with 400', async () => {
     queueRole('instructor');
+    queueValidActivityType();
     const answers = [{ optionText: 'A', isCorrect: false }, { id: 'a-2', optionText: 'B', isCorrect: true }];
     const res = await call(validBody({ answers }));
     expect(res.status).toBe(400);
@@ -190,6 +198,7 @@ describe('PATCH /api/instructor/questions/[questionId]', () => {
 
   it('rejects duplicate answer ids with 400', async () => {
     queueRole('instructor');
+    queueValidActivityType();
     const answers = [
       { id: 'a-1', optionText: 'A', isCorrect: false },
       { id: 'a-1', optionText: 'B', isCorrect: true },
@@ -200,6 +209,7 @@ describe('PATCH /api/instructor/questions/[questionId]', () => {
 
   it('rejects zero correct answers with 400', async () => {
     queueRole('instructor');
+    queueValidActivityType();
     const answers = validAnswers().map((a) => ({ ...a, isCorrect: false }));
     const res = await call(validBody({ answers }));
     const body = await res.json();
@@ -209,6 +219,7 @@ describe('PATCH /api/instructor/questions/[questionId]', () => {
 
   it('rejects two correct answers with 400', async () => {
     queueRole('instructor');
+    queueValidActivityType();
     const answers = validAnswers().map((a) => ({ ...a, isCorrect: true }));
     const res = await call(validBody({ answers }));
     const body = await res.json();
@@ -218,6 +229,7 @@ describe('PATCH /api/instructor/questions/[questionId]', () => {
 
   it('returns 404 when the question does not exist', async () => {
     queueRole('instructor');
+    queueValidActivityType();
     queue('question', { data: null, error: null });
 
     const res = await call(validBody());
@@ -226,6 +238,7 @@ describe('PATCH /api/instructor/questions/[questionId]', () => {
 
   it('returns 403 with a JSON body when the caller does not own the question', async () => {
     queueRole('instructor');
+    queueValidActivityType();
     queueOwnedQuestion('some-other-instructor');
 
     const res = await call(validBody());
@@ -236,6 +249,7 @@ describe('PATCH /api/instructor/questions/[questionId]', () => {
 
   it('returns 400 when the answer count does not match the existing option count', async () => {
     queueRole('instructor');
+    queueValidActivityType();
     queueOwnedQuestion();
     queueExistingLinks(['a-1']); // only one existing option, body sends two
 
@@ -245,6 +259,7 @@ describe('PATCH /api/instructor/questions/[questionId]', () => {
 
   it('returns 400 when an answer id does not belong to this question', async () => {
     queueRole('instructor');
+    queueValidActivityType();
     queueOwnedQuestion();
     queueExistingLinks(['a-1', 'a-3']); // body references a-2, which isn't linked here
 
@@ -254,6 +269,7 @@ describe('PATCH /api/instructor/questions/[questionId]', () => {
 
   it('updates the question and its answers, leaving order_number/max_score/user_id untouched', async () => {
     queueRole('instructor');
+    queueValidActivityType();
     queueOwnedQuestion();
     queueExistingLinks();
     queue('question', { data: null, error: null }); // question update
@@ -283,6 +299,7 @@ describe('PATCH /api/instructor/questions/[questionId]', () => {
 
   it('does not roll back a partial failure: an answer update failing after the question update succeeds is a plain 500', async () => {
     queueRole('instructor');
+    queueValidActivityType();
     queueOwnedQuestion();
     queueExistingLinks();
     queue('question', { data: null, error: null }); // question update succeeds

@@ -20,6 +20,7 @@ const h = vi.hoisted(() => {
         return builder;
       },
       order: () => builder,
+      maybeSingle: async () => result,
       // PostgrestFilterBuilder is thenable — queries without .single() are awaited directly.
       then: (onOk: (r: Result) => unknown, onErr?: (e: unknown) => unknown) =>
         Promise.resolve(result).then(onOk, onErr),
@@ -61,6 +62,11 @@ function req(query = `?activityType=${ACTIVITY}`, token: string | null = 'valid-
   });
 }
 
+/** Queues a successful activity_type lookup (GitHub #347: isActivityType is now a DB read). */
+function queueValidActivityType(activityType = ACTIVITY) {
+  queue('activity_type', { data: { activity_type: activityType }, error: null });
+}
+
 /** A completed session row as the query selects it. */
 function attemptRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -87,6 +93,7 @@ describe('GET /api/sessions/completed', () => {
   });
 
   it('returns 401 for an invalid token', async () => {
+    queueValidActivityType();
     const response = await GET(req(undefined, 'bad-token'));
     expect(response.status).toBe(401);
   });
@@ -108,6 +115,7 @@ describe('GET /api/sessions/completed', () => {
 
   // A history legitimately starts out empty — that is a normal state, not a 404.
   it('returns 200 and an empty list when there are no completed attempts', async () => {
+    queueValidActivityType();
     queue('session_log', { data: [], error: null });
 
     const response = await GET(req());
@@ -118,6 +126,7 @@ describe('GET /api/sessions/completed', () => {
   });
 
   it('maps a session row onto the attempt shape', async () => {
+    queueValidActivityType();
     queue('session_log', { data: [attemptRow()], error: null });
 
     const response = await GET(req());
@@ -138,6 +147,7 @@ describe('GET /api/sessions/completed', () => {
 
   // The response is deliberately trimmed — the filter columns are not part of the payload.
   it('does not leak the underlying session columns', async () => {
+    queueValidActivityType();
     queue('session_log', { data: [attemptRow()], error: null });
 
     const body = await (await GET(req())).json();
@@ -149,6 +159,7 @@ describe('GET /api/sessions/completed', () => {
   });
 
   it('returns every attempt in query order, passed and failed alike', async () => {
+    queueValidActivityType();
     queue('session_log', {
       data: [
         attemptRow({ session_id: 'session-3', cumulative_score: 100, passed: true, ended_at: '2026-07-30T09:00:00.000Z' }),
@@ -171,11 +182,14 @@ describe('GET /api/sessions/completed', () => {
 
   // The student id comes from the token, so a foreign history cannot be requested at all.
   it('scopes the query to the authenticated user, the activity type and completed status', async () => {
+    queueValidActivityType();
     queue('session_log', { data: [], error: null });
 
     await GET(req());
 
     expect(h.state.filters).toEqual([
+      // The activity_type lookup (isActivityType) runs before session_log is ever queried.
+      { table: 'activity_type', column: 'activity_type', value: ACTIVITY },
       { table: 'session_log', column: 'user_id', value: 'user-123' },
       { table: 'session_log', column: 'activity_type', value: ACTIVITY },
       { table: 'session_log', column: 'status', value: 'completed' },
@@ -183,6 +197,7 @@ describe('GET /api/sessions/completed', () => {
   });
 
   it('returns 500 when the session_log query fails', async () => {
+    queueValidActivityType();
     queue('session_log', { data: null, error: { message: 'db down' } });
 
     const response = await GET(req());

@@ -98,6 +98,11 @@ const submittedAnswers = [
   },
 ];
 
+/** Queues a successful activity_type lookup (GitHub #347: isActivityType is now a DB read). */
+function queueValidActivityType(activityType = ACTIVITY) {
+  queue('activity_type', { data: { activity_type: activityType }, error: null });
+}
+
 function req(activityType: string | null = ACTIVITY, token: string | null = 'valid-token') {
   const url = activityType
     ? `http://localhost/api/sessions/current?activityType=${activityType}`
@@ -119,6 +124,7 @@ describe('GET /api/sessions/current', () => {
   });
 
   it('returns 401 for an invalid token', async () => {
+    queueValidActivityType();
     expect((await GET(req(ACTIVITY, 'bad-token'))).status).toBe(401);
   });
 
@@ -129,6 +135,7 @@ describe('GET /api/sessions/current', () => {
 
   // Nothing in progress is a normal state, not an error: the client shows "start" instead.
   it('returns 200 with a null session when nothing is in progress', async () => {
+    queueValidActivityType();
     queue('session_log', { data: null, error: null });
 
     const response = await GET(req());
@@ -142,6 +149,7 @@ describe('GET /api/sessions/current', () => {
   });
 
   it('resumes at the first unanswered question', async () => {
+    queueValidActivityType();
     queue('session_log', { data: sessionRow, error: null });
     queue('session_to_question', { data: drawnQuestions, error: null });
     queue('answered_question_log', { data: submittedAnswers, error: null });
@@ -162,6 +170,7 @@ describe('GET /api/sessions/current', () => {
 
   // The unanswered questions must not carry their solution.
   it('never exposes is_correct on the questions', async () => {
+    queueValidActivityType();
     queue('session_log', { data: sessionRow, error: null });
     queue('session_to_question', { data: drawnQuestions, error: null });
     queue('answered_question_log', { data: submittedAnswers, error: null });
@@ -182,6 +191,7 @@ describe('GET /api/sessions/current', () => {
 
   // Feedback for questions the student has already committed to is theirs to see.
   it('returns correctness and explanation for answers already submitted', async () => {
+    queueValidActivityType();
     queue('session_log', { data: sessionRow, error: null });
     queue('session_to_question', { data: drawnQuestions, error: null });
     queue('answered_question_log', { data: submittedAnswers, error: null });
@@ -201,6 +211,7 @@ describe('GET /api/sessions/current', () => {
   });
 
   it('reports a fresh session with no answers yet', async () => {
+    queueValidActivityType();
     queue('session_log', { data: { ...sessionRow, cumulative_score: 0 }, error: null });
     queue('session_to_question', { data: drawnQuestions, error: null });
     queue('answered_question_log', { data: [], error: null });
@@ -214,6 +225,7 @@ describe('GET /api/sessions/current', () => {
   });
 
   it('reports completed when every question has been answered', async () => {
+    queueValidActivityType();
     queue('session_log', { data: sessionRow, error: null });
     queue('session_to_question', { data: drawnQuestions, error: null });
     queue('answered_question_log', {
@@ -236,6 +248,7 @@ describe('GET /api/sessions/current', () => {
 
   // Answers may arrive in any order; the next position must not depend on it.
   it('derives the next position independently of row order', async () => {
+    queueValidActivityType();
     queue('session_log', { data: sessionRow, error: null });
     queue('session_to_question', { data: [...drawnQuestions].reverse(), error: null });
     queue('answered_question_log', { data: [...submittedAnswers].reverse(), error: null });

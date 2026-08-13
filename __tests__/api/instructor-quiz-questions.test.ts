@@ -56,6 +56,11 @@ function queueCallerRole(role: string) {
   queue('user', { data: { role }, error: null });
 }
 
+/** Queues a successful activity_type lookup (GitHub #347: isActivityType is now a DB read). */
+function queueValidActivityType(activityType = ACTIVITY_TYPE) {
+  queue('activity_type', { data: { activity_type: activityType }, error: null });
+}
+
 function req(token: string | null = 'valid-token') {
   return new Request(`http://localhost/api/instructor/quizzes/${ACTIVITY_TYPE}/1/questions`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -100,7 +105,8 @@ describe('GET /api/instructor/quizzes/:activityType/:difficultyLevel/questions',
     const response = await GET(req(), params('NOT_A_REAL_ACTIVITY'));
 
     expect(response.status).toBe(404);
-    expect(h.state.tables).toEqual(['user']);
+    // The activity_type lookup itself still ran (GitHub #347) — it just found nothing.
+    expect(h.state.tables).toEqual(['user', 'activity_type']);
   });
 
   it('returns 404 for a difficultyLevel outside 1-3, before querying questions', async () => {
@@ -114,6 +120,7 @@ describe('GET /api/instructor/quizzes/:activityType/:difficultyLevel/questions',
 
   it('returns 404 when no question exists for this activityType/difficultyLevel at all', async () => {
     queueCallerRole('instructor');
+    queueValidActivityType();
     queue('question', { data: [], error: null });
 
     const response = await GET(req(), params());
@@ -125,6 +132,7 @@ describe('GET /api/instructor/quizzes/:activityType/:difficultyLevel/questions',
 
   it('returns 403 when the quiz exists but none of its questions belong to the caller', async () => {
     queueCallerRole('instructor');
+    queueValidActivityType();
     queue('question', {
       data: [{ question_id: 'q1', question_prompt: 'Prompt', user_id: 'someone-else', question_to_answer: [] }],
       error: null,
@@ -138,6 +146,7 @@ describe('GET /api/instructor/quizzes/:activityType/:difficultyLevel/questions',
 
   it('returns only the caller\'s own questions, shaped with answers and is_correct', async () => {
     queueCallerRole('instructor');
+    queueValidActivityType();
     queue('question', {
       data: [
         {
@@ -179,6 +188,7 @@ describe('GET /api/instructor/quizzes/:activityType/:difficultyLevel/questions',
 
   it('returns 500 when the question query fails', async () => {
     queueCallerRole('instructor');
+    queueValidActivityType();
     queue('question', { data: null, error: { message: 'boom' } });
 
     const response = await GET(req(), params());
@@ -190,6 +200,7 @@ describe('GET /api/instructor/quizzes/:activityType/:difficultyLevel/questions',
 
   it('filters on the requested activity type and difficulty level', async () => {
     queueCallerRole('instructor');
+    queueValidActivityType();
     queue('question', { data: [], error: null });
 
     await GET(req(), params());

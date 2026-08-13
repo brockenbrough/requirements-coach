@@ -30,13 +30,18 @@ export async function GET(request: Request) {
   if (!token) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
   const activityType = new URL(request.url).searchParams.get('activityType');
-
-  if (!isActivityType(activityType)) {
-    return Response.json({ error: 'Unknown activity type.' }, { status: 400 });
-  }
+  // Narrows activityType to string for the rest of the function — isActivityType's async check
+  // below can no longer double as a type predicate the way the old synchronous version did.
+  if (activityType === null) return Response.json({ error: 'Unknown activity type.' }, { status: 400 });
 
   const supabase = getSupabaseClient();
   if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
+
+  const { valid: validActivityType, error: activityTypeError } = await isActivityType(supabase, activityType);
+  if (activityTypeError) return Response.json({ error: activityTypeError.message }, { status: 500 });
+  if (!validActivityType) {
+    return Response.json({ error: 'Unknown activity type.' }, { status: 400 });
+  }
 
   // The student id comes from the auth session, never from the query string — that is the whole
   // of "a student only ever sees their own history".

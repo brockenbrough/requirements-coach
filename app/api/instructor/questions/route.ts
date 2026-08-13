@@ -136,7 +136,14 @@ export async function POST(request: Request) {
   if (typeof questionPrompt !== 'string' || questionPrompt.trim() === '') {
     return Response.json({ error: 'questionPrompt is required.' }, { status: 400 });
   }
-  if (!isActivityType(activityType)) {
+  // Narrows activityType to string for the rest of the function — isActivityType's async check
+  // below can no longer double as a type predicate the way the old synchronous version did.
+  if (typeof activityType !== 'string') {
+    return Response.json({ error: 'activityType must be a valid activity type.' }, { status: 400 });
+  }
+  const { valid: validActivityType, error: activityTypeError } = await isActivityType(supabase, activityType);
+  if (activityTypeError) return Response.json({ error: activityTypeError.message }, { status: 500 });
+  if (!validActivityType) {
     return Response.json({ error: 'activityType must be a valid activity type.' }, { status: 400 });
   }
   if (difficultyLevel !== 1 && difficultyLevel !== 2 && difficultyLevel !== 3) {

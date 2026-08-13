@@ -138,7 +138,8 @@ describe('GET /api/students/{studentId}/titles', () => {
     ]);
   });
 
-  // AC 1: one entry per attempted activity type, in canonical order.
+  // AC 1: one entry per attempted activity type, in canonical (GitHub #347: alphabetical, since
+  // activity types are no longer a fixed compile-time list) order.
   it('returns one entry per attempted activity type', async () => {
     queueLookup([
       { activity_type: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', difficulty_level: 1, passed: true },
@@ -150,8 +151,8 @@ describe('GET /api/students/{studentId}/titles', () => {
 
     expect(response.status).toBe(200);
     expect(body.titles).toEqual([
-      { activityType: 'IDENTIFY_WEAK_USER_STORIES', difficultyLevel: 3, title: 'Story Expert' },
       { activityType: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', difficultyLevel: 1, title: 'Criteria Apprentice' },
+      { activityType: 'IDENTIFY_WEAK_USER_STORIES', difficultyLevel: 3, title: 'Story Expert' },
     ]);
   });
 
