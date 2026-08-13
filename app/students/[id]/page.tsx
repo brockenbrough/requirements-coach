@@ -89,9 +89,14 @@ function StudentProfileContent({ studentId }: { studentId: string }) {
 
   /**
    * The self case is resolved before the mock lookup, and not just as a display nicety: the
-   * leaderboard substitutes the signed-in student's real Supabase uuid into their own row
-   * (getMockLeaderboard), so clicking it arrives here with an id no hardcoded mock entry can
-   * match. Reading from useUser() instead means your own profile shows real data even in Phase 1.
+   * leaderboard (GET /api/courses/{courseId}/leaderboard) is real now and returns real Supabase
+   * uuids for every row, including the signed-in student's own, which no hardcoded mock entry
+   * can match. Reading from useUser() instead means your own profile shows real data.
+   *
+   * KNOWN GAP left by that same change: a *classmate's* row now also carries a real uuid, and
+   * getMockPublicProfile only recognizes the fake 'mock-stu-NN' ids below — so clicking a peer on
+   * the real leaderboard currently lands on NotFoundCard until GET /api/students/{id}/public-profile
+   * (US-5) replaces this mock. Only the self case above is unaffected.
    */
   const profile: PublicStudentProfile | null = useMemo(() => {
     if (isSelf && ownProfile) {

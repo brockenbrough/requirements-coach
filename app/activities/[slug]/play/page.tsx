@@ -9,6 +9,7 @@ import { QuestionCard } from "../../../../components/QuestionCard";
 import { SessionProgressDots, type ProgressDotStatus } from "../../../../components/SessionProgressDots";
 import { SessionSummaryScreen, type SessionSummaryItem } from "../../../../components/SessionSummaryScreen";
 import { getActivity } from "../../../../lib/activityContent";
+import { clearCachedLeaderboard } from "../../../../lib/leaderboardStore";
 import { isPassing } from "../../../../lib/sessionRules";
 import {
   type CurrentSessionResult,
@@ -244,6 +245,12 @@ export default function PlayActivityPage({
         }),
       ]);
     }
+    // The score that just changed is the same cumulative score every course leaderboard the
+    // student is in ranks by — a completed session can move their rank on any of them. There is
+    // no cheap way from here to know which course(s), so the whole cache is cleared (like the
+    // caches above, not awaited: nothing on this page reads it, only the leaderboard page and
+    // preview do, on their own next mount) rather than a targeted, per-course forceRefresh.
+    clearCachedLeaderboard();
     router.push(`/activities/${activity!.slug}`);
   }
 
