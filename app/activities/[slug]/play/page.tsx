@@ -21,6 +21,7 @@ import {
   loadFeedback,
   loadSessions,
   loadStudentScore,
+  loadStudentTitles,
   submitAnswer,
 } from "../../../../lib/sessionClient";
 import { useRequireRole } from "../../../../lib/useRequireRole";
@@ -52,6 +53,12 @@ export default function PlayActivityPage({
   const [showSummary, setShowSummary] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // REQ-GAM-PL-2.4: the highest difficulty level already passed for this activity type before
+  // this session could complete — undefined until loaded, null meaning "none yet" (same meaning
+  // as StudentTitle.difficultyLevel). Captured once so a retake of an already-passed level
+  // (titleAtStart === this session's level) never reads as a new title.
+  const [titleAtStart, setTitleAtStart] = useState<number | null | undefined>(undefined);
+  const [titleEarned, setTitleEarned] = useState<{ title: string; activityName: string } | null>(null);
 
   /**
    * The server is the only source of progress — there is no stored "current question",
@@ -96,6 +103,22 @@ export default function PlayActivityPage({
   useEffect(() => {
     void syncFromServer();
   }, [syncFromServer]);
+
+  // REQ-GAM-PL-2.4: fetched once per mount, well before a 4-question session can finish, so it
+  // reflects the student's title *before* this attempt — never re-derived from this session's
+  // own outcome, which is what tells a newly-earned title apart from a retake.
+  useEffect(() => {
+    if (!token || !profile?.user_id || !activity) return;
+    let cancelled = false;
+    void loadStudentTitles(token, profile.user_id).then((result) => {
+      if (cancelled || !result.ok) return;
+      const entry = result.data.titles.find((t) => t.activityType === activity.activityType);
+      setTitleAtStart(entry?.difficultyLevel ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, profile?.user_id, activity]);
 
   if (loading || !authorized) return null;
 
@@ -188,7 +211,7 @@ export default function PlayActivityPage({
     });
   }
 
-  function handleContinue() {
+  async function handleContinue() {
     if (!outcome) return;
 
     // GitHub #236: fold the just-graded answer into session.answers before dropping the
@@ -217,6 +240,28 @@ export default function PlayActivityPage({
     );
 
     if (outcome.completed) {
+      // REQ-GAM-PL-2.4/2.5: a new title only exists if this session passed *and* its
+      // difficulty level beats whatever was already passed before this attempt started —
+      // otherwise this is a retake of an already-mastered level, not a new title.
+      const passed = isPassing(cumulativeScore, session!.session!.max_score);
+      if (
+        passed &&
+        titleAtStart !== undefined &&
+        (titleAtStart === null || outcome.question.difficulty_level > titleAtStart) &&
+        token &&
+        profile?.user_id
+      ) {
+        const titlesResult = await loadStudentTitles(token, profile.user_id);
+        if (titlesResult.ok) {
+          const earned = titlesResult.data.titles.find(
+            (t) => t.activityType === activity!.activityType,
+          );
+          if (earned?.title) {
+            setTitleEarned({ title: earned.title, activityName: activity!.name });
+          }
+        }
+      }
+
       // GitHub #263: show the session summary instead of navigating away immediately — the
       // cache refresh + navigation that used to happen right here now happens once the student
       // dismisses the summary, in handleFinishSummary.
@@ -315,6 +360,7 @@ export default function PlayActivityPage({
             message={summaryMessage}
             items={summaryItems}
             onDone={handleFinishSummary}
+            titleNotification={titleEarned}
           />
         ) : outcome && feedback ? (
           <>

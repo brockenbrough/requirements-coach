@@ -22,6 +22,12 @@ export type SessionSummaryItem = {
   passed: boolean;
 };
 
+/** REQ-GAM-PL-2.5: the title name plus the activity type it belongs to. */
+export type TitleNotification = {
+  title: string;
+  activityName: string;
+};
+
 export function SessionSummaryScreen({
   scoreValue,
   scoreMax,
@@ -29,6 +35,7 @@ export function SessionSummaryScreen({
   items,
   onDone,
   doneLabel = 'Back to Activities',
+  titleNotification,
 }: {
   scoreValue: number | string;
   scoreMax: number | string;
@@ -36,6 +43,8 @@ export function SessionSummaryScreen({
   items: SessionSummaryItem[];
   onDone: () => void;
   doneLabel?: string;
+  /** REQ-GAM-PL-2.4: only set when this session earned a new mastery title. */
+  titleNotification?: TitleNotification | null;
 }) {
   return (
     <div className="rounded-brand-lg border border-brand-gold/40 bg-gradient-to-br from-brand-gold-dark to-brand-navy p-8 text-center">
@@ -46,6 +55,12 @@ export function SessionSummaryScreen({
         <span className="text-2xl font-bold text-brand-ink-muted"> / {scoreMax}</span>
       </div>
       <p className="mt-2 text-sm font-semibold text-brand-ink-muted">{message}</p>
+
+      {titleNotification ? (
+        <div className="mt-4 rounded-brand-md border border-brand-gold/40 bg-brand-gold/10 px-4 py-3 text-sm font-bold text-brand-gold">
+          You&apos;ve earned a new title: {titleNotification.title} — {titleNotification.activityName}.
+        </div>
+      ) : null}
 
       <div className="mt-6 space-y-2 text-left">
         {items.map((item) => (
