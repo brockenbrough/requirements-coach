@@ -300,6 +300,22 @@ describe('POST /api/sessions', () => {
     expect(sessionInsert).toMatchObject({ difficulty_level: 2 });
   });
 
+  it('accepts a requested difficultyLevel of 1 when nothing has been passed yet', async () => {
+    queue('session_log', { data: null, error: null }); // no session in progress
+    queue('session_log', { data: [], error: null }); // nothing passed -> auto-advance ceiling is 1
+    queue('question', { data: pool, error: null });
+    queue('session_log', { data: sessionRow, error: null }); // insert
+    queue('session_to_question', { data: null, error: null });
+    queue('session_to_question', { data: drawnQuestions, error: null });
+
+    const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES', difficultyLevel: 1 }));
+    expect(response.status).toBe(201);
+
+    const sessionInsert = h.state.inserts.find((i) => i.table === 'session_log')!
+      .payload as Record<string, unknown>;
+    expect(sessionInsert).toMatchObject({ difficulty_level: 1 });
+  });
+
   it('rejects a requested difficultyLevel above the auto-advance ceiling', async () => {
     queue('session_log', { data: null, error: null }); // no session in progress
     queue('session_log', {

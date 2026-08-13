@@ -97,20 +97,23 @@ function ActivityDetailContent({
     : 0;
   // The top of the selectable range: every already-passed level, plus the one level beyond that
   // Start would auto-advance to anyway (POST /api/sessions accepts a replay override up to and
-  // including this exact value — see that route's comment). 0 when nothing's passed yet, same as
-  // highestPassedLevel, so LevelReplaySelector stays hidden until there's something to choose.
-  const highestSelectableLevel = highestPassedLevel >= 1 ? nextDifficultyLevel(highestPassedLevel) : 0;
+  // including this exact value — see that route's comment). Always >= 1: a student who hasn't
+  // passed anything yet still has level 1 to show and select (nextDifficultyLevel(null) ===
+  // START_DIFFICULTY_LEVEL), so the selector is never hidden just because nothing's been passed.
+  const highestSelectableLevel = nextDifficultyLevel(highestPassedLevel >= 1 ? highestPassedLevel : null);
 
   // The next level (one past whatever was last passed) is the default selection — right after
-  // finishing a level, that's what's shown pre-selected. Guarded by highestPassedLevel so a
-  // student who hasn't passed anything yet still gets plain auto-advance on Start, not a 403 for
-  // "replaying" a level they've never passed. userPickedLevelRef means this only ever sets the
-  // default itself; it never re-asserts itself over a level the student has since picked.
+  // finishing a level, that's what's shown pre-selected; for a student with nothing passed yet,
+  // that's level 1. Gated on attempts !== null rather than highestPassedLevel >= 1 — attempts
+  // starting null (not yet loaded) must not itself count as "confirmed nothing passed" and stomp
+  // initialLevel (the query-param guess) with a premature "level 1" before the real fetch lands.
+  // userPickedLevelRef means this only ever sets the default itself; it never re-asserts itself
+  // over a level the student has since picked.
   useEffect(() => {
-    if (!userPickedLevelRef.current && highestPassedLevel >= 1) {
+    if (!userPickedLevelRef.current && attempts !== null) {
       setSelectedLevel(highestSelectableLevel);
     }
-  }, [highestPassedLevel, highestSelectableLevel]);
+  }, [attempts, highestSelectableLevel]);
 
   // Both reads in one pass, because the page re-runs this on every return from /play: the
   // running session decides Start vs. Resume/Abandon, the finished ones fill the history below.

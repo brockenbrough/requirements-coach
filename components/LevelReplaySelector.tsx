@@ -36,8 +36,9 @@ export function LevelReplaySelector({
   onSelect: (level: number) => void;
   disabled?: boolean;
 }) {
-  // Nothing passed yet means there's no auto-advance level to offer either (still level 1, the
-  // plain Start button already covers that).
+  // Defensive only: app/activities/[slug]/page.tsx always derives highestSelectableLevel as at
+  // least 1 (a student with nothing passed yet still has level 1 to show), so this never actually
+  // hides the row — kept as a guard against a 0/negative value reaching here some other way.
   if (highestSelectableLevel < 1) return null;
 
   const levels = Array.from({ length: highestSelectableLevel }, (_, i) => i + 1);
