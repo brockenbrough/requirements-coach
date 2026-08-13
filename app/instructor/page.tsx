@@ -6,6 +6,7 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { AcSubmissionDetails } from '../../components/AcSubmissionDetails';
 import { AppShell } from '../../components/AppShell';
 import { ActivityLogTable } from '../../components/ActivityLogTable';
+import { InstructorAcceptanceCriteriaStats } from '../../components/InstructorAcceptanceCriteriaStats';
 import { InstructorActivityStats } from '../../components/InstructorActivityStats';
 import {
   InstructorFilters,
@@ -17,7 +18,11 @@ import { InstructorDashboardSkeleton } from '../../components/InstructorDashboar
 import { InstructorRoster } from '../../components/InstructorRoster';
 import { Pagination } from '../../components/Pagination';
 import { QuizAttemptDetails } from '../../components/QuizAttemptDetails';
-import { loadInstructorACSubmissions } from '../../lib/acceptanceCriteriaClient';
+import {
+  loadAcceptanceCriteriaStatistics,
+  loadInstructorACSubmissions,
+  type AcceptanceCriteriaStatistics,
+} from '../../lib/acceptanceCriteriaClient';
 import { summarizeStudents, toAcSubmissionRow, toQuizAttemptRow, type ActivityRow } from '../../lib/activityLogTypes';
 import { loadInstructorActivities, loadInstructorStudents, type StudentSummary } from '../../lib/sessionClient';
 import { useRequireRole } from '../../lib/useRequireRole';
@@ -42,6 +47,7 @@ function InstructorDashboardContent() {
 
   const [entries, setEntries] = useState<ActivityRow[] | null>(null);
   const [allStudents, setAllStudents] = useState<StudentSummary[] | null>(null);
+  const [acStatistics, setAcStatistics] = useState<AcceptanceCriteriaStatistics | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -66,23 +72,28 @@ function InstructorDashboardContent() {
     if (!token || !profile?.user_id) return;
     let cancelled = false;
 
-    Promise.all([loadInstructorActivities(token, profile.user_id), loadInstructorACSubmissions(token)]).then(
-      ([activitiesResult, submissionsResult]) => {
-        if (cancelled) return;
-        if (!activitiesResult.ok) {
-          setError(activitiesResult.error);
-          return;
-        }
-        if (!submissionsResult.ok) {
-          setError(submissionsResult.error);
-          return;
-        }
-        setEntries([
-          ...activitiesResult.data.sessions.map(toQuizAttemptRow),
-          ...submissionsResult.data.submissions.map(toAcSubmissionRow),
-        ]);
-      },
-    );
+    Promise.all([
+      loadInstructorActivities(token, profile.user_id),
+      loadInstructorACSubmissions(token),
+      loadAcceptanceCriteriaStatistics(token),
+    ]).then(([activitiesResult, submissionsResult, statisticsResult]) => {
+      if (cancelled) return;
+      if (!activitiesResult.ok) {
+        setError(activitiesResult.error);
+        return;
+      }
+      if (!submissionsResult.ok) {
+        setError(submissionsResult.error);
+        return;
+      }
+      setEntries([
+        ...activitiesResult.data.sessions.map(toQuizAttemptRow),
+        ...submissionsResult.data.submissions.map(toAcSubmissionRow),
+      ]);
+      // A failed statistics fetch costs the stats card, not the whole dashboard — see
+      // InstructorAcceptanceCriteriaStats, which renders placeholders for a null value.
+      if (statisticsResult.ok) setAcStatistics(statisticsResult.data.statistics);
+    });
 
     return () => {
       cancelled = true;
@@ -95,7 +106,8 @@ function InstructorDashboardContent() {
     Promise.all([
       loadInstructorActivities(token, profile.user_id, { forceRefresh: true }),
       loadInstructorACSubmissions(token),
-    ]).then(([activitiesResult, submissionsResult]) => {
+      loadAcceptanceCriteriaStatistics(token),
+    ]).then(([activitiesResult, submissionsResult, statisticsResult]) => {
       setRefreshing(false);
       if (!activitiesResult.ok) {
         setError(activitiesResult.error);
@@ -109,6 +121,7 @@ function InstructorDashboardContent() {
         ...activitiesResult.data.sessions.map(toQuizAttemptRow),
         ...submissionsResult.data.submissions.map(toAcSubmissionRow),
       ]);
+      if (statisticsResult.ok) setAcStatistics(statisticsResult.data.statistics);
       setError(null);
     });
   }
@@ -216,6 +229,10 @@ function InstructorDashboardContent() {
         ) : (
           <>
             <InstructorActivityStats entries={entries} />
+            <InstructorAcceptanceCriteriaStats
+              statistics={acStatistics}
+              totalStudents={allStudents === null ? null : allStudents.length}
+            />
 
             <div className="mb-3 flex items-center justify-between gap-2">
               <h2 className="text-xs font-extrabold uppercase tracking-wide text-gray-400">Students</h2>
