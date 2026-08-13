@@ -4,19 +4,29 @@ import { useEffect, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { ActivityCard, type ActivityCardData } from '../../components/ActivityCard';
 import { ActivityCardSkeleton } from '../../components/ActivityCardSkeleton';
-import { deriveActivityCardStatus, type ActivityCardStatus } from '../../lib/activityCardStatus';
+import { deriveActivityCardStatus } from '../../lib/activityCardStatus';
 import { ACTIVITIES, Difficulty } from '../../lib/activityContent';
 import { loadCompletedAttempts, loadSessions, loadStudentTitles, type StudentTitle } from '../../lib/sessionClient';
-import { START_DIFFICULTY_LEVEL } from '../../lib/sessionRules';
+import { MAX_DIFFICULTY_LEVEL, nextDifficultyLevel } from '../../lib/sessionRules';
 import { useRequireRole } from '../../lib/useRequireRole';
 
 type CardData = {
   activity: ActivityCardData;
   /** The activity_type this card's title is looked up by; null for Type B, which has none. */
   activityType: string | null;
-  level: Difficulty;
-  status: ActivityCardStatus;
+  running: { difficulty_level: number; answeredCount: number; questionCount: number } | null;
+  best: { score: number; maxScore: number } | null;
 };
+
+/**
+ * This student's titles entry for one activity, or null when they haven't attempted it
+ * (GET /api/students/{id}/titles only returns a row per activity type actually attempted —
+ * lib/titleQueries.ts) or this card has no activityType at all (Type B).
+ */
+function titleEntryFor(titles: StudentTitle[] | null, activityType: string | null): StudentTitle | null {
+  if (!titles || !activityType) return null;
+  return titles.find((candidate) => candidate.activityType === activityType) ?? null;
+}
 
 /**
  * The student's earned title for one activity, or null when they haven't passed a level yet.
@@ -26,9 +36,7 @@ type CardData = {
  * (lib/titleQueries.ts), and rendering that next to a real score is exactly what GitHub #272
  * reported. difficultyLevel === null is the same fact without the string matching.
  */
-function earnedTitle(titles: StudentTitle[] | null, activityType: string | null): string | null {
-  if (!titles || !activityType) return null;
-  const entry = titles.find((candidate) => candidate.activityType === activityType);
+function earnedTitle(entry: StudentTitle | null): string | null {
   if (!entry || entry.difficultyLevel === null) return null;
   return entry.title;
 }
@@ -48,10 +56,12 @@ export default function ActivitiesPage() {
   // Every value on a Type A card is server-derived now (GitHub #272): the running session comes
   // from loadSessions('in-progress') — which already carries answeredCount/questionCount, so the
   // card can say how far along it is — and the best score from loadCompletedAttempts, fetched in
-  // parallel, once per activity. The title arrives from loadStudentTitles in the effect below.
-  // Nothing here reads lib/activityStore.ts any more: nothing writes to that mock since the play
-  // flow moved to the API, so its level was frozen at 1 and its title at "Not yet started"
-  // forever — the actual bug behind #272, not just its wording.
+  // parallel, once per activity. Raw here (running/best), not the rendered level/status/title:
+  // those also depend on titles, which loads in the separate effect below, so they're derived at
+  // render time instead (see the JSX map) rather than getting stuck at whatever titles held the
+  // moment this effect last ran. Nothing here reads lib/activityStore.ts any more: nothing writes
+  // to that mock since the play flow moved to the API, so its level was frozen at 1 and its title
+  // at "Not yet started" forever — the actual bug behind #272, not just its wording.
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
@@ -89,11 +99,8 @@ export default function ActivitiesPage() {
         return {
           activity,
           activityType: activity.activityType,
-          // Same derivation as app/activities/[slug]/page.tsx's displayLevel, so the card and the
-          // page it links to can't disagree: the running session's level, else the level clicking
-          // Start would actually produce. (Server-side level progression doesn't exist yet.)
-          level: (running?.difficulty_level ?? START_DIFFICULTY_LEVEL) as Difficulty,
-          status: deriveActivityCardStatus(running, best ? { score: best.score, maxScore: best.maxScore } : null),
+          running,
+          best: best ? { score: best.score, maxScore: best.maxScore } : null,
         };
       });
 
@@ -148,15 +155,27 @@ export default function ActivitiesPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {cards?.map((card) => (
-            <ActivityCard
-              key={card.activity.slug}
-              activity={card.activity}
-              level={card.level}
-              title={earnedTitle(titles, card.activityType)}
-              status={card.status}
-            />
-          ))}
+          {cards?.map((card) => {
+            const titleEntry = titleEntryFor(titles, card.activityType);
+            const highestPassedLevel = titleEntry?.difficultyLevel ?? null;
+            const isMastered = highestPassedLevel === MAX_DIFFICULTY_LEVEL;
+
+            // Same derivation as app/activities/[slug]/page.tsx's displayLevel, so the card and
+            // the page it links to can't disagree: the running session's own level, else the
+            // level the student's next click would actually produce (their next unpassed level,
+            // capped at MAX_DIFFICULTY_LEVEL — see POST /api/sessions).
+            const level = (card.running?.difficulty_level ?? nextDifficultyLevel(highestPassedLevel)) as Difficulty;
+
+            return (
+              <ActivityCard
+                key={card.activity.slug}
+                activity={card.activity}
+                level={level}
+                title={earnedTitle(titleEntry)}
+                status={deriveActivityCardStatus(card.running, card.best, isMastered)}
+              />
+            );
+          })}
         </div>
       )}
     </AppShell>
