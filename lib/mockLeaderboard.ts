@@ -1,33 +1,29 @@
-// Hardcoded leaderboard data for the Phase-1 UI. This is the ONLY fake data source behind
-// /leaderboard, the dashboard preview and /students/[id], so replacing it with the real
-// GET /api/courses/{courseId}/leaderboard is a single-import swap.
+// Hardcoded leaderboard rows, kept only as backing data for getMockPublicProfile below.
 //
-// DELETE THIS FILE once that route lands. lib/mockStudentAttempts.ts is the cautionary tale:
-// it still drives app/instructor/students/[id]/page.tsx with fabricated data long after the
-// feature was "done", and nothing in the UI admits it.
+// /leaderboard and the dashboard preview (components/LeaderboardPreview.tsx) no longer read this
+// file — GET /api/courses/{courseId}/leaderboard (lib/leaderboardQueries.ts) is real now, wired
+// in through lib/studentCourseClient.ts's loadCourseLeaderboard. getMockCourses/getMockLeaderboard
+// were deleted along with that swap.
 //
-// What a real endpoint has to return for the UI to keep working unchanged:
-//   LeaderboardEntry[], already sorted by rank ascending, with standard competition ranking on
-//   ties (1, 2, 2, 4) and a deterministic secondary sort (username) so two requests can't
-//   disagree about who is second. rankChange is NOT part of the response — the client derives it
-//   from lib/previousRankStore.ts and overwrites whatever is here. streak (GitHub #307) IS part
-//   of the response — unlike rankChange it has a real, already-implemented server source
-//   (computeStudentStreak, lib/streakQueries.ts / GET /api/students/{id}/streak), so the real
-//   route should call that per row rather than deriving it client-side.
+// app/students/[id]/page.tsx (the public student-profile page, US-5) is the one remaining
+// consumer, via getMockPublicProfile — that route doesn't exist yet, and is a separate story
+// from the leaderboard. DELETE what's left of this file once GET /api/students/{id}/public-profile
+// lands; lib/mockStudentAttempts.ts is the cautionary tale for leaving a "done" mock behind:
+// it still drives app/instructor/students/[id]/page.tsx with fabricated data, and nothing in the
+// UI admits it.
 //
-// The rows below deliberately cover every case the UI has to render: a two-way tie, students
-// with and without an avatar, all four rankChange states (up / down / unchanged / unknown),
-// a zero-point student who is enrolled but has never finished an activity, a few students with
-// no active streak (StreakBadge renders nothing for those), and enough rows to force a second
-// page.
+// The rows below still carry rankChange/streak fields (GitHub #307), even though
+// getMockPublicProfile never reads either — keeping the rows shaped like a real LeaderboardEntry
+// costs nothing and avoids a second, drifted shape for the same data. The real leaderboard route
+// (lib/leaderboardQueries.ts) sources streak from computeStudentStreak (lib/streakQueries.ts) per
+// row, same reducer GET /api/students/{id}/streak uses.
+//
+// The rows below deliberately cover every case a public profile has to render: a two-way tie,
+// students with and without an avatar, a zero-point student who is enrolled but has never
+// finished an activity, an empty biography, and a student who has passed nothing at all.
 
 import { ACTIVITIES } from './activityContent';
-import type {
-  LeaderboardCourse,
-  LeaderboardEntry,
-  PublicStudentProfile,
-  PublicStudentTitle,
-} from './leaderboardTypes';
+import type { LeaderboardEntry, PublicStudentProfile, PublicStudentTitle } from './leaderboardTypes';
 
 /**
  * A tiny inline SVG avatar, so the <img> branch is actually exercised offline — real avatars are
@@ -80,32 +76,6 @@ const BY_COURSE: Record<string, LeaderboardEntry[]> = {
   'mock-course-sa': SOFTWARE_ARCHITECTURE,
   'mock-course-empty': EMPTY_COURSE,
 };
-
-/** The courses the signed-in student is enrolled in. Real source later: lib/studentCourseClient.ts. */
-export function getMockCourses(): LeaderboardCourse[] {
-  return [
-    { courseId: 'mock-course-re', courseName: 'Requirements Engineering' },
-    { courseId: 'mock-course-sa', courseName: 'Software Architecture' },
-    { courseId: 'mock-course-empty', courseName: 'Testing & QA' },
-  ];
-}
-
-/**
- * One course's ranking.
- *
- * currentStudentId is a mock-only affordance: the signed-in account's real Supabase uuid can
- * never match a hardcoded id, so without it the "You" highlight and the "Your position" strip
- * would be unreachable in Phase 1. It rewrites the placeholder row's id to the real one. The
- * API-backed version takes no such parameter — the server returns real ids that already match.
- */
-export function getMockLeaderboard(courseId: string, currentStudentId?: string): LeaderboardEntry[] {
-  const entries = BY_COURSE[courseId] ?? [];
-  if (!currentStudentId) return entries;
-
-  return entries.map((entry) =>
-    entry.studentId === 'mock-stu-12' ? { ...entry, studentId: currentStudentId } : entry,
-  );
-}
 
 /**
  * Levels passed per activity type, in the fixed ACTIVITIES order, turned into the title rows

@@ -250,7 +250,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <LeaderboardPreview studentId={profile?.user_id} />
+      {token ? <LeaderboardPreview token={token} studentId={profile?.user_id} /> : null}
 
       <h3 className="mb-4 text-lg font-extrabold text-[#1B1642]">
         Mastery titles

@@ -1,13 +1,14 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import { Avatar } from './Avatar';
 import { LeaderboardRankBadge } from './LeaderboardRankBadge';
 import { RankChangeIndicator } from './RankChangeIndicator';
 import { StreakBadge } from './StreakBadge';
-import { getMockCourses, getMockLeaderboard } from '../lib/mockLeaderboard';
-import type { LeaderboardEntry } from '../lib/leaderboardTypes';
+import { loadCourseLeaderboard, loadJoinableCourses } from '../lib/studentCourseClient';
+import { recordLeaderboardRanks } from '../lib/previousRankStore';
+import type { LeaderboardCourse, LeaderboardEntry } from '../lib/leaderboardTypes';
 
 const TOP_COUNT = 5;
 
@@ -15,7 +16,7 @@ function PreviewRow({ entry, isCurrentUser }: { entry: LeaderboardEntry; isCurre
   return (
     <div
       className={`flex items-center gap-3 rounded-brand-md px-2 py-2 ${
-        isCurrentUser ? 'bg-brand-purple/20' : ''
+        isCurrentUser ? 'bg-brand-navy-border' : ''
       }`}
     >
       <LeaderboardRankBadge rank={entry.rank} />
@@ -48,20 +49,71 @@ function PreviewRow({ entry, isCurrentUser }: { entry: LeaderboardEntry; isCurre
  * meaning — LeaderboardRankBadge, Avatar and RankChangeIndicator — so the podium colours, the
  * initials fallback and the arrow semantics cannot drift between them. Only the layout differs.
  *
- * Phase 1: reads lib/mockLeaderboard.ts synchronously, and picks the student's first course
- * because a "primary course" doesn't exist yet. The real version fetches
- * GET /api/courses/{courseId}/leaderboard and will need an answer for which course a student
- * enrolled in several should see here — likely their most recently active one.
+ * Reads GET /api/courses/{courseId}/leaderboard via lib/studentCourseClient.ts's
+ * loadCourseLeaderboard, same real data source as app/leaderboard/page.tsx — the two share the
+ * courseId-keyed cache (lib/leaderboardStore.ts), so whichever loads first serves the other.
+ * Picks the student's first enrolled course, since a "primary course" doesn't exist yet; a
+ * student in several courses sees the same one here as the leaderboard page falls back to.
+ * Records this render's ranks as the new previous-rank snapshot (lib/previousRankStore.ts) the
+ * same way the full leaderboard page does, so a delta shown here and on /leaderboard afterwards
+ * agrees rather than each keeping its own idea of "last visit".
  */
-export function LeaderboardPreview({ studentId }: { studentId?: string }) {
-  const course = useMemo(() => getMockCourses()[0] ?? null, []);
-  const entries = useMemo(
-    () => (course ? getMockLeaderboard(course.courseId, studentId) : []),
-    [course, studentId],
-  );
+export function LeaderboardPreview({ token, studentId }: { token: string; studentId?: string }) {
+  const [course, setCourse] = useState<LeaderboardCourse | null | undefined>(undefined);
+  const [entries, setEntries] = useState<LeaderboardEntry[] | null>(null);
 
-  const top = entries.slice(0, TOP_COUNT);
-  const me = entries.find((entry) => entry.studentId === studentId) ?? null;
+  useEffect(() => {
+    let cancelled = false;
+
+    loadJoinableCourses(token).then((result) => {
+      if (cancelled) return;
+      if (!result.ok) {
+        setCourse(null);
+        return;
+      }
+      const mine = result.data.courses.find((c) => c.alreadyMember);
+      setCourse(mine ? { courseId: mine.id, courseName: mine.name } : null);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  useEffect(() => {
+    if (!course) return;
+    let cancelled = false;
+
+    loadCourseLeaderboard(token, course.courseId).then((result) => {
+      if (!cancelled && result.ok) setEntries(result.data.entries);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, course]);
+
+  useEffect(() => {
+    if (!course || !entries || entries.length === 0) return;
+    recordLeaderboardRanks(course.courseId, entries);
+  }, [course, entries]);
+
+  if (course === undefined || (course && entries === null)) {
+    return (
+      <section className="mb-7 animate-pulse rounded-brand-lg bg-brand-navy p-6" aria-hidden="true">
+        <div className="mb-4 h-6 w-32 rounded-full bg-white/10" />
+        <div className="space-y-2">
+          {Array.from({ length: TOP_COUNT }, (_, i) => (
+            <div key={i} className="h-11 rounded-brand-md bg-white/5" />
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  const rows = entries ?? [];
+  const top = rows.slice(0, TOP_COUNT);
+  const me = rows.find((entry) => entry.studentId === studentId) ?? null;
   const meInTop = top.some((entry) => entry.studentId === studentId);
 
   return (
@@ -79,7 +131,7 @@ export function LeaderboardPreview({ studentId }: { studentId?: string }) {
         <p className="mb-4 text-sm font-semibold text-brand-ink-muted">
           Join a course to see how you compare with your classmates.
         </p>
-      ) : entries.length === 0 ? (
+      ) : rows.length === 0 ? (
         <p className="mb-4 text-sm font-semibold text-brand-ink-muted">
           No one in this course has completed an activity yet — be the first.
         </p>
