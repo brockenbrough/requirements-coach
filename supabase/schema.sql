@@ -35,6 +35,12 @@ CREATE TABLE "user" (
     last_name text NOT NULL,
     age int2 CHECK (age IS NULL OR (age > 0 AND age < 130)),
     semester int2 CHECK (semester IS NULL OR (semester > 0 AND semester <= 20)),
+    -- GitHub #318: has the first-login guided tour been shown (finished or skipped) yet? Not
+    -- role-specific — which step list to play is decided client-side from role, this column
+    -- only tracks "has this account seen some tour already". Defaults false so an existing
+    -- account backfilled by the ALTER TABLE below is treated the same as a brand new one: they
+    -- get the tour once, same as everybody else.
+    has_seen_onboarding_tour bool NOT NULL DEFAULT false,
     PRIMARY KEY (user_id));
 
 -- ---------------------------------------------------------------------
@@ -714,3 +720,9 @@ CREATE POLICY own_submissions_insert ON submission
 --
 --   -- then the bump_session_score_from_submission() function and trg_submission_score trigger
 --   -- defined above, under "Score roll-up".
+
+-- GitHub #318 (first-login guided tour): if your "user" table predates this column, add it —
+-- existing rows backfill to false, so every account already in the database is offered the
+-- tour once, exactly like a freshly registered one:
+--
+--   ALTER TABLE "user" ADD COLUMN IF NOT EXISTS has_seen_onboarding_tour bool NOT NULL DEFAULT false;
