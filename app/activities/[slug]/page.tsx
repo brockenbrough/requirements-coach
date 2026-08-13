@@ -8,7 +8,7 @@ import { CompletedAttemptsTable } from "../../../components/CompletedAttemptsTab
 import { LevelReplaySelector } from "../../../components/LevelReplaySelector";
 import { ResumeOrAbandonPrompt } from "../../../components/ResumeOrAbandonPrompt";
 import { getActivity } from "../../../lib/activityContent";
-import { START_DIFFICULTY_LEVEL } from "../../../lib/sessionRules";
+import { START_DIFFICULTY_LEVEL, nextDifficultyLevel } from "../../../lib/sessionRules";
 import {
   type CompletedAttempt,
   type CurrentSessionResult,
@@ -28,7 +28,8 @@ const DIFFICULTY_LABEL: Record<number, string> = {
 
 // Easy-to-hard reads green-to-orange, using the existing brand palette (CLAUDE.md's Styling
 // Guidelines) rather than new hex values: brand-green for passing/easy, brand-danger — the
-// closest existing token to orange — for the hardest level, brand-gold bridging the two.
+// closest existing token to orange — for the hardest level, brand-gold bridging the two. Same
+// three colors as components/ActivityCard.tsx's DIFFICULTY_CLASSES on the activities list page.
 const DIFFICULTY_COLOR: Record<number, string> = {
   1: "text-brand-green",
   2: "text-brand-gold",
@@ -71,16 +72,22 @@ export default function ActivityDetailPage({
   const highestPassedLevel = attempts
     ? Math.max(0, ...attempts.filter((attempt) => attempt.passed).map((attempt) => attempt.difficultyLevel))
     : 0;
+  // The top of the selectable range: every already-passed level, plus the one level beyond that
+  // Start would auto-advance to anyway (POST /api/sessions accepts a replay override up to and
+  // including this exact value — see that route's comment). 0 when nothing's passed yet, same as
+  // highestPassedLevel, so LevelReplaySelector stays hidden until there's something to choose.
+  const highestSelectableLevel = highestPassedLevel >= 1 ? nextDifficultyLevel(highestPassedLevel) : 0;
 
-  // The highest passed level is the default replay selection — guarded by highestPassedLevel so
-  // a student who hasn't passed anything yet still gets plain auto-advance on Start, not a 403
-  // for "replaying" a level they've never passed. userPickedLevelRef means this only ever sets
-  // the default itself; it never re-asserts itself over a level the student has since picked.
+  // The next level (one past whatever was last passed) is the default selection — right after
+  // finishing a level, that's what's shown pre-selected. Guarded by highestPassedLevel so a
+  // student who hasn't passed anything yet still gets plain auto-advance on Start, not a 403 for
+  // "replaying" a level they've never passed. userPickedLevelRef means this only ever sets the
+  // default itself; it never re-asserts itself over a level the student has since picked.
   useEffect(() => {
     if (!userPickedLevelRef.current && highestPassedLevel >= 1) {
-      setSelectedLevel(highestPassedLevel);
+      setSelectedLevel(highestSelectableLevel);
     }
-  }, [highestPassedLevel]);
+  }, [highestPassedLevel, highestSelectableLevel]);
 
   // Both reads in one pass, because the page re-runs this on every return from /play: the
   // running session decides Start vs. Resume/Abandon, the finished ones fill the history below.
@@ -263,7 +270,7 @@ export default function ActivityDetailPage({
 
           {!session ? (
             <LevelReplaySelector
-              highestPassedLevel={highestPassedLevel}
+              highestSelectableLevel={highestSelectableLevel}
               selectedLevel={selectedLevel}
               // A level, once replayable, is always selected — clicking a button switches the
               // selection, it never clears it back to auto-advance.

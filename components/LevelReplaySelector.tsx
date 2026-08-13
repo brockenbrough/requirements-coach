@@ -7,12 +7,13 @@ const DIFFICULTY_LABEL: Record<number, string> = {
 };
 
 /**
- * Lets a student choose a difficulty level they have already passed for an activity — practice
- * an easier level without being forced back to level 1 or stuck waiting for the next auto-advance
- * level (POST /api/sessions's difficultyLevel override). Modeled on
- * components/LeaderboardCourseSwitcher.tsx's controlled button row (role="group", aria-pressed,
- * parent-owned selection), not components/TitleProgressionTrack.tsx's display-only ladder, which
- * has no click handler — this is an input control, not a status display.
+ * Lets a student choose which difficulty level to start next — any level they've already
+ * passed, to practice an easier one, or the level they'd auto-advance to anyway (POST
+ * /api/sessions's difficultyLevel override accepts both, up to and including that auto-advance
+ * level — see that route's comment). Modeled on components/LeaderboardCourseSwitcher.tsx's
+ * controlled button row (role="group", aria-pressed, parent-owned selection), not
+ * components/TitleProgressionTrack.tsx's display-only ladder, which has no click handler — this
+ * is an input control, not a status display.
  *
  * Fully controlled: this component holds no state of its own and never starts anything itself —
  * onSelect only records the choice in the parent (app/activities/[slug]/page.tsx), which shows it
@@ -24,27 +25,29 @@ const DIFFICULTY_LABEL: Record<number, string> = {
  * scale, matching the card's existing badges (bg-white/10) and Start button (bg-brand-purple).
  */
 export function LevelReplaySelector({
-  highestPassedLevel,
+  highestSelectableLevel,
   selectedLevel,
   onSelect,
   disabled = false,
 }: {
-  highestPassedLevel: number;
+  /** The top of the 1..N button range — see app/activities/[slug]/page.tsx for how it's derived. */
+  highestSelectableLevel: number;
   selectedLevel: number | null;
   onSelect: (level: number) => void;
   disabled?: boolean;
 }) {
-  // Nothing passed yet is nothing to replay.
-  if (highestPassedLevel < 1) return null;
+  // Nothing passed yet means there's no auto-advance level to offer either (still level 1, the
+  // plain Start button already covers that).
+  if (highestSelectableLevel < 1) return null;
 
-  const levels = Array.from({ length: highestPassedLevel }, (_, i) => i + 1);
+  const levels = Array.from({ length: highestSelectableLevel }, (_, i) => i + 1);
 
   return (
     <div className="mt-6 text-left">
       <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-brand-ink-muted">
-        Practice a level you&apos;ve already passed
+        Choose a difficulty level
       </p>
-      <div className="flex flex-wrap gap-2" role="group" aria-label="Replay a passed level">
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Choose a difficulty level">
         {levels.map((level) => {
           const isSelected = level === selectedLevel;
           return (
