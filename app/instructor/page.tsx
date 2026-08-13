@@ -6,7 +6,6 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { AcSubmissionDetails } from '../../components/AcSubmissionDetails';
 import { AppShell } from '../../components/AppShell';
 import { ActivityLogTable } from '../../components/ActivityLogTable';
-import { InstructorAcceptanceCriteriaStats } from '../../components/InstructorAcceptanceCriteriaStats';
 import { InstructorActivityStats } from '../../components/InstructorActivityStats';
 import {
   InstructorFilters,
@@ -90,8 +89,8 @@ function InstructorDashboardContent() {
         ...activitiesResult.data.sessions.map(toQuizAttemptRow),
         ...submissionsResult.data.submissions.map(toAcSubmissionRow),
       ]);
-      // A failed statistics fetch costs the stats card, not the whole dashboard — see
-      // InstructorAcceptanceCriteriaStats, which renders placeholders for a null value.
+      // A failed statistics fetch costs the participation metric, not the whole dashboard —
+      // InstructorActivityStats renders a placeholder for a null value.
       if (statisticsResult.ok) setAcStatistics(statisticsResult.data.statistics);
     });
 
@@ -228,10 +227,13 @@ function InstructorDashboardContent() {
           </div>
         ) : (
           <>
-            <InstructorActivityStats entries={entries} />
-            <InstructorAcceptanceCriteriaStats
-              statistics={acStatistics}
-              totalStudents={allStudents === null ? null : allStudents.length}
+            <InstructorActivityStats
+              entries={entries}
+              acParticipation={
+                acStatistics === null || allStudents === null
+                  ? null
+                  : { attempted: acStatistics.studentsAttempted, total: allStudents.length }
+              }
             />
 
             <div className="mb-3 flex items-center justify-between gap-2">
