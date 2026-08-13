@@ -1,14 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { AppShell } from "../../../components/AppShell";
 import { CompletedAttemptsTable } from "../../../components/CompletedAttemptsTable";
 import { LevelReplaySelector } from "../../../components/LevelReplaySelector";
 import { ResumeOrAbandonPrompt } from "../../../components/ResumeOrAbandonPrompt";
 import { getActivity } from "../../../lib/activityContent";
-import { START_DIFFICULTY_LEVEL, nextDifficultyLevel } from "../../../lib/sessionRules";
+import { MAX_DIFFICULTY_LEVEL, START_DIFFICULTY_LEVEL, nextDifficultyLevel } from "../../../lib/sessionRules";
 import {
   type CompletedAttempt,
   type CurrentSessionResult,
@@ -36,7 +36,19 @@ const DIFFICULTY_COLOR: Record<number, string> = {
   3: "text-brand-danger",
 };
 
-export default function ActivityDetailPage({
+/** A valid 1..MAX_DIFFICULTY_LEVEL integer from the ?level= query param, or null. */
+function parseLevelParam(raw: string | null): number | null {
+  if (!raw) return null;
+  const level = Number(raw);
+  return Number.isInteger(level) && level >= 1 && level <= MAX_DIFFICULTY_LEVEL ? level : null;
+}
+
+/**
+ * Split out because useSearchParams() forces the nearest Suspense boundary to render
+ * client-side — without one, `npm run build` fails prerendering this route (same reason
+ * app/leaderboard/page.tsx is split into a Content component this way).
+ */
+function ActivityDetailContent({
   params,
 }: {
   params: { slug: string };
@@ -47,6 +59,12 @@ export default function ActivityDetailPage({
   const { token, profile, loading, authorized } = useRequireRole('student');
   const activity = getActivity(params.slug);
 
+  // The level ActivityCard was already showing for this activity on the activities list page
+  // (components/ActivityCard.tsx's ?level= link) — used only to seed the first paint below so
+  // it doesn't default to level 1 and then jump once this page's own data has loaded; the effect
+  // further down still recomputes and corrects it from real data once that arrives.
+  const initialLevel = parseLevelParam(useSearchParams().get('level'));
+
   // The server is the only source of "does this activity have a run in progress" (REQ-PL-6.3) —
   // there is no local/mock notion of progress anymore. null means "not checked yet or nothing
   // running", which the render below treats the same as "not started".
@@ -54,11 +72,13 @@ export default function ActivityDetailPage({
   const [attempts, setAttempts] = useState<CompletedAttempt[] | null>(null);
   const [starting, setStarting] = useState(false);
   // The level picked in LevelReplaySelector — chosen ahead of time, not acted on until Start is
-  // clicked. null only ever means "nothing replayable yet" (no level passed, so Start uses the
-  // server's auto-advance level); once a level becomes selectable there is always exactly one
-  // selected and no way to clear it back to null — see the effect below and LevelReplaySelector's
-  // onSelect, which always replaces the selection rather than toggling it off.
-  const [selectedLevel, setSelectedLevel] = useState<number | null>(null);
+  // clicked. Seeded from initialLevel (the list page's own value) rather than null, so the badge
+  // below reads correctly from the very first paint. null still means "nothing replayable yet"
+  // once real data has loaded (no level passed, so Start uses the server's auto-advance level);
+  // once a level becomes selectable there is always exactly one selected and no way to clear it
+  // back to null — see the effect below and LevelReplaySelector's onSelect, which always replaces
+  // the selection rather than toggling it off.
+  const [selectedLevel, setSelectedLevel] = useState<number | null>(initialLevel);
   const userPickedLevelRef = useRef(false);
   const [abandoning, setAbandoning] = useState(false);
   const [error, setError] = useState<{
@@ -286,5 +306,17 @@ export default function ActivityDetailPage({
         <CompletedAttemptsTable attempts={attempts} />
       </div>
     </AppShell>
+  );
+}
+
+export default function ActivityDetailPage({
+  params,
+}: {
+  params: { slug: string };
+}) {
+  return (
+    <Suspense fallback={null}>
+      <ActivityDetailContent params={params} />
+    </Suspense>
   );
 }
