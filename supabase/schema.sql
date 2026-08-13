@@ -44,18 +44,32 @@ CREATE TABLE "user" (
     PRIMARY KEY (user_id));
 
 -- ---------------------------------------------------------------------
--- GitHub #122: Activity Type
+-- GitHub #122/#347: Activity Type
 --
 -- A lookup table for the activity_type values every other table already
--- stores as free text (question, session_log, title_definition — see the
--- "Open point" comment in lib/activityTypes.ts). The natural key (the
--- string itself) is the primary key, not a surrogate id, so turning an
--- existing activity_type column into a foreign key later needs no data
--- migration — just an ALTER TABLE ADD CONSTRAINT. That wiring, and
--- enforcing it on question/session_log/title_definition, is GitHub #123.
+-- stores as free text (question, session_log, title_definition). The
+-- natural key (the string itself) is the primary key, not a surrogate id,
+-- so turning an existing activity_type column into a foreign key later
+-- needed no data migration — just an ALTER TABLE ADD CONSTRAINT (GitHub
+-- #123).
+--
+-- GitHub #347 turned this from a fixed lookup of three built-in quizzes
+-- into a real, creatable record: quiz_name is the display name (the three
+-- built-in rows backfill it from lib/activityContent.ts's ACTIVITIES[].name
+-- — see the migration note near the bottom of this file), description is
+-- optional instructor-written context, and creator_id is nullable —
+-- NULL means "Built-in" (true for all three original rows), a real value
+-- means the instructor who created that quiz via POST /api/activities/types.
+-- No ON DELETE clause on creator_id, same reasoning as fk_question_user
+-- below: a deleted instructor account should not silently orphan or
+-- cascade-delete the quiz (and everything built on it — questions,
+-- sessions, titles) they created.
 -- ---------------------------------------------------------------------
 CREATE TABLE activity_type (
     activity_type varchar(50) NOT NULL,
+    quiz_name     text        NOT NULL,
+    description   text,
+    creator_id    uuid,
     PRIMARY KEY (activity_type));
 
 -- ---------------------------------------------------------------------
@@ -314,6 +328,10 @@ ALTER TABLE question ADD CONSTRAINT fk_question_activity_type FOREIGN KEY (activ
 -- deleted instructor account should not silently orphan or cascade-delete their questions;
 -- that decision is left for whoever eventually handles account deletion.
 ALTER TABLE question ADD CONSTRAINT fk_question_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
+
+-- GitHub #347: which instructor created this quiz — NULL (the three built-in quizzes) needs no
+-- FK to satisfy. Same no-ON-DELETE reasoning as fk_question_user just above.
+ALTER TABLE activity_type ADD CONSTRAINT fk_activity_type_user FOREIGN KEY (creator_id) REFERENCES "user" (user_id);
 
 ALTER TABLE question_to_answer ADD CONSTRAINT fk_question_to_answer_question FOREIGN KEY (question_id) REFERENCES question (question_id);
 ALTER TABLE question_to_answer ADD CONSTRAINT fk_question_to_answer_answer FOREIGN KEY (answer_id) REFERENCES answer (answer_id);
@@ -722,7 +740,8 @@ CREATE POLICY own_submissions_insert ON submission
 -- you need are the missing activity_type lookup row (session_log.activity_type is FK-constrained
 -- against it, so starting a session 500s without this) and the score roll-up trigger:
 --
---   INSERT INTO activity_type (activity_type) VALUES ('WRITE_ACCEPTANCE_CRITERIA')
+--   INSERT INTO activity_type (activity_type, quiz_name) VALUES
+--     ('WRITE_ACCEPTANCE_CRITERIA', 'Write Acceptance Criteria')
 --     ON CONFLICT DO NOTHING;
 --
 --   -- then the bump_session_score_from_submission() function and trg_submission_score trigger
@@ -733,3 +752,40 @@ CREATE POLICY own_submissions_insert ON submission
 -- tour once, exactly like a freshly registered one:
 --
 --   ALTER TABLE "user" ADD COLUMN IF NOT EXISTS has_seen_onboarding_tour bool NOT NULL DEFAULT false;
+
+-- GitHub #347 (create and browse quizzes): if your activity_type table predates quiz_name/
+-- description/creator_id, add them without touching the three existing rows' keys — every
+-- existing FK to activity_type (question, session_log, title_definition) and every existing
+-- session stays exactly as it was, since the primary key itself never changes.
+--
+-- quiz_name can't go straight to NOT NULL: Postgres would reject the ADD COLUMN outright on a
+-- table that already has rows and no default to fill them with. Add it nullable, backfill, then
+-- tighten the constraint — three statements instead of one, but no data loss and no window where
+-- a half-migrated table is unusable. On a lookup table this small (three built-in rows plus
+-- however many quizzes instructors have since created), none of these steps takes a
+-- meaningful lock or any real time:
+--
+--   ALTER TABLE activity_type ADD COLUMN IF NOT EXISTS quiz_name text;
+--   ALTER TABLE activity_type ADD COLUMN IF NOT EXISTS description text;
+--   ALTER TABLE activity_type ADD COLUMN IF NOT EXISTS creator_id uuid;
+--
+--   -- Backfill from lib/activityContent.ts's ACTIVITIES[].name — the exact names the app
+--   -- already shows for these three activities everywhere else.
+--   UPDATE activity_type SET quiz_name = 'Identify Weak User Stories'
+--     WHERE activity_type = 'IDENTIFY_WEAK_USER_STORIES' AND quiz_name IS NULL;
+--   UPDATE activity_type SET quiz_name = 'Identify Weak Acceptance Criteria'
+--     WHERE activity_type = 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA' AND quiz_name IS NULL;
+--   UPDATE activity_type SET quiz_name = 'Write Acceptance Criteria'
+--     WHERE activity_type = 'WRITE_ACCEPTANCE_CRITERIA' AND quiz_name IS NULL;
+--   -- Fallback for any other row already in the table (e.g. one inserted through the old,
+--   -- narrower POST /api/activities/types before this migration ran) — falls back to the key
+--   -- itself rather than leaving a NULL that the next statement would reject.
+--   UPDATE activity_type SET quiz_name = activity_type WHERE quiz_name IS NULL;
+--
+--   ALTER TABLE activity_type ALTER COLUMN quiz_name SET NOT NULL;
+--   ALTER TABLE activity_type ADD CONSTRAINT fk_activity_type_user
+--     FOREIGN KEY (creator_id) REFERENCES "user" (user_id);
+--
+-- creator_id is left NULL for every pre-existing row by this migration, same as a fresh run of
+-- this script gives the three seeded rows — "Built-in" is the correct attribution for all of
+-- them, not a gap to fill in later.
