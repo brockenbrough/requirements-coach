@@ -4,10 +4,9 @@
 import { getSupabaseClient } from './supabase';
 import {
   DEFAULT_QUESTION_MAX_SCORE,
-  MAX_DIFFICULTY_LEVEL,
   SESSION_COLUMNS,
-  START_DIFFICULTY_LEVEL,
   highestPassedLevelByType,
+  nextDifficultyLevel,
   type PassedSessionRow,
 } from './sessionRules';
 import type { InstructorActivityEntry, InstructorSessionEntry, SessionListEntry, SessionRecord } from './sessionTypes';
@@ -106,8 +105,7 @@ export async function findStartDifficultyLevel(
 
   const highestPassed = highestPassedLevelByType((data ?? []) as PassedSessionRow[]);
   const highestPassedLevel = highestPassed.get(activityType) ?? null;
-  const startLevel =
-    highestPassedLevel === null ? START_DIFFICULTY_LEVEL : Math.min(highestPassedLevel + 1, MAX_DIFFICULTY_LEVEL);
+  const startLevel = nextDifficultyLevel(highestPassedLevel);
 
   return { startLevel, error: null };
 }

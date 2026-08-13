@@ -60,3 +60,16 @@ export function highestPassedLevelByType(sessions: readonly PassedSessionRow[]):
   }
   return highestPassed;
 }
+
+/**
+ * The difficulty level a new session for one activity should start at, given the highest level
+ * already passed (null if none has been). One level past that, capped at MAX_DIFFICULTY_LEVEL.
+ * Shared by the session-start route (lib/sessionQueries.ts's findStartDifficultyLevel) and the
+ * activity list's level display (app/activities/page.tsx), so the two can't disagree about what
+ * "next level" means.
+ */
+export function nextDifficultyLevel(highestPassedLevel: number | null): number {
+  return highestPassedLevel === null
+    ? START_DIFFICULTY_LEVEL
+    : Math.min(highestPassedLevel + 1, MAX_DIFFICULTY_LEVEL);
+}
