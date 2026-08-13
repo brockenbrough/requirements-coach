@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppShell } from "../../../components/AppShell";
 import { CompletedAttemptsTable } from "../../../components/CompletedAttemptsTable";
+import { LevelReplaySelector } from "../../../components/LevelReplaySelector";
 import { ResumeOrAbandonPrompt } from "../../../components/ResumeOrAbandonPrompt";
 import { getActivity } from "../../../lib/activityContent";
 import { START_DIFFICULTY_LEVEL } from "../../../lib/sessionRules";
@@ -42,6 +43,10 @@ export default function ActivityDetailPage({
   const [current, setCurrent] = useState<CurrentSessionResult | null>(null);
   const [attempts, setAttempts] = useState<CompletedAttempt[] | null>(null);
   const [starting, setStarting] = useState(false);
+  // The level picked in LevelReplaySelector, if any — chosen ahead of time, not acted on until
+  // Start is clicked. null means "no replay chosen," i.e. Start uses the server's auto-advance
+  // level.
+  const [selectedLevel, setSelectedLevel] = useState<number | null>(null);
   const [abandoning, setAbandoning] = useState(false);
   const [error, setError] = useState<{
     message: string;
@@ -85,13 +90,16 @@ export default function ActivityDetailPage({
     return null;
   }
 
+  // Starts at selectedLevel when one has been picked via LevelReplaySelector, otherwise the
+  // server's auto-advance level (undefined difficultyLevel) — Start is the only thing that ever
+  // triggers the actual POST; selecting a level just sets what Start will use.
   async function handleStart() {
     if (!token || starting) return;
 
     setStarting(true);
     setError(null);
 
-    const result = await startSession(token, activity!.activityType);
+    const result = await startSession(token, activity!.activityType, { difficultyLevel: selectedLevel ?? undefined });
 
     if (result.ok) {
       // A fresh (or resumed) session now shows up in the activity log too.
@@ -159,10 +167,16 @@ export default function ActivityDetailPage({
   const session = current?.session ?? null;
   const totalQuestions = current?.questions.length ?? 0;
   const answeredCount = current?.answers.length ?? 0;
-  // POST /api/sessions now computes the actual starting level from pass history server-side; this
-  // fallback only covers the moment before a session exists, when there's nothing to read a level
-  // from yet, so it shows the easy-level default rather than guessing what Start would produce.
-  const displayLevel = session?.difficulty_level ?? START_DIFFICULTY_LEVEL;
+  // Before a session exists, show whatever level Start would actually use: the replay level the
+  // student picked, if any, else the easy-level default (POST /api/sessions computes the real
+  // auto-advance level server-side, so this default is only ever a guess for that case).
+  const displayLevel = session?.difficulty_level ?? selectedLevel ?? START_DIFFICULTY_LEVEL;
+  // The highest difficulty level passed so far, derived from the same completed-attempts list
+  // the history table below already renders — no separate fetch needed. 0 means "nothing passed
+  // yet," which LevelReplaySelector reads as "nothing to replay."
+  const highestPassedLevel = attempts
+    ? Math.max(0, ...attempts.filter((attempt) => attempt.passed).map((attempt) => attempt.difficultyLevel))
+    : 0;
 
   return (
     <AppShell active="activities">
@@ -222,6 +236,16 @@ export default function ActivityDetailPage({
                 </Link>
               ) : null}
             </div>
+          ) : null}
+
+          {!session ? (
+            <LevelReplaySelector
+              highestPassedLevel={highestPassedLevel}
+              selectedLevel={selectedLevel}
+              // Clicking the already-selected level deselects it, back to auto-advance.
+              onSelect={(level) => setSelectedLevel((current) => (current === level ? null : level))}
+              disabled={starting}
+            />
           ) : null}
         </div>
 
