@@ -9,9 +9,8 @@ import { MasteryTitleCard } from '../../../components/MasteryTitleCard';
 import { StatTile } from '../../../components/StatTile';
 import { useUser } from '../../../components/UserProvider';
 import { buildMasteryTitleEntries, totalLevelsPassed } from '../../../lib/masteryTitles';
-import { getMockPublicProfile } from '../../../lib/mockLeaderboard';
 import type { PublicStudentProfile, PublicStudentTitle } from '../../../lib/leaderboardTypes';
-import { loadStudentScore, loadStudentTitles } from '../../../lib/sessionClient';
+import { loadPublicStudentProfile, loadStudentScore, loadStudentTitles } from '../../../lib/sessionClient';
 import { useRequireRole } from '../../../lib/useRequireRole';
 
 /**
@@ -20,12 +19,9 @@ import { useRequireRole } from '../../../lib/useRequireRole';
  *
  * PRIVACY CONTRACT. Shown: username, avatar, biography, cumulative score, earned mastery titles.
  * Deliberately NOT shown: real name, age, semester, email, course list, individual answers,
- * attempt history. US-5's GET /api/students/{id}/public-profile must return only the fields
- * above — this page not rendering a field is not a substitute for the route not sending it, and
- * a route that over-returns leaks the data into the network tab regardless of the markup.
- *
- * Phase 1: data comes from lib/mockLeaderboard.ts. The one place this page will change when the
- * real route lands is where `profile` is resolved below.
+ * attempt history. GET /api/students/{id}/public-profile (US-5) returns only the fields above —
+ * this page not rendering a field is not a substitute for the route not sending it, and a route
+ * that over-returns leaks the data into the network tab regardless of the markup.
  */
 export default function StudentProfilePage({ params }: { params: { id: string } }) {
   return <StudentProfileContent studentId={params.id} />;
@@ -88,29 +84,51 @@ function StudentProfileContent({ studentId }: { studentId: string }) {
   }, [isSelf, token, ownProfile]);
 
   /**
-   * The self case is resolved before the mock lookup, and not just as a display nicety: the
-   * leaderboard (GET /api/courses/{courseId}/leaderboard) is real now and returns real Supabase
-   * uuids for every row, including the signed-in student's own, which no hardcoded mock entry
-   * can match. Reading from useUser() instead means your own profile shows real data.
+   * A peer's profile via the real GET /api/students/{id}/public-profile (US-5) — 403s unless the
+   * caller shares a course with them, 404 for an unknown id, both of which collapse to `null`
+   * here (NotFoundCard doesn't distinguish the two; see that component's own copy).
    *
-   * KNOWN GAP left by that same change: a *classmate's* row now also carries a real uuid, and
-   * getMockPublicProfile only recognizes the fake 'mock-stu-NN' ids below — so clicking a peer on
-   * the real leaderboard currently lands on NotFoundCard until GET /api/students/{id}/public-profile
-   * (US-5) replaces this mock. Only the self case above is unaffected.
+   * Gated on `!loading` (not just `!isSelf`): ownProfile is also `null` for an instant while
+   * useUser() is still resolving, which would otherwise make isSelf false and fire a wasted (or
+   * for the self case, wrong) fetch before isSelf has settled.
+   *
+   * undefined means "not fetched yet", distinct from null ("fetched, doesn't exist / forbidden")
+   * — collapsed into the same profileLoading flag as the self branch below.
    */
+  const [peerProfile, setPeerProfile] = useState<PublicStudentProfile | null | undefined>(undefined);
+
+  useEffect(() => {
+    if (loading || isSelf || !token) return;
+    let cancelled = false;
+    setPeerProfile(undefined);
+
+    loadPublicStudentProfile(token, studentId).then((result) => {
+      if (cancelled) return;
+      setPeerProfile(result.ok ? result.data : null);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, isSelf, token, studentId]);
+
+  const profileLoading = !loading && !isSelf && peerProfile === undefined;
+
   const profile: PublicStudentProfile | null = useMemo(() => {
-    if (isSelf && ownProfile) {
-      return {
-        studentId: ownProfile.user_id,
-        username: ownProfile.username,
-        avatarUrl: ownProfile.avatar_url,
-        biography: ownProfile.biography,
-        score: ownScore,
-        titles: ownTitles,
-      };
+    if (isSelf) {
+      return ownProfile
+        ? {
+            studentId: ownProfile.user_id,
+            username: ownProfile.username,
+            avatarUrl: ownProfile.avatar_url,
+            biography: ownProfile.biography,
+            score: ownScore,
+            titles: ownTitles,
+          }
+        : null;
     }
-    return getMockPublicProfile(studentId);
-  }, [isSelf, ownProfile, ownScore, ownTitles, studentId]);
+    return peerProfile ?? null;
+  }, [isSelf, ownProfile, ownScore, ownTitles, peerProfile]);
 
   const masteryEntries = useMemo(
     () => (profile ? buildMasteryTitleEntries(profile.titles) : []),
@@ -134,7 +152,9 @@ function StudentProfileContent({ studentId }: { studentId: string }) {
           ← Back to Leaderboard
         </Link>
 
-        {!profile ? (
+        {profileLoading ? (
+          <p className="py-8 text-center text-sm font-semibold text-gray-500">Loading profile…</p>
+        ) : !profile ? (
           <NotFoundCard />
         ) : (
           <>

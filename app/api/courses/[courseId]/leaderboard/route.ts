@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '../../../../../lib/supabase';
+import { isEnrolledInAnyCourse } from '../../../../../lib/courseQueries';
 import { computeCourseLeaderboard } from '../../../../../lib/leaderboardQueries';
 
 function getToken(request: Request): string | null {
@@ -7,16 +8,19 @@ function getToken(request: Request): string | null {
 }
 
 /**
- * GET /api/courses/{courseId}/leaderboard — real data behind the Phase-1 leaderboard mock
- * (lib/mockLeaderboard.ts), ranking every student enrolled in the course by cumulative score
- * (see computeCourseLeaderboard, lib/leaderboardQueries.ts, for the ranking itself).
+ * GET /api/courses/{courseId}/leaderboard — ranks every student enrolled in the course by
+ * cumulative score (see computeCourseLeaderboard, lib/leaderboardQueries.ts, for the ranking
+ * itself).
  *
  * Enrollment is the authorization boundary here, not role or ownership: a leaderboard discloses
  * other students' usernames, photos and scores, and being enrolled in the course is what makes
- * that acceptable to see. This is the one genuinely new cross-user authorization rule this
- * feature adds — the only other student-callable route that reads across users, GET /api/courses
- * (listJoinableCourses), is far narrower: it discloses course metadata (name, professor,
- * headcount) but never another student's identity or score.
+ * that acceptable to see. isEnrolledInAnyCourse (lib/courseQueries.ts) is the shared membership
+ * check GET /api/students/{id}/public-profile also builds its own "do we share a course"
+ * authorization on, so the definition of "enrolled" can't drift between the two routes. This is
+ * one of only two genuinely new cross-user authorization rules these two features add — the only
+ * other student-callable route that reads across users, GET /api/courses (listJoinableCourses),
+ * is far narrower: it discloses course metadata (name, professor, headcount) but never another
+ * student's identity or score.
  *
  * 404-then-403, the same ordering findOwnedCourse (lib/courseQueries.ts) uses for instructor
  * ownership checks: an unknown courseId is a 404 regardless of the caller's own enrollment, and
@@ -46,15 +50,10 @@ export async function GET(request: Request, { params }: { params: { courseId: st
   if (courseError) return Response.json({ error: courseError.message }, { status: 500 });
   if (!course) return Response.json({ error: 'Course not found.' }, { status: 404 });
 
-  const { data: membership, error: membershipError } = await supabase
-    .from('student_course')
-    .select('user_id')
-    .eq('course_id', params.courseId)
-    .eq('user_id', user.id)
-    .maybeSingle();
+  const { enrolled, error: membershipError } = await isEnrolledInAnyCourse(supabase, user.id, [params.courseId]);
 
   if (membershipError) return Response.json({ error: membershipError.message }, { status: 500 });
-  if (!membership) return Response.json({ error: 'Forbidden.' }, { status: 403 });
+  if (!enrolled) return Response.json({ error: 'Forbidden.' }, { status: 403 });
 
   const { data, error } = await computeCourseLeaderboard(supabase, params.courseId);
   if (error || !data) {

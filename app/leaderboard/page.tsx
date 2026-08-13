@@ -27,9 +27,9 @@ const PAGE_SIZE = 10; // keep in sync with ROW_COUNT in components/LeaderboardSk
 /**
  * The course leaderboard: where a student stands against their classmates.
  *
- * Reads GET /api/courses/{courseId}/leaderboard (lib/studentCourseClient.ts's
- * loadCourseLeaderboard), replacing the Phase-1 lib/mockLeaderboard.ts data source. rankChange is
- * attached by that client call from lib/previousRankStore.ts's last-recorded snapshot; this page
+ * Reads GET /api/courses/{courseId}/leaderboard via lib/studentCourseClient.ts's
+ * loadCourseLeaderboard. rankChange is attached by that client call from
+ * lib/previousRankStore.ts's last-recorded snapshot; this page
  * is what records the NEW snapshot, once per fresh fetch, after the entries carrying the old
  * snapshot's deltas have rendered — see the effect below and recordLeaderboardRanks's own doc.
  *

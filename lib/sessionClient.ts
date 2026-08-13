@@ -10,6 +10,7 @@
 
 import type { ActivityType } from './activityTypes';
 import { toInstant } from './dateTime';
+import type { PublicStudentProfile, PublicStudentTitle } from './leaderboardTypes';
 import type { InstructorActivityEntry, SessionListEntry, SessionRecord } from './sessionTypes';
 import type { QuizQuestion } from './quizQuestionTypes';
 import { getCachedCompletedAttempts, setCachedCompletedAttempts } from './completedAttemptsStore';
@@ -613,6 +614,40 @@ export function loadStudentTitles(token: string, studentId: string) {
     { method: 'GET' },
     token,
   );
+}
+
+/** The wire shape of GET /api/students/{id}/public-profile — no studentId; the caller knows it. */
+type PublicProfileResponse = {
+  username: string;
+  avatarUrl: string | null;
+  biography: string;
+  score: number;
+  titles: PublicStudentTitle[];
+};
+
+/**
+ * A classmate's public profile (GET /api/students/{id}/public-profile, US-5) — username, avatar,
+ * biography, cumulative score and mastery titles, and nothing else (see the route's own privacy
+ * contract). 403s unless the caller shares a course with studentId; 404 for an unknown id.
+ *
+ * studentId is re-attached here to match PublicStudentProfile (lib/leaderboardTypes.ts), since
+ * the response itself doesn't carry it — the caller already knows which id it asked for.
+ *
+ * Not cached, the same reasoning as loadStudentTitles: score and titles change whenever the
+ * viewed student completes a session, and this page is a rare, one-off visit rather than
+ * something re-mounted on every navigation the way the sidebar score is.
+ */
+export function loadPublicStudentProfile(token: string, studentId: string) {
+  return request<PublicProfileResponse>(
+    `/api/students/${encodeURIComponent(studentId)}/public-profile`,
+    { method: 'GET' },
+    token,
+  ).then((result) => {
+    if (!result.ok) return result;
+
+    const profile: PublicStudentProfile = { studentId, ...result.data };
+    return { ok: true as const, data: profile };
+  });
 }
 
 /** One acceptance-criteria submission row as returned by the submissions API. */

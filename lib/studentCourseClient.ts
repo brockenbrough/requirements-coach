@@ -74,8 +74,7 @@ type LeaderboardRow = {
 };
 
 /**
- * One course's leaderboard (GET /api/courses/{courseId}/leaderboard), real data behind the
- * Phase-1 mock in lib/mockLeaderboard.ts.
+ * One course's leaderboard (GET /api/courses/{courseId}/leaderboard).
  *
  * rankChange is not part of the server response (see LeaderboardEntry's own doc) — it is
  * attached here from lib/previousRankStore.ts's last-recorded snapshot for this course.
