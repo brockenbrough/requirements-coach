@@ -41,16 +41,18 @@ export const studentTourSteps: TourStep[] = [
   },
 ];
 
-// Sidebar navigation general, then Instructor Dashboard, Question Bank, and Courses — the four
-// areas the issue names for an instructor. The LLM provider settings gear (GitHub #318 follow-up)
-// comes last, after the day-to-day navigation is covered: it's a one-time setup step rather than
-// something an instructor reaches for on every visit, so it doesn't compete with the nav items
-// for the "first thing explained" slot.
+// Sidebar navigation general, then Instructor Dashboard, Question Catalogs, and Courses — the
+// four areas the issue names for an instructor. GitHub #359 folded the old, separate "Question
+// Bank" step into this one, since browsing/editing questions now happens per catalog at the same
+// nav destination. The LLM provider settings gear (GitHub #318 follow-up) comes last, after the
+// day-to-day navigation is covered: it's a one-time setup step rather than something an
+// instructor reaches for on every visit, so it doesn't compete with the nav items for the "first
+// thing explained" slot.
 export const instructorTourSteps: TourStep[] = [
   {
     target: 'nav',
     title: 'Your navigation',
-    description: 'Everything you need as an instructor is one click away here: your dashboard, question bank, and courses.',
+    description: 'Everything you need as an instructor is one click away here: your dashboard, question catalogs, and courses.',
   },
   {
     target: 'nav-instructor',
@@ -58,9 +60,9 @@ export const instructorTourSteps: TourStep[] = [
     description: 'See every student’s activity in one place. Filter and sort to quickly find who might need a hand.',
   },
   {
-    target: 'nav-instructor-questions',
-    title: 'Question Bank',
-    description: 'Review the questions your students are quizzed on, and add or edit your own.',
+    target: 'nav-instructor-quizzes',
+    title: 'Question Catalogs',
+    description: 'Browse the catalogs your students are quizzed from, click into one to see its questions, and add or edit your own.',
   },
   {
     target: 'nav-instructor-courses',

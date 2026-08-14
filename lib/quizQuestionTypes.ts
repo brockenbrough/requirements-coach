@@ -24,3 +24,14 @@ export type QuizQuestion = {
   /** Shown to the student when they answer incorrectly. */
   explanation: string;
 };
+
+/**
+ * GitHub #359: a QuizQuestion as the catalog detail view returns it — every question in one
+ * activity_type ("catalog"/"quiz"), not just the caller's own, since catalogs are shared
+ * (lib/activityTypeQueries.ts's listQuizzesWithAuthorAndCount). ownerId is null for the seeded
+ * bank the same way question.user_id already is; the catalog page uses it to decide whether the
+ * Edit/Delete icons render for a given row — PATCH/DELETE /api/instructor/questions/{id} both
+ * 403 a non-owner server-side regardless, this is purely so the UI doesn't offer a button that
+ * can only fail.
+ */
+export type CatalogQuestion = QuizQuestion & { ownerId: string | null };

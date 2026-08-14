@@ -72,7 +72,7 @@ vi.mock('../../lib/supabase', () => ({
   }),
 }));
 
-import { PATCH } from '../../app/api/instructor/questions/[questionId]/route';
+import { DELETE, PATCH } from '../../app/api/instructor/questions/[questionId]/route';
 
 function queueRole(role: string) {
   queue('user', { data: { role }, error: null });
@@ -311,5 +311,94 @@ describe('PATCH /api/instructor/questions/[questionId]', () => {
     expect(res.status).toBe(500);
     expect(body.error).toBe('answer update failed');
     expect(h.state.deletes).toHaveLength(0);
+  });
+});
+
+function deleteCall(token: string | null = 'valid-token', questionId = 'q-1') {
+  const request = new Request(`http://localhost/api/instructor/questions/${questionId}`, {
+    method: 'DELETE',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  return DELETE(request, { params: { questionId } });
+}
+
+/** No row means the question has never been assigned to a session (queueUsage(true) means it has). */
+function queueUsage(inUse: boolean) {
+  queue('session_to_question', { data: inUse ? { session_to_question_id: 1 } : null, error: null });
+}
+
+describe('DELETE /api/instructor/questions/[questionId]', () => {
+  it('returns 401 without a token', async () => {
+    const res = await deleteCall(null);
+    expect(res.status).toBe(401);
+    expect(h.state.tables).toEqual([]);
+  });
+
+  it('returns 403 with an empty body when the caller is a student', async () => {
+    queueRole('student');
+    const res = await deleteCall();
+    expect(res.status).toBe(403);
+    expect(await res.text()).toBe('');
+    expect(h.state.tables).not.toContain('question');
+  });
+
+  it('returns 404 when the question does not exist', async () => {
+    queueRole('instructor');
+    queue('question', { data: null, error: null });
+
+    const res = await deleteCall();
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 403 with a JSON body when the caller does not own the question', async () => {
+    queueRole('instructor');
+    queueOwnedQuestion('some-other-instructor');
+
+    const res = await deleteCall();
+    const body = await res.json();
+    expect(res.status).toBe(403);
+    expect(body.error).toBe('You do not own this question.');
+    expect(h.state.tables).not.toContain('session_to_question');
+  });
+
+  it('returns 409 when the question has already been used in a student session', async () => {
+    queueRole('instructor');
+    queueOwnedQuestion();
+    queueUsage(true);
+
+    const res = await deleteCall();
+    const body = await res.json();
+    expect(res.status).toBe(409);
+    expect(body.error).toBe('This question has already been used in a student session and cannot be deleted.');
+    expect(h.state.deletes).toHaveLength(0);
+  });
+
+  it('deletes the question_to_answer links, the answers, and the question, in that order', async () => {
+    queueRole('instructor');
+    queueOwnedQuestion();
+    queueUsage(false);
+    queueExistingLinks(['a-1', 'a-2']);
+    queue('question_to_answer', { data: null, error: null }); // unlink delete
+    queue('answer', { data: null, error: null }); // answer delete
+    queue('question', { data: null, error: null }); // question delete
+
+    const res = await deleteCall();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ questionId: 'q-1' });
+
+    expect(h.state.deletes).toContainEqual({ table: 'question_to_answer', column: 'question_id', value: 'q-1' });
+    expect(h.state.deletes).toContainEqual({ table: 'answer', column: 'answer_id', value: ['a-1', 'a-2'] });
+    expect(h.state.deletes).toContainEqual({ table: 'question', column: 'question_id', value: 'q-1' });
+  });
+
+  it('returns 500 when the initial question lookup fails', async () => {
+    queueRole('instructor');
+    queue('question', { data: null, error: { message: 'DB down' } });
+
+    const res = await deleteCall();
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe('DB down');
   });
 });

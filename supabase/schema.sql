@@ -236,6 +236,44 @@ CREATE TABLE student_course (
     enrolled_at        timestamp NOT NULL DEFAULT now(),
     PRIMARY KEY (student_course_id));
 
+-- ---------------------------------------------------------------------
+-- GitHub #360: Assembled Quiz
+--
+-- Deliberately a separate concept from activity_type (the "Question
+-- Catalog" a question belongs to, GitHub #347/#359, still internally
+-- called "quiz" in code) — see CLAUDE.md for why the two aren't merged.
+-- An assembled_quiz composes one or more catalogs for one course; it
+-- has no question pool of its own, only references. Questions are
+-- drawn dynamically per attempt from the pool of its catalogs'
+-- questions at the requested level (lib/assembledQuizQueries.ts's
+-- pickRandomQuestionsForLevel), the same "draw fresh each time" model
+-- Type A activities already use — not materialized here, so the draw
+-- always reflects whatever the referenced catalogs currently contain.
+--
+-- course_id is NOT NULL: unlike activity_type (shared across every
+-- instructor), an assembled_quiz exists FOR one course and has no
+-- meaning without it — ON DELETE CASCADE below matches that. The
+-- existing difficulty-level scheme (1-3) is reused as-is; no new level
+-- column or table.
+-- ---------------------------------------------------------------------
+CREATE TABLE assembled_quiz (
+    assembled_quiz_id uuid      NOT NULL,
+    quiz_name         text      NOT NULL,
+    description       text,
+    course_id         uuid      NOT NULL,
+    creator_id        uuid      NOT NULL,
+    created_at        timestamp NOT NULL DEFAULT now(),
+    PRIMARY KEY (assembled_quiz_id));
+
+-- The m:n link to the catalogs (activity_type rows) a quiz draws from.
+-- A SERIAL surrogate id, like question_to_answer / session_to_question,
+-- since nothing else needs to reference an individual link row by id.
+CREATE TABLE assembled_quiz_catalog (
+    assembled_quiz_catalog_id SERIAL      NOT NULL,
+    assembled_quiz_id         uuid        NOT NULL,
+    activity_type             varchar(50) NOT NULL,
+    PRIMARY KEY (assembled_quiz_catalog_id));
+
 
 -- =====================================================================
 -- REQ-DL-3 / REQ-PL-2.1: Session Log
@@ -348,6 +386,16 @@ ALTER TABLE student_course ADD CONSTRAINT fk_student_course_user FOREIGN KEY (us
 -- has no meaning once the course it points at is gone.
 ALTER TABLE student_course ADD CONSTRAINT fk_student_course_course FOREIGN KEY (course_id) REFERENCES course (course_id) ON DELETE CASCADE;
 
+-- GitHub #360: an assembled quiz has no meaning once the course it was composed for is gone,
+-- same reasoning as fk_student_course_course just above.
+ALTER TABLE assembled_quiz ADD CONSTRAINT fk_assembled_quiz_course FOREIGN KEY (course_id) REFERENCES course (course_id) ON DELETE CASCADE;
+-- No ON DELETE clause, same reasoning as fk_course_user — a deleted instructor account should
+-- not silently cascade-delete the quizzes they assembled.
+ALTER TABLE assembled_quiz ADD CONSTRAINT fk_assembled_quiz_user FOREIGN KEY (creator_id) REFERENCES "user" (user_id);
+
+ALTER TABLE assembled_quiz_catalog ADD CONSTRAINT fk_assembled_quiz_catalog_quiz FOREIGN KEY (assembled_quiz_id) REFERENCES assembled_quiz (assembled_quiz_id) ON DELETE CASCADE;
+ALTER TABLE assembled_quiz_catalog ADD CONSTRAINT fk_assembled_quiz_catalog_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
+
 ALTER TABLE title_definition ADD CONSTRAINT fk_title_definition_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
 -- Who authored the story, for attribution/moderation.
 ALTER TABLE user_story ADD CONSTRAINT fk_user_story_user FOREIGN KEY (creator_id) REFERENCES "user" (user_id);
@@ -429,6 +477,16 @@ ALTER TABLE student_course ADD CONSTRAINT uq_student_course_user_course UNIQUE (
 
 -- An instructor's "my courses" list filters on exactly this column.
 CREATE INDEX ix_course_creator_id ON course (creator_id);
+
+-- GitHub #360: a quiz cannot reference the same catalog twice, and "every catalog this quiz
+-- draws from" (the random-selection pool) filters on assembled_quiz_id.
+ALTER TABLE assembled_quiz_catalog ADD CONSTRAINT uq_assembled_quiz_catalog UNIQUE (assembled_quiz_id, activity_type);
+CREATE INDEX ix_assembled_quiz_catalog_quiz_id ON assembled_quiz_catalog (assembled_quiz_id);
+
+-- An instructor's "my assembled quizzes" list filters on creator_id; a course's assigned
+-- quizzes (not yet read by any route, but the natural next lookup) would filter on course_id.
+CREATE INDEX ix_assembled_quiz_creator_id ON assembled_quiz (creator_id);
+CREATE INDEX ix_assembled_quiz_course_id ON assembled_quiz (course_id);
 
 -- At most one running session per student and activity type. This is what
 -- makes POST /api/sessions idempotent: "start" and "resume" are the same
@@ -535,6 +593,8 @@ ALTER TABLE user_story ENABLE ROW LEVEL SECURITY;
 ALTER TABLE instructor_llm_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE course ENABLE ROW LEVEL SECURITY;
 ALTER TABLE student_course ENABLE ROW LEVEL SECURITY;
+ALTER TABLE assembled_quiz ENABLE ROW LEVEL SECURITY;
+ALTER TABLE assembled_quiz_catalog ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE session_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE answered_question_log ENABLE ROW LEVEL SECURITY;
@@ -789,3 +849,11 @@ CREATE POLICY own_submissions_insert ON submission
 -- creator_id is left NULL for every pre-existing row by this migration, same as a fresh run of
 -- this script gives the three seeded rows — "Built-in" is the correct attribution for all of
 -- them, not a gap to fill in later.
+
+-- GitHub #360 (compose a quiz from one or more catalogs, scoped to a course): brand new tables,
+-- no rename or backfill path — run the two CREATE TABLE statements, their two indexes/unique
+-- constraint, the four ALTER TABLE ... ADD CONSTRAINT foreign keys, and
+-- ALTER TABLE assembled_quiz[_catalog] ENABLE ROW LEVEL SECURITY from above. Nothing existing
+-- changes shape: assembled_quiz_catalog.activity_type points at the same activity_type table
+-- question.activity_type already does, so every catalog created before this migration is
+-- immediately eligible to be referenced by a new quiz.

@@ -1,0 +1,50 @@
+import { getSupabaseClient } from '../../../../../lib/supabase';
+import { requireInstructor } from '../../../../../lib/instructorAuth';
+import { getQuizByActivityType, listCatalogQuestions } from '../../../../../lib/activityTypeQueries';
+
+function getToken(request: Request): string | null {
+  const auth = request.headers.get('Authorization');
+  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+}
+
+/**
+ * GET /api/instructor/quizzes/:activityType — one catalog's metadata plus every question it
+ * contains (GitHub #359), for the catalog detail page's read-only view. Distinct from
+ * GET /api/instructor/quizzes/:activityType/:difficultyLevel/questions (own-questions-only, one
+ * level, 403s when the caller owns none of that level) — this route answers "what's in this
+ * catalog" for anyone who can see it exists, since catalogs are shared the same way the browse
+ * list already is.
+ *
+ * - 401 missing/invalid bearer token
+ * - 403 caller isn't an instructor (no body)
+ * - 404 activityType matches no catalog
+ * - 200 { quiz: { activityType, name, description, authorName }, questions: CatalogQuestion[] }
+ * - 500 Supabase not configured, or either query fails
+ */
+export async function GET(request: Request, { params }: { params: { activityType: string } }) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
+
+  const guard = await requireInstructor(supabase, getToken(request));
+  if (!guard.ok) {
+    return guard.status === 403
+      ? new Response(null, { status: 403 })
+      : Response.json(
+          { error: guard.status === 401 ? 'Unauthorized' : 'Supabase credentials are not configured.' },
+          { status: guard.status },
+        );
+  }
+
+  const { activityType } = params;
+
+  const { quiz, error: quizError } = await getQuizByActivityType(supabase, activityType);
+  if (quizError) return Response.json({ error: quizError.message }, { status: 500 });
+  if (!quiz) return Response.json({ error: 'Catalog not found.' }, { status: 404 });
+
+  const { questions, error: questionsError } = await listCatalogQuestions(supabase, activityType);
+  if (questionsError || !questions) {
+    return Response.json({ error: questionsError?.message ?? 'Could not load questions.' }, { status: 500 });
+  }
+
+  return Response.json({ quiz, questions }, { status: 200 });
+}

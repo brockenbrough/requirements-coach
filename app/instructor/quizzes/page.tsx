@@ -1,16 +1,27 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../../../components/AppShell';
-import { createQuiz, loadQuizzes, type QuizSummary } from '../../../lib/quizClient';
+import { CreateCatalogModal } from '../../../components/CreateCatalogModal';
+import { loadQuizzes, type QuizSummary } from '../../../lib/quizClient';
 import { useRequireRole } from '../../../lib/useRequireRole';
 
 const ALL_AUTHORS = 'all';
+const TOAST_MS = 3200;
 
 /**
- * GitHub #347: every quiz in the system (built-in or instructor-created), filterable by author,
- * plus the create-quiz form. Quizzes are globally shared — this list is not scoped to the
- * calling instructor, unlike the Question Bank or Courses pages.
+ * GitHub #347/#359: every question catalog in the system (built-in or instructor-created),
+ * filterable by author, plus the create-catalog flow (a button-triggered popup, GitHub #359
+ * follow-up, replacing the permanently visible inline form this page used to render below the
+ * list). Catalogs are globally shared — this list is not scoped to the calling instructor,
+ * unlike the old Question Bank or the Courses pages.
+ *
+ * "Catalog" here and "quiz" in the code (this route, quizClient.ts, activity_type.quiz_name, …)
+ * are the same concept — see CLAUDE.md's Question Catalogs section for why the user-facing name
+ * changed but the underlying activity_type-backed plumbing from GitHub #347 didn't. Clicking a
+ * row goes to app/instructor/quizzes/[activityType]/page.tsx, the catalog detail/edit view
+ * (GitHub #359) that replaces the retired flat Question Bank page.
  */
 export default function InstructorQuizzesPage() {
   const { token, profile, loading, authorized } = useRequireRole('instructor');
@@ -20,10 +31,8 @@ export default function InstructorQuizzesPage() {
   const [retryCount, setRetryCount] = useState(0);
   const [authorFilter, setAuthorFilter] = useState(ALL_AUTHORS);
 
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [createError, setCreateError] = useState('');
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -54,27 +63,7 @@ export default function InstructorQuizzesPage() {
   if (loading || !authorized) return null;
   if (!token || !profile) return null;
 
-  const canSubmit = Boolean(name.trim()) && !submitting;
-
-  async function handleSubmit(event: React.FormEvent) {
-    event.preventDefault();
-    if (!canSubmit || !token) return;
-
-    setSubmitting(true);
-    setCreateError('');
-
-    const result = await createQuiz(token, {
-      name: name.trim(),
-      description: description.trim() || undefined,
-    });
-
-    setSubmitting(false);
-
-    if (!result.ok) {
-      setCreateError(result.error);
-      return;
-    }
-
+  function handleCreated(quiz: { activityType: string; name: string; description: string | null }) {
     // Optimistic insert: the caller is the quiz's creator_id, and its display name follows the
     // same first/last-name-else-username fallback GET /api/instructor/quizzes uses server-side —
     // no need to re-fetch the whole list just to show the one row that just changed.
@@ -82,23 +71,53 @@ export default function InstructorQuizzesPage() {
     const authorName = fullName || profile?.username || 'You';
 
     setQuizzes((current) => [
+      { activityType: quiz.activityType, name: quiz.name, description: quiz.description, authorName, questionCount: 0 },
       ...(current ?? []),
-      { activityType: result.data.quiz.activityType, name: result.data.quiz.name, description: result.data.quiz.description, authorName, questionCount: 0 },
     ]);
 
-    setName('');
-    setDescription('');
+    setToastMessage(`"${quiz.name}" created.`);
+    window.setTimeout(() => setToastMessage(null), TOAST_MS);
   }
 
   return (
     <AppShell active="instructor-quizzes">
       <div className="mx-auto max-w-4xl">
-        <h1 className="mb-1.5 text-2xl font-extrabold text-brand-navy">Quizzes</h1>
-        <p className="mb-6 text-sm font-semibold text-gray-500">
-          Every quiz in the system, built-in or created by an instructor. Quizzes are shared — reuse a colleague's instead of rebuilding it.
-        </p>
+        <div className="mb-1 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="mb-1.5 text-2xl font-extrabold text-brand-navy">Question Catalogs</h1>
+            <p className="max-w-2xl text-sm font-semibold text-gray-500">
+              Every question catalog in the system, built-in or created by an instructor. Catalogs are shared — reuse a
+              colleague's instead of rebuilding it. Click a catalog to view its questions and edit it.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowCreateModal(true)}
+            className="flex flex-none items-center gap-2 rounded-full bg-brand-purple px-5 py-2.5 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark"
+          >
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            Create catalog
+          </button>
+        </div>
 
-        {loadFailed ? (
+        {toastMessage ? (
+          <div
+            role="status"
+            className="mb-5 mt-5 flex items-center gap-2.5 rounded-brand-md border border-brand-teal/40 bg-brand-teal/10 px-4 py-3 text-sm font-bold text-brand-teal-dark"
+          >
+            <span className="flex h-5 w-5 flex-none items-center justify-center rounded-full bg-brand-teal text-brand-teal-ink">
+              <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+            </span>
+            {toastMessage}
+          </div>
+        ) : null}
+
+        <div className="mt-6">
+          {loadFailed ? (
           <div className="mb-6 rounded-brand-lg border border-brand-danger/40 bg-brand-danger/10 p-6 text-center">
             <p className="mb-4 text-sm font-semibold text-brand-danger">Failed to load quizzes.</p>
             <button
@@ -115,7 +134,7 @@ export default function InstructorQuizzesPage() {
           <>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <p className="text-xs font-extrabold uppercase tracking-wide text-gray-400">
-                {visibleQuizzes.length} quiz{visibleQuizzes.length === 1 ? '' : 'zes'}
+                {visibleQuizzes.length} catalog{visibleQuizzes.length === 1 ? '' : 's'}
               </p>
 
               <label className="flex items-center gap-2 text-xs font-bold text-gray-500">
@@ -149,13 +168,17 @@ export default function InstructorQuizzesPage() {
                   {visibleQuizzes.length === 0 ? (
                     <tr>
                       <td colSpan={4} className="bg-brand-navy-2 px-4 py-10 text-center text-sm font-semibold text-brand-ink-muted">
-                        No quizzes match this filter.
+                        No catalogs match this filter.
                       </td>
                     </tr>
                   ) : (
                     visibleQuizzes.map((quiz) => (
-                      <tr key={quiz.activityType} className="border-t border-gray-100 bg-white">
-                        <td className="whitespace-nowrap px-4 py-3 font-extrabold text-brand-navy">{quiz.name}</td>
+                      <tr key={quiz.activityType} className="border-t border-gray-100 bg-white transition hover:bg-gray-50">
+                        <td className="whitespace-nowrap px-4 py-3 font-extrabold text-brand-navy">
+                          <Link href={`/instructor/quizzes/${encodeURIComponent(quiz.activityType)}`} className="hover:text-brand-purple hover:underline">
+                            {quiz.name}
+                          </Link>
+                        </td>
                         <td className="px-4 py-3 text-gray-500">{quiz.description || '—'}</td>
                         <td className="whitespace-nowrap px-4 py-3 text-gray-500">{quiz.authorName}</td>
                         <td className="whitespace-nowrap px-4 py-3 text-right font-bold text-gray-600">{quiz.questionCount}</td>
@@ -166,43 +189,13 @@ export default function InstructorQuizzesPage() {
               </table>
             </div>
           </>
-        )}
-
-        <p className="mb-3 text-xs font-extrabold uppercase tracking-wide text-gray-400">Create a quiz</p>
-        <form onSubmit={handleSubmit} className="rounded-brand-lg border border-gray-100 bg-gray-50 p-6">
-          <label className="mb-1.5 block text-sm font-bold text-gray-600">
-            Name
-            <input
-              type="text"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="e.g. Sprint Planning Basics"
-              className="mt-1.5 block w-full rounded-brand-md border border-gray-300 bg-white px-3.5 py-2.5 text-sm font-semibold text-gray-700 outline-none transition focus:border-brand-purple"
-            />
-          </label>
-
-          <label className="mb-1.5 mt-4 block text-sm font-bold text-gray-600">
-            Description <span className="font-semibold text-gray-400">(optional)</span>
-            <textarea
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              placeholder="What does this quiz cover?"
-              rows={3}
-              className="mt-1.5 block w-full resize-none rounded-brand-md border border-gray-300 bg-white px-3.5 py-2.5 text-sm font-semibold text-gray-700 outline-none transition focus:border-brand-purple"
-            />
-          </label>
-
-          {createError ? <p className="mt-4 text-sm font-semibold text-brand-danger">{createError}</p> : null}
-
-          <button
-            type="submit"
-            disabled={!canSubmit}
-            className="mt-5 rounded-brand-md bg-brand-purple px-5 py-2.5 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {submitting ? 'Creating…' : 'Create quiz'}
-          </button>
-        </form>
+          )}
+        </div>
       </div>
+
+      {showCreateModal ? (
+        <CreateCatalogModal token={token} onClose={() => setShowCreateModal(false)} onCreated={handleCreated} />
+      ) : null}
     </AppShell>
   );
 }
