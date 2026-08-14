@@ -68,6 +68,10 @@ export default function BrowseCoursesPage() {
     setCourses((current) => current?.map((c) => (c.id === courseId ? { ...c, alreadyMember: true } : c)) ?? current);
   }
 
+  function handleLeft(courseId: string) {
+    setCourses((current) => current?.map((c) => (c.id === courseId ? { ...c, alreadyMember: false } : c)) ?? current);
+  }
+
   return (
     <AppShell active="courses">
       <div className="mx-auto max-w-4xl">
@@ -119,7 +123,7 @@ export default function BrowseCoursesPage() {
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {filtered.map((course) => (
-              <StudentCourseCard key={course.id} course={course} token={token} onJoined={handleJoined} />
+              <StudentCourseCard key={course.id} course={course} token={token} onJoined={handleJoined} onLeft={handleLeft} />
             ))}
           </div>
         )}
