@@ -8,9 +8,9 @@ import { MasteryProgressSkeleton } from './MasteryProgressSkeleton';
 import { MasteryTitleCard } from './MasteryTitleCard';
 
 /**
- * GitHub #39: the profile page's cumulative score + mastery titles section — self-contained the
- * same way MyCoursesSection is (owns its own fetch, loading, and error state), so
- * app/profile/page.tsx just renders it for a student and doesn't otherwise know how it works.
+ * GitHub #39: the profile page's cumulative score + mastery titles section — self-contained (owns
+ * its own fetch, loading, and error state), so app/profile/page.tsx just renders it for a student
+ * and doesn't otherwise know how it works.
  *
  * Loads GET /api/students/{id}/score and GET /api/students/{id}/titles in parallel (the two
  * endpoints the issue names) and reconciles the titles response with every known activity type

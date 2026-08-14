@@ -2,7 +2,7 @@
 
 // REQ-DL-5: real client for the student-facing course routes (browse + join) — the student
 // counterpart to lib/courseClient.ts, which is instructor-only (see that file's header). Backs
-// app/courses/page.tsx, components/StudentCourseCard.tsx, and components/MyCoursesSection.tsx.
+// app/courses/page.tsx and components/StudentCourseCard.tsx.
 
 import type { CourseMeta, JoinableCourse } from './courseTypes';
 import type { LeaderboardCourse, LeaderboardEntry } from './leaderboardTypes';
@@ -91,8 +91,8 @@ export function leaveCourse(token: string, courseId: string): Promise<ApiResult<
  * components/LeaderboardPreview.tsx use to pick a courseId, cached session-scoped
  * (lib/leaderboardCoursesStore.ts, GitHub #328) so revisiting either view doesn't re-run this
  * network call — same cache-first/forceRefresh shape as loadCourseLeaderboard below. Distinct
- * from loadJoinableCourses itself, which stays uncached: app/courses/page.tsx and
- * MyCoursesSection need a just-joined course to show up without waiting for a fresh session.
+ * from loadJoinableCourses itself, which stays uncached: app/courses/page.tsx needs a just-joined
+ * or just-left course to show up without waiting for a fresh session.
  */
 export function loadMyLeaderboardCourses(
   token: string,

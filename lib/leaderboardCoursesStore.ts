@@ -5,8 +5,8 @@
 //
 // Deliberately a separate cache from lib/leaderboardStore.ts's entries, and NOT layered onto the
 // underlying loadJoinableCourses (lib/studentCourseClient.ts) call itself — that call also backs
-// app/courses/page.tsx (browse/join) and components/MyCoursesSection.tsx, both of which must see
-// a just-created or just-joined course immediately, not after a stale session cache expires.
+// app/courses/page.tsx (browse/join/leave), which must see a just-created, just-joined, or
+// just-left course immediately, not after a stale session cache expires.
 // Session-scoped like leaderboardStore for the same reason: a stale entry must not survive an
 // app restart.
 import type { LeaderboardCourse } from './leaderboardTypes';
