@@ -86,6 +86,42 @@ describe('loadCompletedAttempts — WRITE_ACCEPTANCE_CRITERIA cache (GitHub #258
     expect(cached).toEqual({ ok: true, data: { attempts: [ATTEMPT, newAttempt] } });
   });
 
+  it('AC4: with onRevalidate, a cache hit still fetches in the background and reports a changed result', async () => {
+    // Warm the cache with the old list (device A).
+    stubFetch(() => jsonResponse({ attempts: [ATTEMPT] }));
+    await loadCompletedAttempts(TOKEN, STUDENT_ID, 'WRITE_ACCEPTANCE_CRITERIA');
+
+    // Device B finished a session in the meantime — the server now has one more attempt.
+    const newAttempt: CompletedAttempt = { ...ATTEMPT, sessionId: 'session-xyz', score: 35, passed: true };
+    const fetchSpy = stubFetch(() => jsonResponse({ attempts: [newAttempt, ATTEMPT] }));
+
+    const onRevalidate = vi.fn();
+    const result = await loadCompletedAttempts(TOKEN, STUDENT_ID, 'WRITE_ACCEPTANCE_CRITERIA', { onRevalidate });
+
+    // The cached list is what the caller gets back immediately...
+    expect(result).toEqual({ ok: true, data: { attempts: [ATTEMPT] } });
+
+    // ...but the background fetch still went out, and once it lands with a different result,
+    // onRevalidate reports it.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(onRevalidate).toHaveBeenCalledWith([newAttempt, ATTEMPT]));
+  });
+
+  it("AC5: with onRevalidate, a cache hit whose background fetch matches doesn't report a change", async () => {
+    stubFetch(() => jsonResponse({ attempts: [ATTEMPT] }));
+    await loadCompletedAttempts(TOKEN, STUDENT_ID, 'WRITE_ACCEPTANCE_CRITERIA');
+
+    const fetchSpy = stubFetch(() => jsonResponse({ attempts: [ATTEMPT] }));
+    const onRevalidate = vi.fn();
+    await loadCompletedAttempts(TOKEN, STUDENT_ID, 'WRITE_ACCEPTANCE_CRITERIA', { onRevalidate });
+
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    // Give the background .then() a chance to run — since it never fires, there's nothing to
+    // wait for directly, so flush a tick and assert it stayed quiet.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onRevalidate).not.toHaveBeenCalled();
+  });
+
   it('AC3: signing out clears the cache so the next student sees no previous history', async () => {
     // Student A warms the cache.
     stubFetch(() => jsonResponse({ attempts: [ATTEMPT] }));
