@@ -310,6 +310,32 @@ CREATE TABLE answered_question_log (
     PRIMARY KEY (log_id));
 
 
+-- ---------------------------------------------------------------------
+-- GitHub #337: Daily Challenge
+--
+-- One random cross-course question a day, drawn from the courses the student is enrolled in
+-- (course.creator_id -> question.user_id), with a server-enforced time limit and double points.
+-- submitted_option/is_correct/score/submitted_at are nullable for the same write-before-disclose
+-- reason as answered_question_log/submission: the row is inserted at draw time (locking in the
+-- question and today's deadline), then filled in only if the student submits before deadline_at.
+-- A missed deadline is left unfinalized on purpose — nothing outside this table reads it for
+-- scoring, so an unfinalized row's only job is to keep uq_daily_challenge_attempt_user_date
+-- blocking a second attempt that day, finished or not.
+-- ---------------------------------------------------------------------
+CREATE TABLE daily_challenge_attempt (
+    daily_challenge_attempt_id uuid      NOT NULL,
+    user_id                    uuid      NOT NULL,
+    question_id                uuid      NOT NULL,
+    challenge_date              date      NOT NULL,
+    started_at                  timestamp NOT NULL DEFAULT now(),
+    deadline_at                  timestamp NOT NULL,
+    submitted_option             uuid,
+    is_correct                   bool,
+    score                        int4,
+    submitted_at                 timestamp,
+    PRIMARY KEY (daily_challenge_attempt_id));
+
+
 -- =====================================================================
 -- Foreign Keys
 -- Naming pattern: fk_<table_with_the_fk>_<referenced_table>
@@ -373,6 +399,14 @@ ALTER TABLE session_to_question ADD CONSTRAINT fk_session_to_question_question F
 
 ALTER TABLE session_to_user_story ADD CONSTRAINT fk_session_to_user_story_session FOREIGN KEY (session_id) REFERENCES session_log (session_id) ON DELETE CASCADE;
 ALTER TABLE session_to_user_story ADD CONSTRAINT fk_session_to_user_story_user_story FOREIGN KEY (user_story_id) REFERENCES user_story (user_story_id);
+
+-- GitHub #337: no ON DELETE clause on the user/question FKs, matching fk_session_log_user and
+-- fk_session_to_question_question — a deleted account or question should not silently cascade
+-- away attempt history, and there is no parent session row to cascade from the way submission
+-- cascades from session_log.
+ALTER TABLE daily_challenge_attempt ADD CONSTRAINT fk_daily_challenge_attempt_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
+ALTER TABLE daily_challenge_attempt ADD CONSTRAINT fk_daily_challenge_attempt_question FOREIGN KEY (question_id) REFERENCES question (question_id);
+ALTER TABLE daily_challenge_attempt ADD CONSTRAINT fk_daily_challenge_attempt_answer FOREIGN KEY (submitted_option) REFERENCES answer (answer_id);
 
 
 -- =====================================================================
@@ -468,6 +502,15 @@ ALTER TABLE answered_question_log ADD CONSTRAINT uq_answered_question_log_sessio
 -- wiring existed.
 ALTER TABLE submission ADD CONSTRAINT uq_submission_session_user_story UNIQUE (session_id, user_story_id);
 
+-- GitHub #337: the server-side "one attempt per day" rule. A second POST for the same UTC day
+-- cannot insert a second row, race or not — the same mechanism as uq_session_log_one_active,
+-- just a plain unique index rather than a partial one since every row here counts, not only
+-- in-progress ones.
+ALTER TABLE daily_challenge_attempt ADD CONSTRAINT uq_daily_challenge_attempt_user_date UNIQUE (user_id, challenge_date);
+
+-- The daily draw's course-scoped pool query and the per-student attempt lookup both filter here.
+CREATE INDEX ix_daily_challenge_attempt_user_id ON daily_challenge_attempt (user_id);
+
 
 -- =====================================================================
 -- Score roll-up
@@ -539,6 +582,7 @@ ALTER TABLE student_course ENABLE ROW LEVEL SECURITY;
 ALTER TABLE session_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE answered_question_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE submission ENABLE ROW LEVEL SECURITY;
+ALTER TABLE daily_challenge_attempt ENABLE ROW LEVEL SECURITY;
 
 -- Without this, "user" is readable through PostgREST with the anon key —
 -- the real names of every student in the class, next to the performance
@@ -576,6 +620,13 @@ CREATE POLICY own_answers_insert ON answered_question_log
 CREATE POLICY own_submissions_select ON submission
   FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY own_submissions_insert ON submission
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+-- GitHub #337: same own-row shape as session_log above. No UPDATE policy — recording the
+-- submitted answer is service-role only, same as submission's grading columns.
+CREATE POLICY own_daily_challenge_attempt_select ON daily_challenge_attempt
+  FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
   FOR INSERT WITH CHECK (auth.uid() = user_id);
 
 
@@ -733,6 +784,13 @@ CREATE POLICY own_submissions_insert ON submission
 -- and user_story to already exist. If your database has everything above and you only need this
 -- table, run just its CREATE TABLE, both FKs, uq_session_to_user_story_position,
 -- uq_session_to_user_story_story, and RLS statements from this script.
+
+-- Daily Challenge (GitHub #337): also a new table, no rename path. Its three FKs
+-- (fk_daily_challenge_attempt_user, fk_daily_challenge_attempt_question,
+-- fk_daily_challenge_attempt_answer) require "user", question and answer to already exist. If
+-- your database has everything above and you only need this table, run just its CREATE TABLE,
+-- all three FKs, uq_daily_challenge_attempt_user_date, ix_daily_challenge_attempt_user_id, and
+-- RLS statements from this script.
 
 -- Write Acceptance Criteria sessions: if your database already has session_to_user_story and
 -- submission.session_id from an earlier run of this script but predates their being wired up to
