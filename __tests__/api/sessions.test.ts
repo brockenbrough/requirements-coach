@@ -289,6 +289,7 @@ describe('POST /api/sessions', () => {
   // level. The ceiling for the override is the auto-advance level itself (findStartDifficultyLevel),
   // not just already-passed levels, so a level shown as "next" in the picker is a legal request too.
   it('accepts a requested difficultyLevel at or below the highest passed level', async () => {
+    queueValidActivityType();
     queue('session_log', { data: null, error: null }); // no session in progress
     queue('session_log', {
       data: [
@@ -318,6 +319,7 @@ describe('POST /api/sessions', () => {
   });
 
   it('accepts a requested difficultyLevel equal to the auto-advance level, even though it was never passed', async () => {
+    queueValidActivityType();
     queue('session_log', { data: null, error: null }); // no session in progress
     queue('session_log', {
       data: [{ activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 1, passed: true }],
@@ -337,6 +339,7 @@ describe('POST /api/sessions', () => {
   });
 
   it('accepts a requested difficultyLevel of 1 when nothing has been passed yet', async () => {
+    queueValidActivityType();
     queue('session_log', { data: null, error: null }); // no session in progress
     queue('session_log', { data: [], error: null }); // nothing passed -> auto-advance ceiling is 1
     queue('question', { data: pool, error: null });
@@ -353,6 +356,7 @@ describe('POST /api/sessions', () => {
   });
 
   it('rejects a requested difficultyLevel above the auto-advance ceiling', async () => {
+    queueValidActivityType();
     queue('session_log', { data: null, error: null }); // no session in progress
     queue('session_log', {
       data: [{ activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 1, passed: true }],
@@ -366,6 +370,7 @@ describe('POST /api/sessions', () => {
   });
 
   it('rejects a requested difficultyLevel above the ceiling when nothing has been passed yet', async () => {
+    queueValidActivityType();
     queue('session_log', { data: null, error: null }); // no session in progress
     queue('session_log', { data: [], error: null }); // nothing passed -> auto-advance ceiling is 1
 

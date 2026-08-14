@@ -7,9 +7,9 @@ import type { ActivitySlug, Difficulty } from '../lib/activityContent';
 const DIFFICULTY_LABEL: Record<Difficulty, string> = { 1: 'Easy', 2: 'Medium', 3: 'Hard' };
 // Same green-to-orange difficulty color schema as the activity detail page
 // (app/activities/[slug]/page.tsx's DIFFICULTY_COLOR) — kept in sync there rather than shared.
-// Levels 1 and 3 there stay solid text on a neutral bg-white/10 pill; level 2 (Medium) there
-// copies this card's exact tinted-pill classes verbatim, since plain gold text alone read too
-// low-contrast on that page's dark card.
+// That page's badge uses solid text on a neutral bg-white/10 pill for all three levels; this
+// card's chips are tinted-background pills instead (its own established style, predating the
+// color schema unification), so the two intentionally differ in treatment while sharing hue.
 //
 // The tinted pill background stays a literal hex value (not the bg-brand-* token) deliberately:
 // brand-* colors are `var(--rc-*)` references (tailwind.config.js), and Tailwind can only apply
