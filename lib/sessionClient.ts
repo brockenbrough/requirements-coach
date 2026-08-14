@@ -248,29 +248,7 @@ export function loadSessions(
   });
 }
 
-/**
- * The student's finished attempts at one activity, newest first. An empty list is a normal
- * 200 — a student who has not completed anything yet simply has no history.
- *
- * Cached in localStorage (lib/completedAttemptsStore.ts) keyed by studentId *and* activityType,
- * the same pattern as loadStudentScore/loadSessions('completed', ...), since the activity detail
- * page otherwise refetches this on every mount. A plain call is served from the cache when
- * present; pass forceRefresh to bypass it and re-cache the server's answer — the play flow does
- * this once a session for that activity completes, since that's the only thing that changes it.
- */
-export function loadCompletedAttempts(
-  token: string,
-  studentId: string,
-  activityType: ActivityType,
-  options: { forceRefresh?: boolean } = {},
-) {
-  if (!options.forceRefresh) {
-    const cached = getCachedCompletedAttempts(studentId, activityType);
-    if (cached !== null) {
-      return Promise.resolve<ApiResult<{ attempts: CompletedAttempt[] }>>({ ok: true, data: { attempts: cached } });
-    }
-  }
-
+function fetchCompletedAttempts(token: string, studentId: string, activityType: ActivityType) {
   return request<{ attempts: CompletedAttempt[] }>(
     `/api/sessions/completed?activityType=${encodeURIComponent(activityType)}`,
     { method: 'GET' },
@@ -288,6 +266,45 @@ export function loadCompletedAttempts(
     setCachedCompletedAttempts(studentId, activityType, attempts);
     return { ok: true as const, data: { attempts } };
   });
+}
+
+/**
+ * The student's finished attempts at one activity, newest first. An empty list is a normal
+ * 200 — a student who has not completed anything yet simply has no history.
+ *
+ * Cached in localStorage (lib/completedAttemptsStore.ts) keyed by studentId *and* activityType,
+ * the same pattern as loadStudentScore/loadSessions('completed', ...), since the activity detail
+ * page otherwise refetches this on every mount. A plain call resolves from the cache immediately
+ * when present, but — unlike the other cache-first loaders — still fires the network request in
+ * parallel underneath: a session finished on another device is otherwise invisible here forever,
+ * since nothing on *this* device would ever have a reason to invalidate the cache (GitHub #333).
+ * That background result only reaches the caller via onRevalidate, and only when it actually
+ * differs from what was just returned — a same-device reload re-fetching identical rows should
+ * not cause the table to re-render. Pass forceRefresh to skip the cache and await the network
+ * result directly instead — the play flow does this once a session for that activity completes.
+ */
+export function loadCompletedAttempts(
+  token: string,
+  studentId: string,
+  activityType: ActivityType,
+  options: { forceRefresh?: boolean; onRevalidate?: (attempts: CompletedAttempt[]) => void } = {},
+) {
+  if (!options.forceRefresh) {
+    const cached = getCachedCompletedAttempts(studentId, activityType);
+    if (cached !== null) {
+      if (options.onRevalidate) {
+        const onRevalidate = options.onRevalidate;
+        fetchCompletedAttempts(token, studentId, activityType).then((result) => {
+          if (result.ok && JSON.stringify(result.data.attempts) !== JSON.stringify(cached)) {
+            onRevalidate(result.data.attempts);
+          }
+        });
+      }
+      return Promise.resolve<ApiResult<{ attempts: CompletedAttempt[] }>>({ ok: true, data: { attempts: cached } });
+    }
+  }
+
+  return fetchCompletedAttempts(token, studentId, activityType);
 }
 
 /**

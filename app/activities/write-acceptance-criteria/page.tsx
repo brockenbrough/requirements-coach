@@ -57,7 +57,13 @@ export default function WriteAcceptanceCriteriaLandingPage() {
 
     Promise.all([
       loadCurrentAcceptanceCriteriaSession(token),
-      loadCompletedAttempts(token, profile.user_id, 'WRITE_ACCEPTANCE_CRITERIA'),
+      loadCompletedAttempts(token, profile.user_id, 'WRITE_ACCEPTANCE_CRITERIA', {
+        // A quiz finished on another device wouldn't otherwise show up here until something on
+        // this device invalidated the cache — see loadCompletedAttempts's own comment.
+        onRevalidate: (attempts) => {
+          if (!cancelled) setAttempts(attempts);
+        },
+      }),
     ]).then(([currentResult, completed]) => {
       if (cancelled) return;
       if (currentResult.ok) setCurrent(currentResult.data);
