@@ -1,14 +1,24 @@
 'use client';
 
 import { useState } from 'react';
-import type { SessionQuestion } from '../lib/sessionClient';
+import type { SessionQuestionOption } from '../lib/sessionClient';
+
+// Narrower than SessionQuestion on purpose: this component never reads position/difficulty_level/
+// activity_type/max_score, so any question-shaped object with a prompt, id and options — a
+// SessionQuestion (app/activities/.../play/page.tsx) or a DailyChallengeQuestion
+// (app/daily-challenge/page.tsx) — satisfies it without either caller reshaping its data.
+type QuestionCardQuestion = {
+  question_id: string;
+  question_prompt: string;
+  options: SessionQuestionOption[];
+};
 
 export function QuestionCard({
   question,
   disabled = false,
   onSubmit,
 }: {
-  question: SessionQuestion;
+  question: QuestionCardQuestion;
   disabled?: boolean;
   onSubmit: (answerId: string) => void;
 }) {

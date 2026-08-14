@@ -4,10 +4,13 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AppShell } from "../../components/AppShell";
 import { ActivityLogRow } from "../../components/ActivityLogRow";
+import { DailyChallengeCard } from "../../components/DailyChallengeCard";
 import { LeaderboardPreview } from "../../components/LeaderboardPreview";
 import { ACTIVITIES, Difficulty } from "../../lib/activityContent";
 import { toActivityLogEntry } from "../../lib/activityLogTypes";
 import { ActivityState, getActivityState } from "../../lib/activityStore";
+import { loadDailyChallenge } from "../../lib/dailyChallengeClient";
+import type { DailyChallengeState } from "../../lib/dailyChallengeTypes";
 import { type SessionListEntry, type StudentTitle, loadSessions, loadStudentTitles } from "../../lib/sessionClient";
 import { useRequireRole } from "../../lib/useRequireRole";
 
@@ -31,6 +34,7 @@ export default function DashboardPage() {
   > | null>(null);
   const [recent, setRecent] = useState<SessionListEntry[] | null>(null);
   const [titles, setTitles] = useState<StudentTitle[] | null>(null);
+  const [dailyChallenge, setDailyChallenge] = useState<DailyChallengeState | null>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -66,6 +70,16 @@ export default function DashboardPage() {
     });
     return () => { cancelled = true; };
   }, [token, profile?.user_id]);
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    loadDailyChallenge(token).then((result) => {
+      if (cancelled) return;
+      if (result.ok) setDailyChallenge(result.data);
+    });
+    return () => { cancelled = true; };
+  }, [token]);
 
   // Blank rather than a "logged out" message while useRequireRole's effect redirects — for
   // a wrong role that message would be actively misleading (an instructor isn't logged out).
@@ -249,6 +263,8 @@ export default function DashboardPage() {
           </Link>
         </div>
       )}
+
+      <DailyChallengeCard state={dailyChallenge} />
 
       {token ? <LeaderboardPreview token={token} studentId={profile?.user_id} /> : null}
 
