@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { ActivityDetailSkeleton } from '../../../components/ActivityDetailSkeleton';
 import { AppShell } from '../../../components/AppShell';
 import { CompletedAttemptsTable } from '../../../components/CompletedAttemptsTable';
 import { LevelReplaySelector } from '../../../components/LevelReplaySelector';
@@ -35,6 +36,10 @@ export default function WriteAcceptanceCriteriaLandingPage() {
   // local/mock notion of progress any more. null means "not checked yet or nothing running".
   const [current, setCurrent] = useState<CurrentAcSessionResult | null>(null);
   const [attempts, setAttempts] = useState<CompletedAttempt[] | null>(null);
+  // True until the current-session and completed-attempts fetches below have both resolved —
+  // the hero card renders nothing real before then, only ActivityDetailSkeleton (same as
+  // app/activities/[slug]/page.tsx).
+  const [isLoading, setIsLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [abandoning, setAbandoning] = useState(false);
   const [error, setError] = useState<{ message: string; needsProfile: boolean } | null>(null);
@@ -42,7 +47,12 @@ export default function WriteAcceptanceCriteriaLandingPage() {
   // Both reads in one pass, because this page re-runs them on every return from /play: the
   // running session decides Start vs. Resume/Abandon, the finished ones fill the history below.
   useEffect(() => {
-    if (!token || !profile?.user_id) return;
+    if (!token || !profile?.user_id) {
+      // Nothing to fetch yet — don't leave the skeleton spinning forever waiting on a load that
+      // was never started (see app/activities/[slug]/page.tsx's identical guard).
+      setIsLoading(false);
+      return;
+    }
     let cancelled = false;
 
     Promise.all([
@@ -52,6 +62,7 @@ export default function WriteAcceptanceCriteriaLandingPage() {
       if (cancelled) return;
       if (currentResult.ok) setCurrent(currentResult.data);
       if (completed.ok) setAttempts(completed.data.attempts);
+      setIsLoading(false);
     });
 
     return () => {
@@ -146,63 +157,70 @@ export default function WriteAcceptanceCriteriaLandingPage() {
           ← Back to Activities
         </Link>
 
-        <div className="rounded-brand-lg border border-brand-navy-border bg-brand-navy p-8 text-brand-ink">
-          <div className="mb-4 flex flex-wrap gap-2">
-            {/* This activity has no difficulty progression (CLAUDE.md's "half-connected worlds"
-                note on write-acceptance-criteria) — every session is level 1, so this badge is
-                the same fixed "Easy · Level 1" app/activities/[slug]/page.tsx shows a level-1
-                student, just without a live displayLevel to read from. */}
-            <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-extrabold text-brand-green">
-              Easy · Level 1
-            </span>
-            <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-bold text-brand-ink-muted">
-              {ACTIVITY.category}
-            </span>
-          </div>
-          <h2 className="mb-2 text-2xl font-extrabold text-white">{ACTIVITY.name}</h2>
-          <p className="mb-6 text-sm font-semibold text-brand-ink-muted">{ACTIVITY.instructions}</p>
+        {isLoading ? (
+          <ActivityDetailSkeleton />
+        ) : (
+          <>
+            <div className="rounded-brand-lg border border-brand-navy-border bg-brand-navy p-8 text-brand-ink">
+              <div className="mb-4 flex flex-wrap gap-2">
+                {/* This activity has no difficulty progression (CLAUDE.md's "half-connected
+                    worlds" note on write-acceptance-criteria) — every session is level 1, so this
+                    badge is the same fixed "Easy · Level 1" app/activities/[slug]/page.tsx shows
+                    a level-1 student, just without a live displayLevel to read from. */}
+                <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-extrabold text-brand-green">
+                  Easy · Level 1
+                </span>
+                <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-bold text-brand-ink-muted">
+                  {ACTIVITY.category}
+                </span>
+              </div>
+              <h2 className="mb-2 text-2xl font-extrabold text-white">{ACTIVITY.name}</h2>
+              <p className="mb-6 text-sm font-semibold text-brand-ink-muted">{ACTIVITY.instructions}</p>
 
-          {session ? (
-            <ResumeOrAbandonPrompt
-              message="You have a session in progress."
-              progressLabel={`${answeredCount} / ${totalStories} answered`}
-              progressFraction={totalStories > 0 ? answeredCount / totalStories : 0}
-              resumeLabel="Continue"
-              onResume={handleResume}
-              onAbandon={handleAbandon}
-              abandoning={abandoning}
-              confirmMessage="Abandon this in-progress attempt? Your answers so far will be discarded."
-            />
-          ) : (
-            <button
-              onClick={handleStart}
-              disabled={starting}
-              className="rounded-full bg-brand-purple px-6 py-3 text-sm font-extrabold text-white hover:bg-brand-purple-dark disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {starting ? 'Starting…' : 'Start'}
-            </button>
-          )}
+              {session ? (
+                <ResumeOrAbandonPrompt
+                  message="You have a session in progress."
+                  progressLabel={`${answeredCount} / ${totalStories} answered`}
+                  progressFraction={totalStories > 0 ? answeredCount / totalStories : 0}
+                  resumeLabel="Continue"
+                  onResume={handleResume}
+                  onAbandon={handleAbandon}
+                  abandoning={abandoning}
+                  confirmMessage="Abandon this in-progress attempt? Your answers so far will be discarded."
+                />
+              ) : (
+                <button
+                  onClick={handleStart}
+                  disabled={starting}
+                  className="rounded-full bg-brand-purple px-6 py-3 text-sm font-extrabold text-white hover:bg-brand-purple-dark disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {starting ? 'Starting…' : 'Start'}
+                </button>
+              )}
 
-          {error ? (
-            <div className="mt-4 rounded-brand-md border border-brand-danger/40 bg-brand-danger/10 p-4 text-sm font-semibold text-brand-danger-light">
-              {error.message}
-              {error.needsProfile ? (
-                <Link href="/profile" className="ml-1 underline hover:text-white">
-                  Go to your profile
-                </Link>
+              {error ? (
+                <div className="mt-4 rounded-brand-md border border-brand-danger/40 bg-brand-danger/10 p-4 text-sm font-semibold text-brand-danger-light">
+                  {error.message}
+                  {error.needsProfile ? (
+                    <Link href="/profile" className="ml-1 underline hover:text-white">
+                      Go to your profile
+                    </Link>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {/* Level 1 is the only level this activity ever has, so unlike
+                  app/activities/[slug]/page.tsx there's nothing to pick between — shown purely
+                  for visual consistency with the other activity detail pages (see the badge
+                  above). */}
+              {!session ? (
+                <LevelReplaySelector highestSelectableLevel={1} selectedLevel={1} onSelect={() => {}} disabled={starting} />
               ) : null}
             </div>
-          ) : null}
 
-          {/* Level 1 is the only level this activity ever has, so unlike
-              app/activities/[slug]/page.tsx there's nothing to pick between — shown purely for
-              visual consistency with the other activity detail pages (see the badge above). */}
-          {!session ? (
-            <LevelReplaySelector highestSelectableLevel={1} selectedLevel={1} onSelect={() => {}} disabled={starting} />
-          ) : null}
-        </div>
-
-        <CompletedAttemptsTable attempts={attempts} showLevel={false} />
+            <CompletedAttemptsTable attempts={attempts} showLevel={false} />
+          </>
+        )}
       </div>
     </AppShell>
   );
