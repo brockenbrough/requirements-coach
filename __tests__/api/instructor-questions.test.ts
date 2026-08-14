@@ -80,7 +80,7 @@ vi.mock('../../lib/supabase', () => ({
   }),
 }));
 
-import { GET, POST } from '../../app/api/instructor/questions/route';
+import { POST } from '../../app/api/instructor/questions/route';
 
 function queueRole(role: string) {
   queue('user', { data: { role }, error: null });
@@ -89,12 +89,6 @@ function queueRole(role: string) {
 /** Queues a successful activity_type lookup (GitHub #347: isActivityType is now a DB read). */
 function queueValidActivityType(activityType = 'IDENTIFY_WEAK_USER_STORIES') {
   queue('activity_type', { data: { activity_type: activityType }, error: null });
-}
-
-function request(token?: string) {
-  return new Request('http://localhost/api/instructor/questions', {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
 }
 
 function postRequest(body: unknown, token: string | null = 'valid-token') {
@@ -125,20 +119,6 @@ function validBody(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-function questionRow(overrides: Partial<Record<string, unknown>> = {}) {
-  return {
-    question_id: 'q-1',
-    question_prompt: 'Which story is weakest?',
-    difficulty_level: 1,
-    activity_type: 'IDENTIFY_WEAK_USER_STORIES',
-    question_to_answer: [
-      { answer: { answer_id: 'a-1', option_text: 'Wrong option', is_correct: false, explanation: 'Incorrect: not this one.' } },
-      { answer: { answer_id: 'a-2', option_text: 'Right option', is_correct: true, explanation: 'Correct: this is the weakest one.' } },
-    ],
-    ...overrides,
-  };
-}
-
 beforeEach(() => {
   h.state.queues = {};
   h.state.tables = [];
@@ -147,89 +127,6 @@ beforeEach(() => {
   h.state.deletes = [];
   h.state.filters = [];
   h.state.orders = [];
-});
-
-describe('GET /api/instructor/questions', () => {
-  it('returns 401 without a token', async () => {
-    const res = await GET(request());
-    expect(res.status).toBe(401);
-    expect(h.state.tables).toEqual([]);
-  });
-
-  it('returns 401 for an invalid token', async () => {
-    const res = await GET(request('bad-token'));
-    expect(res.status).toBe(401);
-  });
-
-  it('returns 403 with an empty body when the caller is a student', async () => {
-    queueRole('student');
-    const res = await GET(request('valid-token'));
-    expect(res.status).toBe(403);
-    expect(await res.text()).toBe('');
-    expect(h.state.tables).not.toContain('question');
-  });
-
-  it('returns 200 with questions mapped to QuizQuestion, including isCorrect and explanation', async () => {
-    queueRole('instructor');
-    queue('question', { data: [questionRow()], error: null });
-
-    const res = await GET(request('valid-token'));
-    expect(res.status).toBe(200);
-
-    const body = await res.json();
-    expect(body.questions).toHaveLength(1);
-    expect(body.questions[0]).toEqual({
-      id: 'q-1',
-      quizType: 'IDENTIFY_WEAK_USER_STORIES',
-      level: 1,
-      questionText: 'Which story is weakest?',
-      answerOptions: [
-        { id: 'a-1', text: 'Wrong option', isCorrect: false },
-        { id: 'a-2', text: 'Right option', isCorrect: true },
-      ],
-      // The mapped explanation is the *correct* answer's explanation, not a question-level
-      // free-text field — the database only stores explanation per answer option.
-      explanation: 'Correct: this is the weakest one.',
-    });
-  });
-
-  it('returns 200 with an empty list for an empty bank', async () => {
-    queueRole('instructor');
-    queue('question', { data: [], error: null });
-
-    const res = await GET(request('valid-token'));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.questions).toEqual([]);
-  });
-
-  it('orders by order_number ascending', async () => {
-    queueRole('instructor');
-    queue('question', { data: [], error: null });
-
-    await GET(request('valid-token'));
-
-    expect(h.state.orders).toContainEqual({ table: 'question', column: 'order_number', ascending: true });
-  });
-
-  it('filters question by user_id = the calling instructor, so only their own questions are fetched', async () => {
-    queueRole('instructor');
-    queue('question', { data: [], error: null });
-
-    await GET(request('valid-token'));
-
-    expect(h.state.filters).toContainEqual({ table: 'question', column: 'user_id', value: 'instructor-1' });
-  });
-
-  it('returns 500 when the database returns an error', async () => {
-    queueRole('instructor');
-    queue('question', { data: null, error: { message: 'DB failure' } });
-
-    const res = await GET(request('valid-token'));
-    expect(res.status).toBe(500);
-    const body = await res.json();
-    expect(body.error).toBe('DB failure');
-  });
 });
 
 describe('POST /api/instructor/questions', () => {

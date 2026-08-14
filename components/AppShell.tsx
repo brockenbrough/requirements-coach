@@ -18,10 +18,10 @@ type NavKey =
   | 'leaderboard'
   | 'profile'
   | 'instructor'
-  | 'instructor-questions'
   | 'instructor-settings'
   | 'instructor-courses'
-  | 'instructor-quizzes';
+  | 'instructor-quizzes'
+  | 'instructor-assembled-quizzes';
 
 // GitHub #242 (UI-2): 'courses' here is the student-facing browse/join page (app/courses/page.tsx)
 // — a distinct NavKey/route from the instructor's 'instructor-courses' (create/manage), same
@@ -51,13 +51,21 @@ const STUDENT_NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
 // at /instructor/acceptance-criteria is gone — that page's rows now live in the Instructor
 // Dashboard's own activity table alongside every other attempt, so a separate destination for
 // them would just be a second, stale way to reach the same data.
-// GitHub #347: 'instructor-quizzes' sits next to Question Bank — both are about the question
-// bank/quiz catalog side of the app, as opposed to Courses (rosters) or the Dashboard (activity).
+// GitHub #359: the old, separate 'instructor-questions' ("Question Bank") entry is gone —
+// browsing/editing questions now happens per catalog, at the 'instructor-quizzes' destination
+// below, which took over Question Bank's old spot in this list. "Quizzes" is this app's internal
+// name for what's user-facing labeled "Question Catalogs" (GitHub #347's activity_type-backed
+// named question sets); see CLAUDE.md for why the label changed but the route/key didn't.
+//
+// GitHub #360: 'instructor-assembled-quizzes' ("Quizzes") sits right after it — composing
+// catalogs into a course-scoped quiz is the natural next step after browsing them, and this is
+// the *other* "quiz" concept CLAUDE.md's Question Catalogs section warns not to confuse with the
+// one above (a fixed, assembled_quiz-backed composition of catalogs, not a catalog itself).
 const INSTRUCTOR_NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
   { key: 'instructor', label: 'Instructor Dashboard', href: '/instructor' },
   { key: 'instructor-courses', label: 'Courses', href: '/instructor/courses' },
-  { key: 'instructor-questions', label: 'Question Bank', href: '/instructor/questions' },
-  { key: 'instructor-quizzes', label: 'Quizzes', href: '/instructor/quizzes' },
+  { key: 'instructor-quizzes', label: 'Question Catalogs', href: '/instructor/quizzes' },
+  { key: 'instructor-assembled-quizzes', label: 'Quizzes', href: '/instructor/assembled-quizzes' },
   { key: 'profile', label: 'Profile', href: '/profile' },
   { key: 'instructor-settings', label: 'LLM Provider Settings', href: '/instructor/settings' },
 ];
@@ -97,15 +105,6 @@ function UsersIcon() {
       <path d="M2 20c0-3.3 3.1-5.5 7-5.5s7 2.2 7 5.5" />
       <path d="M16 8.5a3 3 0 1 0 0-6" />
       <path d="M18 14.5c2.6.5 4 2.1 4 5.5" />
-    </svg>
-  );
-}
-
-function BookIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v17H6.5A2.5 2.5 0 0 0 4 21.5v-17Z" />
-      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
     </svg>
   );
 }
@@ -194,8 +193,8 @@ const NAV_ICONS: Record<NavKey, () => JSX.Element> = {
   profile: UserIcon,
   instructor: UsersIcon,
   'instructor-courses': GraduationCapIcon,
-  'instructor-questions': BookIcon,
   'instructor-quizzes': LayersIcon,
+  'instructor-assembled-quizzes': ListIcon,
   'instructor-settings': GearIcon,
 };
 

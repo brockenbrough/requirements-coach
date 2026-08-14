@@ -5,11 +5,6 @@ import { AnswerOptionField } from './AnswerOptionField';
 import type { ActivityType } from '../lib/activityTypes';
 import type { QuizQuestion } from '../lib/quizQuestionTypes';
 
-const QUIZ_OPTIONS: { value: ActivityType; label: string }[] = [
-  { value: 'IDENTIFY_WEAK_USER_STORIES', label: 'Identify Weak User Stories' },
-  { value: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', label: 'Identify Weak Acceptance Criteria' },
-];
-
 const LEVEL_OPTIONS: { value: 1 | 2 | 3; label: string }[] = [
   { value: 1, label: 'Easy · Level 1' },
   { value: 2, label: 'Medium · Level 2' },
@@ -45,6 +40,7 @@ export function QuestionFormModal({
   mode,
   initialData,
   defaultQuizType,
+  quizOptions,
   onClose,
   onSave,
 }: {
@@ -53,6 +49,13 @@ export function QuestionFormModal({
   initialData?: QuizQuestion;
   /** Which quiz's tab/filter the page currently has active — the starting value in 'add' mode. */
   defaultQuizType: ActivityType;
+  /**
+   * The choices the "Quiz" dropdown offers (GitHub #359). A catalog's detail page passes its own
+   * single catalog here, effectively locking the field to "this catalog" without special-casing
+   * the dropdown away entirely; a page that lets a question move between catalogs (like the
+   * now-retired flat Question Bank did) would pass more than one.
+   */
+  quizOptions: { value: ActivityType; label: string }[];
   onClose: () => void;
   /** Async so a failed save can keep the modal open with an error instead of closing blindly. */
   onSave: (question: QuizQuestion) => Promise<{ ok: true } | { ok: false; error: string }>;
@@ -184,7 +187,7 @@ export function QuestionFormModal({
       >
         <div className="mb-1 flex items-start justify-between gap-3">
           <div>
-            <p className="text-xs font-extrabold uppercase tracking-wide text-brand-gold">Question Bank</p>
+            <p className="text-xs font-extrabold uppercase tracking-wide text-brand-gold">Question Catalog</p>
             <h2 id="question-form-title" className="mt-1 text-xl font-extrabold text-white">
               {isEdit ? 'Edit Question' : 'Add a New Question'}
             </h2>
@@ -211,7 +214,7 @@ export function QuestionFormModal({
               onChange={(event) => setQuizType(event.target.value as ActivityType)}
               className="mt-1.5 block w-full rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none transition focus:border-brand-purple"
             >
-              {QUIZ_OPTIONS.map((option) => (
+              {quizOptions.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
