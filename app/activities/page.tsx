@@ -50,6 +50,12 @@ export default function ActivitiesPage() {
   // GitHub #108: explicit loading state rather than inferring it from cards === null — the
   // retry button needs to distinguish "haven't loaded yet" from "loaded, then failed".
   const [isLoading, setIsLoading] = useState(true);
+  // Titles load in their own effect below (a failing titles call must not cost the whole list),
+  // but a card rendered before titles arrives would briefly show no title and the wrong level
+  // (nextDifficultyLevel(null) — "Easy" — even for a student who's already passed levels), then
+  // jump once titles lands. Tracked separately from isLoading so cards/titles can fail or arrive
+  // independently while the page still waits for both before showing anything real.
+  const [titlesLoading, setTitlesLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
 
@@ -117,12 +123,19 @@ export default function ActivitiesPage() {
   // sessions. Not cached (see loadStudentTitles) — a title the student just earned must show up.
   // A failed call leaves titles null, which simply renders no title, same as not having one.
   useEffect(() => {
-    if (!token || !profile?.user_id) return;
+    if (!token || !profile?.user_id) {
+      // Nothing to fetch yet — don't leave the page waiting forever on a load that never started
+      // (see app/activities/[slug]/page.tsx's identical guard on its own loading state).
+      setTitlesLoading(false);
+      return;
+    }
     let cancelled = false;
+    setTitlesLoading(true);
 
     loadStudentTitles(token, profile.user_id).then((result) => {
       if (cancelled) return;
       if (result.ok) setTitles(result.data.titles);
+      setTitlesLoading(false);
     });
 
     return () => {
@@ -136,7 +149,7 @@ export default function ActivitiesPage() {
     <AppShell active="activities">
       <h3 className="mb-5 text-lg font-extrabold">Choose an activity</h3>
 
-      {isLoading ? (
+      {isLoading || titlesLoading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2" role="status" aria-label="Loading activities">
           {ACTIVITIES.map((activity) => (
             <ActivityCardSkeleton key={activity.slug} />
