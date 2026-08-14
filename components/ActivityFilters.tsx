@@ -9,6 +9,7 @@ const ACTIVITY_OPTIONS: { value: ActivityFilterValue; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'IDENTIFY_WEAK_USER_STORIES', label: 'Weak User Stories' },
   { value: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', label: 'Weak Acceptance Criteria' },
+  { value: 'WRITE_ACCEPTANCE_CRITERIA', label: 'Write Acceptance Criteria' },
 ];
 
 const STATUS_OPTIONS: { value: StatusFilterValue; label: string }[] = [
