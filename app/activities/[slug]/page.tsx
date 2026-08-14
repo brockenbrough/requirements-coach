@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
+import { ActivityDetailSkeleton } from "../../../components/ActivityDetailSkeleton";
 import { AppShell } from "../../../components/AppShell";
 import { CompletedAttemptsTable } from "../../../components/CompletedAttemptsTable";
 import { LevelReplaySelector } from "../../../components/LevelReplaySelector";
@@ -71,6 +72,10 @@ function ActivityDetailContent({
   // running", which the render below treats the same as "not started".
   const [current, setCurrent] = useState<CurrentSessionResult | null>(null);
   const [attempts, setAttempts] = useState<CompletedAttempt[] | null>(null);
+  // True until the current-session and completed-attempts fetches below have both resolved —
+  // the hero card and level picker render nothing real before then, only ActivityDetailSkeleton,
+  // so a level/status guess is never shown and then corrected once real data lands.
+  const [isLoading, setIsLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   // The level picked in LevelReplaySelector — chosen ahead of time, not acted on until Start is
   // clicked. Seeded from initialLevel (the list page's own value) rather than null, so the badge
@@ -116,7 +121,13 @@ function ActivityDetailContent({
   // Both reads in one pass, because the page re-runs this on every return from /play: the
   // running session decides Start vs. Resume/Abandon, the finished ones fill the history below.
   useEffect(() => {
-    if (!token || !activity || !profile?.user_id) return;
+    if (!token || !activity || !profile?.user_id) {
+      // Nothing to fetch yet (still resolving auth, or no profile row — see handleStart's 409
+      // handling) — there is no load in flight to wait on, so don't leave the skeleton spinning
+      // forever; the page renders its normal empty/default state instead.
+      setIsLoading(false);
+      return;
+    }
     let cancelled = false;
 
     Promise.all([
@@ -128,6 +139,7 @@ function ActivityDetailContent({
       // An empty list and a failed read are different things, so the history only
       // renders once it is actually known — null keeps it out of the way until then.
       if (completed.ok) setAttempts(completed.data.attempts);
+      setIsLoading(false);
     });
 
     return () => {
@@ -242,72 +254,78 @@ function ActivityDetailContent({
           ← Back to Activities
         </Link>
 
-        <div className="rounded-2xl border border-[#332b6b] bg-[#1b1642] p-8 text-[#F3F1FF]">
-          <div className="mb-4 flex flex-wrap gap-2">
-            <span className={`rounded-full px-2.5 py-1 text-xs font-extrabold ${DIFFICULTY_COLOR[displayLevel] ?? "bg-white/10 text-brand-teal"}`}>
-              {DIFFICULTY_LABEL[displayLevel] ?? "Level"} · Level {displayLevel}
-            </span>
-            <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-bold text-[#A79FC9]">
-              {activity.category}
-            </span>
-          </div>
-          <h2 className="mb-2 text-2xl font-extrabold text-white">
-            {activity.name}
-          </h2>
-          <p className="mb-6 text-sm font-semibold text-[#A79FC9]">
-            {activity.instructions}
-          </p>
+        {isLoading ? (
+          <ActivityDetailSkeleton />
+        ) : (
+          <>
+            <div className="rounded-2xl border border-[#332b6b] bg-[#1b1642] p-8 text-[#F3F1FF]">
+              <div className="mb-4 flex flex-wrap gap-2">
+                <span className={`rounded-full px-2.5 py-1 text-xs font-extrabold ${DIFFICULTY_COLOR[displayLevel] ?? "bg-white/10 text-brand-teal"}`}>
+                  {DIFFICULTY_LABEL[displayLevel] ?? "Level"} · Level {displayLevel}
+                </span>
+                <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-bold text-[#A79FC9]">
+                  {activity.category}
+                </span>
+              </div>
+              <h2 className="mb-2 text-2xl font-extrabold text-white">
+                {activity.name}
+              </h2>
+              <p className="mb-6 text-sm font-semibold text-[#A79FC9]">
+                {activity.instructions}
+              </p>
 
-          {session ? (
-            <ResumeOrAbandonPrompt
-              message="You have a previous attempt in progress."
-              progressLabel={`${answeredCount} / ${totalQuestions} answered`}
-              progressFraction={totalQuestions > 0 ? answeredCount / totalQuestions : 0}
-              onResume={handleResume}
-              onAbandon={handleAbandon}
-              abandoning={abandoning}
-              confirmMessage="Abandon this in-progress attempt? Your answers so far will be discarded."
-            />
-          ) : (
-            <button
-              onClick={handleStart}
-              disabled={starting}
-              className="rounded-full bg-[#7C4DFF] px-6 py-3 text-sm font-extrabold text-white hover:bg-[#6234d1] disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {starting ? "Starting…" : "Start"}
-            </button>
-          )}
-
-          {error ? (
-            <div className="mt-4 rounded-brand-md border border-brand-danger/40 bg-brand-danger/10 p-4 text-sm font-semibold text-brand-danger-light">
-              {error.message}
-              {error.needsProfile ? (
-                <Link
-                  href="/profile"
-                  className="ml-1 underline hover:text-white"
+              {session ? (
+                <ResumeOrAbandonPrompt
+                  message="You have a previous attempt in progress."
+                  progressLabel={`${answeredCount} / ${totalQuestions} answered`}
+                  progressFraction={totalQuestions > 0 ? answeredCount / totalQuestions : 0}
+                  onResume={handleResume}
+                  onAbandon={handleAbandon}
+                  abandoning={abandoning}
+                  confirmMessage="Abandon this in-progress attempt? Your answers so far will be discarded."
+                />
+              ) : (
+                <button
+                  onClick={handleStart}
+                  disabled={starting}
+                  className="rounded-full bg-[#7C4DFF] px-6 py-3 text-sm font-extrabold text-white hover:bg-[#6234d1] disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  Go to your profile
-                </Link>
+                  {starting ? "Starting…" : "Start"}
+                </button>
+              )}
+
+              {error ? (
+                <div className="mt-4 rounded-brand-md border border-brand-danger/40 bg-brand-danger/10 p-4 text-sm font-semibold text-brand-danger-light">
+                  {error.message}
+                  {error.needsProfile ? (
+                    <Link
+                      href="/profile"
+                      className="ml-1 underline hover:text-white"
+                    >
+                      Go to your profile
+                    </Link>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {!session ? (
+                <LevelReplaySelector
+                  highestSelectableLevel={highestSelectableLevel}
+                  selectedLevel={selectedLevel}
+                  // A level, once replayable, is always selected — clicking a button switches the
+                  // selection, it never clears it back to auto-advance.
+                  onSelect={(level) => {
+                    userPickedLevelRef.current = true;
+                    setSelectedLevel(level);
+                  }}
+                  disabled={starting}
+                />
               ) : null}
             </div>
-          ) : null}
 
-          {!session ? (
-            <LevelReplaySelector
-              highestSelectableLevel={highestSelectableLevel}
-              selectedLevel={selectedLevel}
-              // A level, once replayable, is always selected — clicking a button switches the
-              // selection, it never clears it back to auto-advance.
-              onSelect={(level) => {
-                userPickedLevelRef.current = true;
-                setSelectedLevel(level);
-              }}
-              disabled={starting}
-            />
-          ) : null}
-        </div>
-
-        <CompletedAttemptsTable attempts={attempts} />
+            <CompletedAttemptsTable attempts={attempts} />
+          </>
+        )}
       </div>
     </AppShell>
   );
