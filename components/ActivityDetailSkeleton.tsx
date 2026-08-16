@@ -1,3 +1,5 @@
+import { MAX_DIFFICULTY_LEVEL } from '../lib/sessionRules';
+
 /**
  * Shown on app/activities/[slug]/page.tsx while its current-session and completed-attempts
  * fetches are both still in flight — shaped like the real hero card (badges, title,
@@ -5,8 +7,14 @@
  * components/AcceptanceCriteriaWritingScreenSkeleton.tsx, so nothing about "the activity" is
  * shown until there's real data to show; CompletedAttemptsTable's own attempts === null skeleton
  * covers the history table underneath once this skeleton gives way to the real card.
+ *
+ * The level-chip row renders levelSlotCount placeholders, matching
+ * components/LevelReplaySelector.tsx's own totalLevels — that component now always renders a
+ * fixed number of slots (locking the ones a student hasn't reached yet) rather than growing once
+ * attempts loads, so the skeleton underneath it should show the same fixed count instead of a
+ * generic two-chip guess.
  */
-export function ActivityDetailSkeleton() {
+export function ActivityDetailSkeleton({ levelSlotCount = MAX_DIFFICULTY_LEVEL }: { levelSlotCount?: number }) {
   return (
     <div role="status" aria-label="Loading activity">
       <div className="rounded-2xl border border-[#332b6b] bg-[#1b1642] p-8">
@@ -19,8 +27,9 @@ export function ActivityDetailSkeleton() {
         <span className="skeleton-block mb-6 block h-4 w-4/5 rounded-full" />
         <span className="skeleton-block block h-11 w-32 rounded-full" />
         <div className="mt-6 flex flex-wrap gap-2">
-          <span className="skeleton-block block h-7 w-20 rounded-full" />
-          <span className="skeleton-block block h-7 w-20 rounded-full" />
+          {Array.from({ length: levelSlotCount }, (_, i) => (
+            <span key={i} className="skeleton-block block h-7 w-20 rounded-full" />
+          ))}
         </div>
       </div>
       <style jsx>{`
