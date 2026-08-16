@@ -216,15 +216,13 @@ export default function WriteAcceptanceCriteriaLandingPage() {
               ) : null}
 
               {/* Level 1 is the only level this activity ever has, so unlike
-                  app/activities/[slug]/page.tsx there's nothing to pick between — shown purely
-                  for visual consistency with the other activity detail pages (see the badge
-                  above). totalLevels={1} says exactly that: without it the selector would default
-                  to the app-wide maximum and render two padlocked levels (GitHub #371) that this
-                  activity has no questions, titles or difficulty progression for. */}
+                  app/activities/[slug]/page.tsx there's nothing to actually pick — highestSelectableLevel
+                  stays fixed at 1 forever, so LevelReplaySelector's default totalLevels (every real
+                  difficulty level) renders Medium/Hard permanently locked here, for the same visual
+                  consistency with the other activity detail pages the badge above already has. */}
               {!session ? (
                 <LevelReplaySelector
                   highestSelectableLevel={1}
-                  totalLevels={1}
                   selectedLevel={1}
                   onSelect={() => {}}
                   disabled={starting}

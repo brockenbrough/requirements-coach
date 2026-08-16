@@ -9,7 +9,7 @@ import { CompletedAttemptsTable } from "../../../components/CompletedAttemptsTab
 import { LevelReplaySelector } from "../../../components/LevelReplaySelector";
 import { ResumeOrAbandonPrompt } from "../../../components/ResumeOrAbandonPrompt";
 import { getActivity } from "../../../lib/activityContent";
-import { MAX_DIFFICULTY_LEVEL, START_DIFFICULTY_LEVEL, nextDifficultyLevel } from "../../../lib/sessionRules";
+import { MAX_DIFFICULTY_LEVEL, nextDifficultyLevel } from "../../../lib/sessionRules";
 import {
   type CompletedAttempt,
   type CurrentSessionResult,
@@ -35,6 +35,10 @@ const DIFFICULTY_LABEL: Record<number, string> = {
   2: "Medium",
   3: "Hard",
 };
+
+// The floor on how long ActivityDetailSkeleton stays up, regardless of how fast the current-
+// session/completed-attempts fetch below actually resolves — see the loading effect's comment.
+const MIN_SKELETON_MS = 400;
 
 // Easy-to-hard reads green-to-orange, using the existing brand palette (CLAUDE.md's Styling
 // Guidelines) rather than new hex values: brand-green for passing/easy, brand-danger — the
@@ -171,27 +175,48 @@ function ActivityDetailContent({
       return;
     }
     let cancelled = false;
+    let minDelayTimeout: ReturnType<typeof setTimeout> | undefined;
+    const fetchStartedAt = Date.now();
 
     Promise.all([
       loadCurrentSession(token, activity.activityType),
-      loadCompletedAttempts(token, profile.user_id, activity.activityType, {
-        // A quiz finished on another device wouldn't otherwise show up here until something on
-        // this device invalidated the cache — see loadCompletedAttempts's own comment.
-        onRevalidate: (attempts) => {
-          if (!cancelled) setAttempts(attempts);
-        },
-      }),
+      // forceRefresh, not the cache-first default: highestSelectableLevel below (and therefore
+      // how many buttons LevelReplaySelector renders) is derived straight from attempts, so a
+      // stale cache hit here doesn't just show a stale *value* — it changes the button row's
+      // *shape*, then pops in extra buttons once the background revalidation lands seconds
+      // later, disagreeing with the badge in the meantime (that one reads selectedLevel, seeded
+      // from the ?level= query param, independent of attempts). Forcing a real fetch means
+      // attempts is already correct by the time isLoading flips false, so there's nothing left to
+      // pop in. See loadCompletedAttempts's own docblock (lib/sessionClient.ts) for the general
+      // cache-first/onRevalidate mechanism — still the right choice for callers like
+      // app/activities/page.tsx's cards, just not for a control whose shape depends on this data.
+      loadCompletedAttempts(token, profile.user_id, activity.activityType, { forceRefresh: true }),
     ]).then(([currentResult, completed]) => {
       if (cancelled) return;
       if (currentResult.ok) setCurrent(currentResult.data);
       // An empty list and a failed read are different things, so the history only
       // renders once it is actually known — null keeps it out of the way until then.
       if (completed.ok) setAttempts(completed.data.attempts);
-      setIsLoading(false);
+
+      // Both loadCurrentSession and loadCompletedAttempts can resolve inside a single frame on a
+      // fast/local connection, so the skeleton would otherwise never actually get painted before
+      // real content replaces it (no animation is "not played" so much as never shown at all).
+      // Floor the loading state at MIN_SKELETON_MS so the transition reads the same as a fresh
+      // navigation into this page from the activities list, where the fetch is slow enough to
+      // make the skeleton visible on its own.
+      const elapsed = Date.now() - fetchStartedAt;
+      if (elapsed >= MIN_SKELETON_MS) {
+        setIsLoading(false);
+      } else {
+        minDelayTimeout = setTimeout(() => {
+          if (!cancelled) setIsLoading(false);
+        }, MIN_SKELETON_MS - elapsed);
+      }
     });
 
     return () => {
       cancelled = true;
+      if (minDelayTimeout) clearTimeout(minDelayTimeout);
     };
   }, [token, activity, profile?.user_id]);
 
@@ -288,9 +313,16 @@ function ActivityDetailContent({
   const totalQuestions = current?.questions.length ?? 0;
   const answeredCount = current?.answers.length ?? 0;
   // Before a session exists, show whatever level Start would actually use: the replay level the
-  // student picked, if any, else the easy-level default (POST /api/sessions computes the real
-  // auto-advance level server-side, so this default is only ever a guess for that case).
-  const displayLevel = session?.difficulty_level ?? selectedLevel ?? START_DIFFICULTY_LEVEL;
+  // student picked, if any, else highestSelectableLevel — never START_DIFFICULTY_LEVEL here.
+  // selectedLevel only gets seeded to highestSelectableLevel by the effect above once attempts
+  // has loaded, and that effect runs a render *after* the one where isLoading first flips false
+  // (React batches setAttempts/setIsLoading together, but effects run post-commit) — on a hard
+  // refresh with no ?level= to seed initialLevel, that gap showed a wrong "Level 1" badge for one
+  // frame right after the loading skeleton. highestSelectableLevel is derived straight from
+  // attempts on every render, so falling back to it instead has no such lag, and degrades to the
+  // exact same value (START_DIFFICULTY_LEVEL) once selectedLevel is genuinely unset with nothing
+  // passed yet.
+  const displayLevel = session?.difficulty_level ?? selectedLevel ?? highestSelectableLevel;
 
   return (
     <AppShell active="activities">

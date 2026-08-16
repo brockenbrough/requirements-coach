@@ -17,18 +17,29 @@ const DIFFICULTY_LABEL: Record<number, string> = {
  * components/TitleProgressionTrack.tsx's display-only ladder, which has no click handler — this
  * is an input control, not a status display.
  *
- * Fully controlled: this component holds no state of its own and never starts anything itself —
- * onSelect only records the choice in the parent (app/activities/[slug]/page.tsx), which shows it
- * in the level badge above and only actually starts a session once Start is clicked. disabled
- * locks the row while that Start request is in flight. The unlock animation keeps that contract
- * too: unlockingLevel is a prop, and the timer that clears it lives in the parent.
+ * Always renders totalLevels slots (default MAX_DIFFICULTY_LEVEL), not just the unlocked ones —
+ * anything above highestSelectableLevel renders locked (disabled, lock icon, no click handler)
+ * rather than being omitted. This is deliberate: the row's *shape* no longer depends on when
+ * attempts has loaded, only which of its buttons are enabled does — so there is nothing left to
+ * visibly pop in once real data replaces app/activities/[slug]/page.tsx's initial guess, and
+ * components/ActivityDetailSkeleton.tsx can render the exact same number of placeholder chips
+ * up front. write-acceptance-criteria/page.tsx uses the default totalLevels too, even though its
+ * highestSelectableLevel is permanently fixed at 1 (that activity has no difficulty progression)
+ * — Medium/Hard render locked there forever rather than being hidden, for visual consistency
+ * across every activity detail page rather than a special case for that one.
  *
- * GitHub #371: every level the activity has is rendered, not just the reachable ones — levels
- * past highestSelectableLevel are disabled and carry a padlock. That is a prerequisite for the
- * animation, not just decoration: a lock can only be shown opening if it was on screen closed
- * first. POST /api/sessions would 403 a level the student hasn't reached ('You have not passed
- * that difficulty level yet.'), so disabled is the honest state, and the row now doubles as the
- * progression path.
+ * Fully controlled: this component holds no state of its own and never starts anything itself —
+ * onSelect only records the choice in the parent, which shows it in the level badge above and
+ * only actually starts a session once Start is clicked. disabled locks every unlocked button in
+ * the row while that Start request is in flight; a locked button is always disabled regardless.
+ *
+ * GitHub #371 builds the unlock animation on top of those permanently rendered locks: when a
+ * finished session raises highestSelectableLevel, the parent sets unlockingLevel to the level
+ * that just opened and this row plays it once — the padlock rattles, its shackle springs open,
+ * and the pill pops out of the locked greyscale with a particle burst. It only works because the
+ * lock was already on screen closed; a level that appeared out of nowhere would have nothing to
+ * unlock. The animation is presentation only — whether a level is *actually* selectable is still
+ * decided entirely by highestSelectableLevel, and POST /api/sessions re-checks it server-side.
  *
  * Lives inside that page's dark hero card (bg-brand-navy), so — unlike the light-surface switcher
  * it's modeled on — its colors are brand-ink/brand-ink-muted/white-alpha rather than the gray
@@ -36,39 +47,28 @@ const DIFFICULTY_LABEL: Record<number, string> = {
  */
 export function LevelReplaySelector({
   highestSelectableLevel,
-  totalLevels = MAX_DIFFICULTY_LEVEL,
   selectedLevel,
   onSelect,
   disabled = false,
+  totalLevels = MAX_DIFFICULTY_LEVEL,
   unlockingLevel = null,
 }: {
-  /** The top of the *selectable* range — see app/activities/[slug]/page.tsx for how it's derived. */
+  /** Every level up to and including this one renders unlocked — see app/activities/[slug]/page.tsx for how it's derived. */
   highestSelectableLevel: number;
-  /**
-   * How many levels this activity has at all, selectable or not — the length of the rendered row.
-   * Defaults to the app-wide maximum; app/activities/write-acceptance-criteria/page.tsx passes 1,
-   * since that activity has no difficulty progression and must not sprout locks for levels that
-   * will never exist there.
-   */
-  totalLevels?: number;
   selectedLevel: number | null;
   onSelect: (level: number) => void;
   disabled?: boolean;
+  /** How many level slots to render, locked beyond highestSelectableLevel. Defaults to every real difficulty level. */
+  totalLevels?: number;
   /**
    * The level whose padlock should be shown springing open, or null for the usual static row.
-   * Set for roughly the animation's duration and then cleared by the parent — see
-   * UNLOCK_ANIMATION_MS in app/activities/[slug]/page.tsx.
+   * Set for roughly the animation's duration and then cleared by the parent — the timer lives
+   * there (UNLOCK_ANIMATION_MS in app/activities/[slug]/page.tsx) so this component can keep the
+   * "no state of its own" contract above.
    */
   unlockingLevel?: number | null;
 }) {
-  // Defensive only: app/activities/[slug]/page.tsx always derives highestSelectableLevel as at
-  // least 1 (a student with nothing passed yet still has level 1 to show), so this never actually
-  // hides the row — kept as a guard against a 0/negative value reaching here some other way.
-  if (highestSelectableLevel < 1) return null;
-
-  // max() rather than totalLevels alone so a highestSelectableLevel beyond the declared range can
-  // never render a selectable level as missing — the row grows instead of silently truncating.
-  const levels = Array.from({ length: Math.max(totalLevels, highestSelectableLevel) }, (_, i) => i + 1);
+  const levels = Array.from({ length: totalLevels }, (_, i) => i + 1);
 
   return (
     <div className="mt-6 text-left">
@@ -77,47 +77,41 @@ export function LevelReplaySelector({
       </p>
       <div className="flex flex-wrap gap-2" role="group" aria-label="Choose a difficulty level">
         {levels.map((level) => {
+          const isSelected = level === selectedLevel;
           const isLocked = level > highestSelectableLevel;
-          const isSelected = !isLocked && level === selectedLevel;
           const isUnlocking = level === unlockingLevel;
           const label = `${DIFFICULTY_LABEL[level] ?? `Level ${level}`} · ${level}`;
-
           return (
             <button
               key={level}
               type="button"
               onClick={() => onSelect(level)}
-              // A permanently unselectable toggle reporting aria-pressed="false" reads as "you
-              // chose not to pick this"; locked levels aren't a choice at all, so they get a
-              // spelled-out label instead and no pressed state.
               aria-pressed={isLocked ? undefined : isSelected}
-              aria-label={
-                isLocked
-                  ? `${DIFFICULTY_LABEL[level] ?? `Level ${level}`}, level ${level} — locked. Pass level ${level - 1} to unlock.`
-                  : undefined
-              }
+              aria-label={isLocked ? `${label} (locked)` : undefined}
               disabled={disabled || isLocked}
-              className={`relative inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-extrabold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-purple disabled:cursor-not-allowed ${
+              className={`relative flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-extrabold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-purple disabled:cursor-not-allowed ${
                 isUnlocking ? 'level-unlocking' : ''
               } ${
                 isLocked
-                  ? 'border-white/5 bg-white/5 text-brand-ink-muted/50'
+                  ? 'border-white/5 bg-white/5 text-brand-ink-muted opacity-50'
                   : isSelected
-                    ? 'border-brand-purple bg-brand-purple text-white disabled:opacity-40'
+                    ? 'border-brand-purple bg-brand-purple text-white'
                     : 'border-white/10 bg-white/10 text-brand-ink-muted hover:border-white/20 hover:text-brand-ink disabled:opacity-40'
               }`}
             >
-              {/* Same padlock as components/TitleProgressionTrack.tsx, inlined rather than shared:
-                  styled-jsx scopes its generated class to this component's own JSX, so the shackle
-                  inside a child component would never receive the animation below — the same
-                  constraint components/InstructorDashboardSkeleton.tsx documents for its shimmer. */}
+              {/* Same glyph as components/TitleProgressionTrack.tsx's LockIcon, but inlined rather
+                  than a local LockIcon() component: styled-jsx scopes its generated class to this
+                  component's own JSX, so a shackle living inside a child component would never be
+                  matched by the .lock-shackle rule below — the same constraint
+                  components/InstructorDashboardSkeleton.tsx documents for its duplicated shimmer.
+                  The unlocking button renders it too, so there is a lock to actually open. */}
               {isLocked || isUnlocking ? (
                 <svg
                   viewBox="0 0 24 24"
-                  className="lock-icon h-3.5 w-3.5 flex-none"
+                  className="lock-icon h-3 w-3 flex-none"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth={2.5}
+                  strokeWidth={2}
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   aria-hidden="true"
@@ -144,8 +138,8 @@ export function LevelReplaySelector({
         })}
       </div>
 
-      {/* Announced for screen readers, which get nothing from the visual burst. Deliberately
-          outside the reduced-motion switch below: someone who turned animations off still needs
+      {/* Announced for screen readers, which get nothing from the visual burst. Deliberately not
+          part of the reduced-motion switch below: someone who turned animations off still needs
           to be told the level opened up. */}
       <p role="status" aria-live="polite" className="sr-only">
         {unlockingLevel !== null
@@ -158,7 +152,7 @@ export function LevelReplaySelector({
            a second animation with a fill mode would win the cascade over the first for the whole
            run — the shake would silently never render. Percentages of the 1.2s total: rattling to
            25%, shackle swinging out 25-46%, pop and colour reveal 46-60%, glow ring fading to
-           100%. The pill starts looking exactly like its locked neighbours (grayscale + dimmed)
+           100%. The pill starts looking exactly like its locked neighbours (greyscale + dimmed)
            and ends on whatever its real classes say, which is what lets one keyframe set serve
            both the selected (purple) and the plain landing style. */
         .level-unlocking {
@@ -205,8 +199,8 @@ export function LevelReplaySelector({
         }
 
         /* Icon side: the shackle swings out of the body first, then the whole padlock leaves.
-           forwards keeps it hidden for the rest of the animation — the button unmounts it
-           entirely once the parent clears unlockingLevel. */
+           forwards keeps it gone for the rest of the run — the button unmounts it entirely once
+           the parent clears unlockingLevel. */
         .level-unlocking .lock-icon {
           animation: unlock-icon-exit 0.35s ease-in 0.55s forwards;
         }
@@ -236,8 +230,8 @@ export function LevelReplaySelector({
 
         /* Particle burst, same mechanics as components/PasswordField.tsx: fixed per-spark
            --dx/--dy in CSS rather than inline styles, so no per-instance style prop is needed.
-           Timed to the 0.72s pop above (60% of 1.2s) — earlier and they'd be caught by the pill's
-           own grayscale filter, which applies to descendants until that point. */
+           Timed to the 0.72s pop above (60% of 1.2s) — any earlier and they'd be caught by the
+           pill's own greyscale filter, which applies to descendants until that point. */
         .unlock-spark {
           position: absolute;
           top: 50%;
@@ -307,13 +301,13 @@ export function LevelReplaySelector({
 
         @media (prefers-reduced-motion: reduce) {
           .level-unlocking,
-          .level-unlocking .lock-icon,
           .level-unlocking .lock-shackle {
             animation: none;
           }
           /* No animation means unlock-icon-exit never hides the padlock, and the button would sit
              there unlocked-but-padlocked until the parent's timer unmounts it. Hide it outright. */
           .level-unlocking .lock-icon {
+            animation: none;
             display: none;
           }
           .unlock-spark {
