@@ -23,6 +23,7 @@ import { clearCachedLeaderboardCourses } from './leaderboardCoursesStore';
 import { clearCachedLlmConfig } from './instructorLlmConfigStore';
 import { clearCachedScore } from './scoreStore';
 import { clearPreviousRanks } from './previousRankStore';
+import { clearSeenUnlockedLevels } from './unlockedLevelStore';
 
 /**
  * Clears every cache that fronts an API call. Called from clearStoredAccessToken
@@ -49,4 +50,8 @@ export function clearAllClientCaches(): void {
   clearCachedLeaderboard();
   clearCachedLeaderboardCourses();
   clearPreviousRanks();
+  // Not an API cache but a "how did this look last time" snapshot, like clearPreviousRanks above.
+  // Safe to drop: the next sign-in re-records the baseline silently (newlyUnlockedLevel's
+  // seen === null case), so clearing it can only skip an animation, never invent one.
+  clearSeenUnlockedLevels();
 }

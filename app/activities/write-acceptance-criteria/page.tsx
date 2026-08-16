@@ -218,9 +218,17 @@ export default function WriteAcceptanceCriteriaLandingPage() {
               {/* Level 1 is the only level this activity ever has, so unlike
                   app/activities/[slug]/page.tsx there's nothing to pick between — shown purely
                   for visual consistency with the other activity detail pages (see the badge
-                  above). */}
+                  above). totalLevels={1} says exactly that: without it the selector would default
+                  to the app-wide maximum and render two padlocked levels (GitHub #371) that this
+                  activity has no questions, titles or difficulty progression for. */}
               {!session ? (
-                <LevelReplaySelector highestSelectableLevel={1} selectedLevel={1} onSelect={() => {}} disabled={starting} />
+                <LevelReplaySelector
+                  highestSelectableLevel={1}
+                  totalLevels={1}
+                  selectedLevel={1}
+                  onSelect={() => {}}
+                  disabled={starting}
+                />
               ) : null}
             </div>
 

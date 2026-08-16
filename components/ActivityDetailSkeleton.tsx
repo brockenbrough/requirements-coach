@@ -18,8 +18,11 @@ export function ActivityDetailSkeleton() {
         <span className="skeleton-block mb-1.5 block h-4 w-full rounded-full" />
         <span className="skeleton-block mb-6 block h-4 w-4/5 rounded-full" />
         <span className="skeleton-block block h-11 w-32 rounded-full" />
+        {/* One placeholder per difficulty level: the real selector renders all of them now,
+            locked ones included (GitHub #371), so the skeleton no longer reflows when it lands. */}
         <div className="mt-6 flex flex-wrap gap-2">
           <span className="skeleton-block block h-7 w-20 rounded-full" />
+          <span className="skeleton-block block h-7 w-24 rounded-full" />
           <span className="skeleton-block block h-7 w-20 rounded-full" />
         </div>
       </div>
