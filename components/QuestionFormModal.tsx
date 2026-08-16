@@ -4,12 +4,9 @@ import { useEffect, useRef, useState } from 'react';
 import { AnswerOptionField } from './AnswerOptionField';
 import type { ActivityType } from '../lib/activityTypes';
 import type { QuizQuestion } from '../lib/quizQuestionTypes';
-
-const LEVEL_OPTIONS: { value: 1 | 2 | 3; label: string }[] = [
-  { value: 1, label: 'Easy · Level 1' },
-  { value: 2, label: 'Medium · Level 2' },
-  { value: 3, label: 'Hard · Level 3' },
-];
+// Shared with components/PromptFormModal.tsx — the two authoring forms must offer the same
+// levels with the same labels, since they write to the same difficulty_level scale.
+import { DIFFICULTY_OPTIONS as LEVEL_OPTIONS } from '../lib/difficultyLevels';
 
 const OPTION_COUNT = 4;
 const EMPTY_OPTIONS = Array.from({ length: OPTION_COUNT }, () => '');
