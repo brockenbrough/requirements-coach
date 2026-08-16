@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { createQuiz } from '../lib/quizClient';
+import type { CourseSummary } from '../lib/courseClient';
 import { useModalDismiss } from './useModalDismiss';
 
 /**
@@ -13,18 +14,26 @@ import { useModalDismiss } from './useModalDismiss';
  *
  * "Catalog" here and "quiz" in the code (createQuiz, activity_type.quiz_name) are the same
  * concept — see CLAUDE.md's Question Catalogs section.
+ *
+ * `courses` is passed in rather than fetched here, same reasoning as CreateQuizModal's own
+ * `courses` prop — the parent page already loads the instructor's courses for this same field.
+ * Every activity now belongs to exactly one course (activity_type_course), so this is no longer
+ * optional the way it was before that requirement existed.
  */
 export function CreateCatalogModal({
   token,
+  courses,
   onClose,
   onCreated,
 }: {
   token: string;
+  courses: CourseSummary[];
   onClose: () => void;
-  onCreated: (quiz: { activityType: string; name: string; description: string | null }) => void;
+  onCreated: (quiz: { activityType: string; name: string; description: string | null; courseId: string; courseName: string }) => void;
 }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [courseId, setCourseId] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -33,15 +42,18 @@ export function CreateCatalogModal({
     isBlocked: submitting,
   });
 
+  const canSubmit = Boolean(name.trim()) && Boolean(courseId) && !submitting;
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    if (!name.trim() || submitting) return;
+    if (!canSubmit) return;
 
     setSubmitting(true);
     setError('');
 
     const result = await createQuiz(token, {
       name: name.trim(),
+      courseId,
       description: description.trim() || undefined,
     });
 
@@ -117,6 +129,27 @@ export function CreateCatalogModal({
             />
           </label>
 
+          <label className="mb-1.5 mt-4 block text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted">
+            Course
+            <select
+              value={courseId}
+              onChange={(event) => setCourseId(event.target.value)}
+              className="mt-1.5 block w-full rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none transition focus:border-brand-purple"
+            >
+              <option value="">Select a course…</option>
+              {courses.map((course) => (
+                <option key={course.id} value={course.id}>
+                  {course.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {courses.length === 0 ? (
+            <p className="mt-1.5 text-xs font-semibold text-brand-ink-muted">
+              You don&apos;t have any courses yet — create one on the Courses page first.
+            </p>
+          ) : null}
+
           {error ? <p className="mt-3 text-xs font-bold text-brand-danger">{error}</p> : null}
 
           <div className="mt-6 flex justify-end gap-3">
@@ -130,7 +163,7 @@ export function CreateCatalogModal({
             </button>
             <button
               type="submit"
-              disabled={!name.trim() || submitting}
+              disabled={!canSubmit}
               className="rounded-brand-md bg-brand-purple px-5 py-2 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark disabled:cursor-not-allowed disabled:opacity-40"
             >
               {submitting ? 'Creating…' : 'Create'}

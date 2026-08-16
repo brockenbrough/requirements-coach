@@ -12,6 +12,10 @@ export type QuizSummary = {
   description: string | null;
   authorName: string;
   questionCount: number;
+  /** The course this activity is linked to (activity_type_course), or null if unlinked — an
+   *  unlinked activity isn't visible to any student yet. */
+  courseId: string | null;
+  courseName: string | null;
 };
 
 export type QuizMeta = Omit<QuizSummary, 'questionCount'>;
@@ -47,14 +51,19 @@ export function loadQuizzes(token: string): Promise<ApiResult<{ quizzes: QuizSum
 }
 
 /**
- * Creates a named quiz (POST /api/activities/types). The stored key is derived server-side from
- * name — never sent by the caller — and reported back so the create form can show it if useful.
+ * Creates a named quiz, linked to one of the instructor's own courses (POST /api/activities/types).
+ * The stored key is derived server-side from name — never sent by the caller — and reported back
+ * so the create form can show it if useful. courseId is required now: a course-less activity is
+ * not a valid end state (see activity_type_course's own header comment in supabase/schema.sql) —
+ * no student could ever see or start a session against one.
  */
 export function createQuiz(
   token: string,
-  input: { name: string; description?: string },
-): Promise<ApiResult<{ quiz: { activityType: string; name: string; description: string | null } }>> {
-  return request<{ quiz: { activityType: string; name: string; description: string | null } }>(
+  input: { name: string; courseId: string; description?: string },
+): Promise<
+  ApiResult<{ quiz: { activityType: string; name: string; description: string | null; courseId: string; courseName: string } }>
+> {
+  return request<{ quiz: { activityType: string; name: string; description: string | null; courseId: string; courseName: string } }>(
     '/api/activities/types',
     {
       method: 'POST',

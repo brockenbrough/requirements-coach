@@ -13,6 +13,12 @@ export type QuizSummary = {
   /** The instructor's display name, or 'Built-in' for the three seeded quizzes (creator_id is NULL). */
   authorName: string;
   questionCount: number;
+  /** The one course this activity is linked to (activity_type_course), or null if unlinked — see
+   *  that table's own header comment in supabase/schema.sql. An unlinked activity is not visible
+   *  to any student yet, which this lets the browse/detail pages surface honestly instead of
+   *  silently omitting the column. */
+  courseId: string | null;
+  courseName: string | null;
 };
 
 type QuizRow = {
@@ -22,24 +28,32 @@ type QuizRow = {
   creator_id: string | null;
   creator: { first_name: string | null; last_name: string | null; username: string | null } | null;
   question: { count: number }[] | null;
+  activity_type_course: { course_id: string; course: { course_name: string } | null }[] | null;
 };
 
+function courseFields(row: QuizRow): { courseId: string | null; courseName: string | null } {
+  const link = row.activity_type_course?.[0] ?? null;
+  return { courseId: link?.course_id ?? null, courseName: link?.course?.course_name ?? null };
+}
+
 /**
- * Every quiz in the system — built-in or instructor-created — with its author and question
- * count, for the instructor-facing browse page. Quizzes are globally shared (not scoped to the
- * calling instructor): anyone can see and reuse anyone else's, which is the entire point of
- * GitHub #347.
+ * Every quiz in the system — built-in or instructor-created — with its author, question count,
+ * and linked course, for the instructor-facing browse page. Quizzes are globally shared (not
+ * scoped to the calling instructor): anyone can see and reuse anyone else's, which is the entire
+ * point of GitHub #347 — course linkage doesn't change that, it only says which course a student
+ * would need to be enrolled in to actually see it.
  *
  * One query, using the same creator:creator_id(...) + related-table (count) embed pattern
- * lib/courseQueries.ts's listJoinableCourses uses for professor_name/student_count — author name
- * and question count come back on the same row as the quiz itself rather than two round trips
- * merged in JS.
+ * lib/courseQueries.ts's listJoinableCourses uses for professor_name/student_count, extended with
+ * a reverse embed onto activity_type_course (the same direction question(count) already embeds
+ * in) for the linked course — author name, question count, and course come back on the same row
+ * as the quiz itself rather than three round trips merged in JS.
  */
 export async function listQuizzesWithAuthorAndCount(supabase: SupabaseClient) {
   const { data, error } = await supabase
     .from('activity_type')
     .select(
-      'activity_type, quiz_name, description, creator_id, creator:creator_id(first_name, last_name, username), question(count)',
+      'activity_type, quiz_name, description, creator_id, creator:creator_id(first_name, last_name, username), question(count), activity_type_course(course_id, course:course_id(course_name))',
     )
     .order('quiz_name', { ascending: true });
 
@@ -55,6 +69,7 @@ export async function listQuizzesWithAuthorAndCount(supabase: SupabaseClient) {
       description: row.description,
       authorName,
       questionCount: row.question?.[0]?.count ?? 0,
+      ...courseFields(row),
     };
   });
 
@@ -64,14 +79,17 @@ export async function listQuizzesWithAuthorAndCount(supabase: SupabaseClient) {
 export type QuizMeta = Omit<QuizSummary, 'questionCount'>;
 
 /**
- * GitHub #359: one catalog's own metadata (name/description/author), for the catalog detail page
- * — the single-row counterpart to listQuizzesWithAuthorAndCount's list. Returns { quiz: null }
- * (not an error) when activityType matches no row, so the route can turn that into a 404.
+ * GitHub #359: one catalog's own metadata (name/description/author/course), for the catalog
+ * detail page — the single-row counterpart to listQuizzesWithAuthorAndCount's list. Returns
+ * { quiz: null } (not an error) when activityType matches no row, so the route can turn that
+ * into a 404.
  */
 export async function getQuizByActivityType(supabase: SupabaseClient, activityType: string) {
   const { data, error } = await supabase
     .from('activity_type')
-    .select('activity_type, quiz_name, description, creator_id, creator:creator_id(first_name, last_name, username)')
+    .select(
+      'activity_type, quiz_name, description, creator_id, creator:creator_id(first_name, last_name, username), activity_type_course(course_id, course:course_id(course_name))',
+    )
     .eq('activity_type', activityType)
     .maybeSingle();
 
@@ -87,6 +105,7 @@ export async function getQuizByActivityType(supabase: SupabaseClient, activityTy
     name: row.quiz_name,
     description: row.description,
     authorName,
+    ...courseFields(row),
   };
 
   return { quiz, error: null };

@@ -8,7 +8,6 @@ import { FeedbackCard } from "../../../../components/FeedbackCard";
 import { QuestionCard } from "../../../../components/QuestionCard";
 import { SessionProgressDots, type ProgressDotStatus } from "../../../../components/SessionProgressDots";
 import { SessionSummaryScreen, type SessionSummaryItem } from "../../../../components/SessionSummaryScreen";
-import { getActivity } from "../../../../lib/activityContent";
 import { clearCachedLeaderboard } from "../../../../lib/leaderboardStore";
 import { isPassing } from "../../../../lib/sessionRules";
 import {
@@ -25,6 +24,7 @@ import {
   submitAnswer,
 } from "../../../../lib/sessionClient";
 import { useRequireRole } from "../../../../lib/useRequireRole";
+import { useResolvedActivity } from "../../../../lib/useResolvedActivity";
 
 /** What the last submitted answer earned, alongside the explanations for it. */
 type AnswerOutcome = {
@@ -43,7 +43,7 @@ export default function PlayActivityPage({
   // Also redirects an instructor account away (GitHub #82) — this page is the "quiz
   // durchführen" flow itself, exactly what an instructor must not be able to reach.
   const { token, profile, loading, authorized } = useRequireRole("student");
-  const activity = getActivity(params.slug);
+  const { activity, status: activityStatus } = useResolvedActivity(token, params.slug);
 
   const [session, setSession] = useState<CurrentSessionResult | null>(null);
   const [nextPosition, setNextPosition] = useState<number | null>(null);
@@ -122,7 +122,22 @@ export default function PlayActivityPage({
 
   if (loading || !authorized) return null;
 
-  if (!activity) return null;
+  if (activityStatus === 'loading') return null;
+
+  if (!activity) {
+    return (
+      <AppShell active="activities">
+        <div className="mx-auto max-w-xl rounded-brand-lg border border-brand-danger/40 bg-brand-danger/10 p-6 text-sm font-semibold text-brand-danger-light">
+          {activityStatus === 'forbidden'
+            ? "You're not enrolled in a course that offers this activity."
+            : "This activity doesn't exist."}
+          <Link href="/activities" className="ml-1 underline hover:text-white">
+            Back to Activities
+          </Link>
+        </div>
+      </AppShell>
+    );
+  }
 
   if (error) {
     return (

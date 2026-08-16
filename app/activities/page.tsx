@@ -5,10 +5,18 @@ import { AppShell } from '../../components/AppShell';
 import { ActivityCard, type ActivityCardData } from '../../components/ActivityCard';
 import { ActivityCardSkeleton } from '../../components/ActivityCardSkeleton';
 import { deriveActivityCardStatus } from '../../lib/activityCardStatus';
-import { ACTIVITIES, Difficulty } from '../../lib/activityContent';
+import { buildCustomActivityDefinition, getActivityByType, type ActivityDefinition, type Difficulty } from '../../lib/activityContent';
+import { loadAvailableActivities } from '../../lib/activityDiscoveryClient';
 import { loadCompletedAttempts, loadSessions, loadStudentTitles, type StudentTitle } from '../../lib/sessionClient';
 import { MAX_DIFFICULTY_LEVEL, nextDifficultyLevel } from '../../lib/sessionRules';
 import { useRequireRole } from '../../lib/useRequireRole';
+
+// A fixed guess for the loading skeleton's card count — real activities aren't known until
+// GET /api/activities resolves (unlike the old hardcoded ACTIVITIES array, the list now depends
+// on which courses the student is enrolled in), so this is just a plausible placeholder shape,
+// the same "fixed slot count independent of real data" reasoning LevelReplaySelector's default
+// totalLevels uses.
+const SKELETON_COUNT = 3;
 
 type CardData = {
   activity: ActivityCardData;
@@ -68,6 +76,13 @@ export default function ActivitiesPage() {
   // moment this effect last ran. Nothing here reads lib/activityStore.ts any more: nothing writes
   // to that mock since the play flow moved to the API, so its level was frozen at 1 and its title
   // at "Not yet started" forever — the actual bug behind #272, not just its wording.
+  //
+  // The activity list itself is no longer the hardcoded ACTIVITIES array: every activity_type is
+  // now linked to a course (activity_type_course), so GET /api/activities (loadAvailableActivities)
+  // is asked first for exactly the ones this student's enrolled courses actually offer — built-in
+  // or instructor-created alike. Each entry resolves to its rich static ActivityDefinition when
+  // one exists (getActivityByType — the two Type A activities and Write Acceptance Criteria),
+  // else a generic one built from the catalog's own name/description (buildCustomActivityDefinition).
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
@@ -75,43 +90,58 @@ export default function ActivitiesPage() {
     setIsLoading(true);
     setLoadFailed(false);
 
-    const attemptsPromises = profile
-      ? ACTIVITIES.map((activity) => loadCompletedAttempts(token, profile.user_id, activity.activityType))
-      : ACTIVITIES.map(() => Promise.resolve({ ok: true as const, data: { attempts: [] } }));
-
-    Promise.all([loadSessions(token, 'in-progress'), ...attemptsPromises]).then(([sessionsResult, ...attemptResults]) => {
+    loadAvailableActivities(token).then((discoveryResult) => {
       if (cancelled) return;
 
-      if (!sessionsResult.ok) {
+      if (!discoveryResult.ok) {
         setLoadFailed(true);
         setIsLoading(false);
         return;
       }
 
-      // The whole session, not just its activity_type: answeredCount/questionCount drive the
-      // "In progress · 1 of 4" line, and difficulty_level the level pill.
-      const runningByType = new Map(sessionsResult.data.sessions.map((session) => [session.activity_type, session]));
+      const resolvedActivities: ActivityDefinition[] = discoveryResult.data.activities.map(
+        (entry) => getActivityByType(entry.activityType) ?? buildCustomActivityDefinition(entry),
+      );
 
-      // Write Acceptance Criteria (GitHub #149, REQ-FU-2) is one of ACTIVITIES like the two
-      // Type A entries now that it has a real session_log row — loadSessions/loadCompletedAttempts
-      // both key on activity_type, so it needs no special case here any more (it used to read a
-      // local-only mock, which is what produced a second, separately-built card for the same
-      // activity — see the "Write Acceptance Criteria sessions" note in CLAUDE.md).
-      const cards: CardData[] = ACTIVITIES.map((activity, i) => {
-        const attemptsResult = attemptResults[i];
-        const attempts = attemptsResult.ok ? attemptsResult.data.attempts : [];
-        const best = attempts.length === 0 ? null : attempts.reduce((b, a) => (a.score > b.score ? a : b), attempts[0]);
-        const running = runningByType.get(activity.activityType) ?? null;
-        return {
-          activity,
-          activityType: activity.activityType,
-          running,
-          best: best ? { score: best.score, maxScore: best.maxScore } : null,
-        };
+      const attemptsPromises = profile
+        ? resolvedActivities.map((activity) => loadCompletedAttempts(token, profile.user_id, activity.activityType))
+        : resolvedActivities.map(() => Promise.resolve({ ok: true as const, data: { attempts: [] } }));
+
+      Promise.all([loadSessions(token, 'in-progress'), ...attemptsPromises]).then(([sessionsResult, ...attemptResults]) => {
+        if (cancelled) return;
+
+        if (!sessionsResult.ok) {
+          setLoadFailed(true);
+          setIsLoading(false);
+          return;
+        }
+
+        // The whole session, not just its activity_type: answeredCount/questionCount drive the
+        // "In progress · 1 of 4" line, and difficulty_level the level pill.
+        const runningByType = new Map(sessionsResult.data.sessions.map((session) => [session.activity_type, session]));
+
+        // Write Acceptance Criteria (GitHub #149, REQ-FU-2) is one of resolvedActivities like the
+        // two Type A entries now that it has a real session_log row — loadSessions/
+        // loadCompletedAttempts both key on activity_type, so it needs no special case here any
+        // more (it used to read a local-only mock, which is what produced a second,
+        // separately-built card for the same activity — see the "Write Acceptance Criteria
+        // sessions" note in CLAUDE.md).
+        const cards: CardData[] = resolvedActivities.map((activity, i) => {
+          const attemptsResult = attemptResults[i];
+          const attempts = attemptsResult.ok ? attemptsResult.data.attempts : [];
+          const best = attempts.length === 0 ? null : attempts.reduce((b, a) => (a.score > b.score ? a : b), attempts[0]);
+          const running = runningByType.get(activity.activityType) ?? null;
+          return {
+            activity,
+            activityType: activity.activityType,
+            running,
+            best: best ? { score: best.score, maxScore: best.maxScore } : null,
+          };
+        });
+
+        setCards(cards);
+        setIsLoading(false);
       });
-
-      setCards(cards);
-      setIsLoading(false);
     });
 
     return () => {
@@ -151,8 +181,8 @@ export default function ActivitiesPage() {
 
       {isLoading || titlesLoading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2" role="status" aria-label="Loading activities">
-          {ACTIVITIES.map((activity) => (
-            <ActivityCardSkeleton key={activity.slug} />
+          {Array.from({ length: SKELETON_COUNT }, (_, i) => (
+            <ActivityCardSkeleton key={i} />
           ))}
         </div>
       ) : loadFailed ? (
@@ -165,6 +195,13 @@ export default function ActivitiesPage() {
           >
             Retry
           </button>
+        </div>
+      ) : cards && cards.length === 0 ? (
+        // Genuinely possible now that the list is course-scoped (GET /api/activities), not a
+        // fixed set of three: a student enrolled in no course, or in courses with nothing linked
+        // yet, sees this instead of an empty grid.
+        <div className="rounded-brand-lg border border-gray-100 bg-gray-50 p-8 text-center text-sm font-semibold text-gray-500">
+          No activities yet — join a course to see what it offers.
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

@@ -4,8 +4,14 @@ import type { ActivityType } from './activityTypes';
  * 'write-acceptance-criteria' is the Type B (LLM-graded) activity from GitHub #149 (REQ-FU-2).
  * Unlike the MCQ activities it has no questionBank — students write free-text answers that are
  * scored by AI, not by picking from a fixed set of options.
+ *
+ * Widened to `string` (kept as an alias purely so existing `: ActivitySlug` annotations keep
+ * compiling) for the same reason lib/activityTypes.ts's ActivityType was: since every
+ * activity_type is now linked to a course (activity_type_course) and reachable by students who
+ * are enrolled in it, app/activities/[slug]/page.tsx routes on more than these three known
+ * slugs — see buildCustomActivityDefinition below for how an unrecognized one is resolved.
  */
-export type ActivitySlug = 'weak-user-stories' | 'weak-acceptance-criteria' | 'write-acceptance-criteria';
+export type ActivitySlug = string;
 
 export type Difficulty = 1 | 2 | 3;
 
@@ -353,6 +359,32 @@ export const ACTIVITIES: ActivityDefinition[] = [
 
 export function getActivity(slug: string): ActivityDefinition | undefined {
   return ACTIVITIES.find((a) => a.slug === slug);
+}
+
+/**
+ * Builds an ActivityDefinition-shaped object for a course-scoped custom catalog — one not in the
+ * static ACTIVITIES array above, reached by its activity_type key directly (lib/useResolvedActivity.ts
+ * falls back to this when getActivity/getActivityByType both miss). slug is the activity_type
+ * itself: a custom catalog has no separate display slug the way the three built-ins do, and the
+ * key is already URL-safe (upper-case letters, digits, underscores — see slugifyQuizName).
+ *
+ * titles are generic ("Level 1/2/3") rather than omitted: nothing downstream (the play page's
+ * title-toast diff, CompletedAttemptsTable) special-cases a missing titles field, so this keeps
+ * the type honest instead of introducing an optional titles?: that every consumer would need to
+ * guard against. A custom catalog's *actual* earned title (if any) still comes from
+ * title_definition/computeStudentTitles like any other activity_type — this only supplies a
+ * fallback for the ladder label, which nothing renders unless a title was actually earned.
+ */
+export function buildCustomActivityDefinition(entry: { activityType: string; name: string; description: string | null }): ActivityDefinition {
+  return {
+    slug: entry.activityType,
+    activityType: entry.activityType,
+    name: entry.name,
+    summary: entry.description ?? 'A question catalog created by an instructor.',
+    instructions: entry.description ?? 'Answer each question as best you can. Score 75% or higher to advance to the next difficulty level.',
+    category: 'Custom',
+    titles: { 1: 'Level 1', 2: 'Level 2', 3: 'Level 3' },
+  };
 }
 
 /** The counterpart to getActivity for anything coming back from the API, which keys on activity_type. */
