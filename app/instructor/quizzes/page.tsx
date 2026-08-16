@@ -4,8 +4,6 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../../../components/AppShell';
 import { CreateCatalogModal } from '../../../components/CreateCatalogModal';
-import { loadCourses } from '../../../lib/courseClient';
-import type { CourseSummary } from '../../../lib/courseTypes';
 import { loadQuizzes, type QuizSummary } from '../../../lib/quizClient';
 import { useRequireRole } from '../../../lib/useRequireRole';
 
@@ -19,6 +17,12 @@ const TOAST_MS = 3200;
  * list). Catalogs are globally shared — this list is not scoped to the calling instructor,
  * unlike the old Question Bank or the Courses pages.
  *
+ * A catalog has no course of its own (activity_type_course, the table that used to link one
+ * directly, is gone) — the "Used in" column instead shows how many assembled quizzes (GitHub
+ * #360) currently reference it, which is the honest replacement: a catalog is only reachable by
+ * students once composed into a quiz for a course, but which course(s) is a property of those
+ * quizzes, not of the catalog itself.
+ *
  * "Catalog" here and "quiz" in the code (this route, quizClient.ts, activity_type.quiz_name, …)
  * are the same concept — see CLAUDE.md's Question Catalogs section for why the user-facing name
  * changed but the underlying activity_type-backed plumbing from GitHub #347 didn't. Clicking a
@@ -29,7 +33,6 @@ export default function InstructorQuizzesPage() {
   const { token, profile, loading, authorized } = useRequireRole('instructor');
 
   const [quizzes, setQuizzes] = useState<QuizSummary[] | null>(null);
-  const [courses, setCourses] = useState<CourseSummary[]>([]);
   const [loadFailed, setLoadFailed] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [authorFilter, setAuthorFilter] = useState(ALL_AUTHORS);
@@ -49,14 +52,6 @@ export default function InstructorQuizzesPage() {
       else setLoadFailed(true);
     });
 
-    // The create-catalog form needs the instructor's own courses for its now-required course
-    // picker (every activity_type is linked to exactly one course) — a failure here just leaves
-    // the picker empty rather than blocking the whole page, the same "a title costs a title, not
-    // the whole page" pattern app/activities/page.tsx uses for loadStudentTitles.
-    loadCourses(token).then((result) => {
-      if (!cancelled && result.ok) setCourses(result.data.courses);
-    });
-
     return () => {
       cancelled = true;
     };
@@ -74,7 +69,7 @@ export default function InstructorQuizzesPage() {
   if (loading || !authorized) return null;
   if (!token || !profile) return null;
 
-  function handleCreated(quiz: { activityType: string; name: string; description: string | null; courseId: string; courseName: string }) {
+  function handleCreated(quiz: { activityType: string; name: string; description: string | null }) {
     // Optimistic insert: the caller is the quiz's creator_id, and its display name follows the
     // same first/last-name-else-username fallback GET /api/instructor/quizzes uses server-side —
     // no need to re-fetch the whole list just to show the one row that just changed.
@@ -88,8 +83,7 @@ export default function InstructorQuizzesPage() {
         description: quiz.description,
         authorName,
         questionCount: 0,
-        courseId: quiz.courseId,
-        courseName: quiz.courseName,
+        quizCount: 0,
       },
       ...(current ?? []),
     ]);
@@ -180,7 +174,7 @@ export default function InstructorQuizzesPage() {
                     <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Name</th>
                     <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Description</th>
                     <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Author</th>
-                    <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Course</th>
+                    <th className="whitespace-nowrap px-4 py-3 text-right text-xs font-bold uppercase tracking-wide">Used in</th>
                     <th className="whitespace-nowrap px-4 py-3 text-right text-xs font-bold uppercase tracking-wide">Questions</th>
                   </tr>
                 </thead>
@@ -201,8 +195,8 @@ export default function InstructorQuizzesPage() {
                         </td>
                         <td className="px-4 py-3 text-gray-500">{quiz.description || '—'}</td>
                         <td className="whitespace-nowrap px-4 py-3 text-gray-500">{quiz.authorName}</td>
-                        <td className="whitespace-nowrap px-4 py-3 text-gray-500">
-                          {quiz.courseName ?? <span className="italic text-gray-400">Not linked yet</span>}
+                        <td className="whitespace-nowrap px-4 py-3 text-right text-gray-500">
+                          {quiz.quizCount} quiz{quiz.quizCount === 1 ? '' : 'zes'}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-right font-bold text-gray-600">{quiz.questionCount}</td>
                       </tr>
@@ -217,7 +211,7 @@ export default function InstructorQuizzesPage() {
       </div>
 
       {showCreateModal ? (
-        <CreateCatalogModal token={token} courses={courses} onClose={() => setShowCreateModal(false)} onCreated={handleCreated} />
+        <CreateCatalogModal token={token} onClose={() => setShowCreateModal(false)} onCreated={handleCreated} />
       ) : null}
     </AppShell>
   );

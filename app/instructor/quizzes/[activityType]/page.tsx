@@ -169,8 +169,7 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
                 <h1 className="mb-1.5 text-2xl font-extrabold text-brand-navy">{quiz.name}</h1>
                 <p className="max-w-2xl text-sm font-semibold text-gray-500">
                   {quiz.description ? `${quiz.description} · ` : ''}
-                  {questions.length} question{questions.length === 1 ? '' : 's'} · by {quiz.authorName} ·{' '}
-                  {quiz.courseName ?? 'Not linked to a course yet'}
+                  {questions.length} question{questions.length === 1 ? '' : 's'} · by {quiz.authorName}
                 </p>
               </div>
               <div className="flex flex-none items-center gap-2">

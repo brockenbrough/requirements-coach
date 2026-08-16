@@ -12,13 +12,12 @@ export type QuizSummary = {
   description: string | null;
   authorName: string;
   questionCount: number;
-  /** The course this activity is linked to (activity_type_course), or null if unlinked — an
-   *  unlinked activity isn't visible to any student yet. */
-  courseId: string | null;
-  courseName: string | null;
+  /** How many assembled quizzes (GitHub #360) currently reference this catalog — a catalog has no
+   *  course of its own, so this is what the browse page shows instead. */
+  quizCount: number;
 };
 
-export type QuizMeta = Omit<QuizSummary, 'questionCount'>;
+export type QuizMeta = Omit<QuizSummary, 'questionCount' | 'quizCount'>;
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number; error: string };
 
@@ -51,19 +50,16 @@ export function loadQuizzes(token: string): Promise<ApiResult<{ quizzes: QuizSum
 }
 
 /**
- * Creates a named quiz, linked to one of the instructor's own courses (POST /api/activities/types).
- * The stored key is derived server-side from name — never sent by the caller — and reported back
- * so the create form can show it if useful. courseId is required now: a course-less activity is
- * not a valid end state (see activity_type_course's own header comment in supabase/schema.sql) —
- * no student could ever see or start a session against one.
+ * Creates a named question catalog, owned only by the creating instructor (POST /api/activities/types)
+ * — a catalog has no course of its own; it becomes visible to students once composed into an
+ * assembled_quiz (GitHub #360) for one. The stored key is derived server-side from name — never
+ * sent by the caller — and reported back so the create form can show it if useful.
  */
 export function createQuiz(
   token: string,
-  input: { name: string; courseId: string; description?: string },
-): Promise<
-  ApiResult<{ quiz: { activityType: string; name: string; description: string | null; courseId: string; courseName: string } }>
-> {
-  return request<{ quiz: { activityType: string; name: string; description: string | null; courseId: string; courseName: string } }>(
+  input: { name: string; description?: string },
+): Promise<ApiResult<{ quiz: { activityType: string; name: string; description: string | null } }>> {
+  return request<{ quiz: { activityType: string; name: string; description: string | null } }>(
     '/api/activities/types',
     {
       method: 'POST',
