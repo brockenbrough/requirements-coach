@@ -19,7 +19,16 @@ import {
   loadCurrentSession,
   startSession,
 } from "../../../lib/sessionClient";
+import {
+  getSeenUnlockedLevel,
+  newlyUnlockedLevel,
+  recordSeenUnlockedLevel,
+} from "../../../lib/unlockedLevelStore";
 import { useRequireRole } from "../../../lib/useRequireRole";
+
+// Slightly longer than LevelReplaySelector's 1.2s unlock keyframes plus its latest spark delay,
+// so the padlock and particles are unmounted only once they have actually finished playing.
+const UNLOCK_ANIMATION_MS = 1500;
 
 const DIFFICULTY_LABEL: Record<number, string> = {
   1: "Easy",
@@ -91,6 +100,10 @@ function ActivityDetailContent({
   const [selectedLevel, setSelectedLevel] = useState<number | null>(initialLevel);
   const userPickedLevelRef = useRef(false);
   const [abandoning, setAbandoning] = useState(false);
+  // GitHub #371: the level whose padlock is currently springing open in LevelReplaySelector, or
+  // null the rest of the time. Owned here rather than in the selector so that component can stay
+  // the stateless, fully controlled input its doc comment promises.
+  const [unlockingLevel, setUnlockingLevel] = useState<number | null>(null);
   const [error, setError] = useState<{
     message: string;
     needsProfile: boolean;
@@ -121,6 +134,35 @@ function ActivityDetailContent({
       setSelectedLevel(highestSelectableLevel);
     }
   }, [attempts, highestSelectableLevel]);
+
+  // GitHub #371: the unlock is derived, not handed over. app/activities/[slug]/play/page.tsx
+  // force-refreshes the completed-attempts cache and then router.push()es straight back here, so
+  // by the time this runs highestSelectableLevel already reflects the level just passed — nothing
+  // needs to travel in a query param. Diffing it against what this device recorded last visit
+  // (lib/unlockedLevelStore.ts, the same snapshot approach as lib/previousRankStore.ts) also
+  // covers the student who wandered off and came back, and a plain reload can't replay it.
+  //
+  // attempts !== null is the load-bearing guard: the initial null must not count as "confirmed
+  // nothing passed" and write a baseline of 1, or the real fetch landing on 3 straight after
+  // would read as a two-level unlock that never happened.
+  useEffect(() => {
+    if (attempts === null || !profile?.user_id || !activity) return;
+    const seen = getSeenUnlockedLevel(profile.user_id, activity.activityType);
+    const newly = newlyUnlockedLevel(seen, highestSelectableLevel);
+    // Recorded unconditionally, which is what makes this idempotent: loadCompletedAttempts's
+    // background onRevalidate below re-runs this effect with a new attempts identity, and the
+    // second pass must find nothing new rather than restart an animation already in flight.
+    recordSeenUnlockedLevel(profile.user_id, activity.activityType, highestSelectableLevel);
+    if (newly !== null) setUnlockingLevel(newly);
+  }, [attempts, profile?.user_id, activity, highestSelectableLevel]);
+
+  // Kept in its own effect so a re-run of the one above (a revalidation, say) cannot clear the
+  // timeout mid-animation and leave the padlock frozen half-open.
+  useEffect(() => {
+    if (unlockingLevel === null) return;
+    const timer = setTimeout(() => setUnlockingLevel(null), UNLOCK_ANIMATION_MS);
+    return () => clearTimeout(timer);
+  }, [unlockingLevel]);
 
   // Both reads in one pass, because the page re-runs this on every return from /play: the
   // running session decides Start vs. Resume/Abandon, the finished ones fill the history below.
@@ -357,6 +399,7 @@ function ActivityDetailContent({
                     setSelectedLevel(level);
                   }}
                   disabled={starting}
+                  unlockingLevel={unlockingLevel}
                 />
               ) : null}
             </div>
