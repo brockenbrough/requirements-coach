@@ -1,5 +1,6 @@
 import { getSupabaseClient } from '../../../lib/supabase';
 import { isActivityType } from '../../../lib/activityTypes';
+import { checkActivityAccess } from '../../../lib/activityCourseQueries';
 import {
   DEFAULT_QUESTION_MAX_SCORE,
   QUESTIONS_PER_SESSION,
@@ -157,6 +158,16 @@ export async function POST(request: Request) {
   // AC 6: the student id comes from the auth session, never from the request body.
   const { data: { user }, error: authError } = await supabase.auth.getUser(token);
   if (authError || !user) return Response.json({ error: 'Invalid or expired token.' }, { status: 401 });
+
+  // Every activity now belongs to exactly one course (activity_type_course) — a student can only
+  // start a session against one whose course they're enrolled in. Checked here rather than
+  // folded into isActivityType above: "does this exist" and "can this caller see it" are
+  // different questions, and only the second one needs the caller's identity.
+  const access = await checkActivityAccess(supabase, activityType, user.id);
+  if (access.status === 'error') return Response.json({ error: access.error.message }, { status: 500 });
+  if (access.status === 'forbidden') {
+    return Response.json({ error: 'You are not enrolled in a course that offers this activity.' }, { status: 403 });
+  }
 
   const existing = await findInProgressSession(supabase, user.id, activityType);
   if (existing.error) return Response.json({ error: existing.error.message }, { status: 500 });

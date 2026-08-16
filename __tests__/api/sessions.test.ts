@@ -19,6 +19,7 @@ const h = vi.hoisted(() => {
       select: () => builder,
       eq: () => builder,
       in: () => builder,
+      limit: () => builder,
       order: (column: string, opts?: { ascending?: boolean }) => {
         state.orders.push({ table, column, ascending: opts?.ascending ?? true });
         return builder;
@@ -108,9 +109,25 @@ function req(body?: object, token: string | null = 'valid-token') {
   });
 }
 
-/** Queues a successful activity_type lookup (GitHub #347: isActivityType is now a DB read). */
+/**
+ * Queues a course link + enrollment so checkActivityAccess (lib/activityCourseQueries.ts)
+ * resolves to 'ok' — every activity is now linked to exactly one course, and a student can only
+ * start/resume a session against one whose course they're enrolled in.
+ */
+function queueEnrolled() {
+  queue('activity_type_course', { data: { course_id: 'course-1', course: { course_name: 'Software Requirements' } }, error: null });
+  queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
+}
+
+/**
+ * Queues a successful activity_type lookup (GitHub #347: isActivityType is now a DB read) plus
+ * an enrolled course link — the two checks every path past "does this activity exist" now runs
+ * before touching session_log. Tests that specifically exercise the enrollment gate itself queue
+ * activity_type_course/student_course directly instead of calling this.
+ */
 function queueValidActivityType(activityType = 'IDENTIFY_WEAK_USER_STORIES') {
   queue('activity_type', { data: { activity_type: activityType }, error: null });
+  queueEnrolled();
 }
 
 /**
@@ -492,6 +509,32 @@ describe('POST /api/sessions', () => {
     expect(response.status).toBe(500);
     // Otherwise the empty session would block every future start via uq_session_log_one_active.
     expect(h.state.deletes).toContain('session_log');
+  });
+
+  // GitHub #<activity-course link>: every activity now belongs to exactly one course
+  // (activity_type_course) — a student can only start a session against one whose course
+  // they're enrolled in.
+  it('returns 403 when the activity has no course link at all', async () => {
+    queue('activity_type', { data: { activity_type: 'IDENTIFY_WEAK_USER_STORIES' }, error: null });
+    queue('activity_type_course', { data: null, error: null }); // unlinked
+
+    const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toMatch(/not enrolled/i);
+    expect(h.state.tables).not.toContain('session_log');
+  });
+
+  it('returns 403 when the caller is not enrolled in the activity\'s linked course', async () => {
+    queue('activity_type', { data: { activity_type: 'IDENTIFY_WEAK_USER_STORIES' }, error: null });
+    queue('activity_type_course', { data: { course_id: 'course-1', course: { course_name: 'Software Requirements' } }, error: null });
+    queue('student_course', { data: [], error: null }); // not enrolled
+
+    const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES' }));
+
+    expect(response.status).toBe(403);
+    expect(h.state.inserts).toHaveLength(0);
   });
 
   it('returns 400 for a malformed JSON body', async () => {

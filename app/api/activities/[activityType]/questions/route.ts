@@ -1,5 +1,6 @@
 import { getSupabaseClient } from '../../../../../lib/supabase';
 import { isActivityType } from '../../../../../lib/activityTypes';
+import { checkActivityAccess } from '../../../../../lib/activityCourseQueries';
 
 // REQ-DL-1.1: valid difficulty levels are 1 (easy), 2 (medium), 3 (hard).
 const VALID_DIFFICULTY_LEVELS = [1, 2, 3];
@@ -47,6 +48,14 @@ export async function GET(
   if (activityTypeError) return Response.json({ error: activityTypeError.message }, { status: 500 });
   if (!validActivityType) {
     return Response.json({ error: 'Unknown activity type.' }, { status: 400 });
+  }
+
+  // Same course-enrollment gate as POST /api/sessions — this activity's question pool is only
+  // visible to a caller enrolled in the course it's linked to (activity_type_course).
+  const access = await checkActivityAccess(supabase, activityType, user.id);
+  if (access.status === 'error') return Response.json({ error: access.error.message }, { status: 500 });
+  if (access.status === 'forbidden') {
+    return Response.json({ error: 'You are not enrolled in a course that offers this activity.' }, { status: 403 });
   }
 
   const difficulty = Number(new URL(request.url).searchParams.get('difficulty'));

@@ -16,6 +16,8 @@ const h = vi.hoisted(() => {
         state.filters.push({ column, value });
         return builder;
       },
+      in: () => builder,
+      limit: () => builder,
       maybeSingle: async () => result,
       then: (onOk: (r: Result) => unknown, onErr?: (e: unknown) => unknown) =>
         Promise.resolve(result).then(onOk, onErr),
@@ -30,9 +32,23 @@ function queue(table: string, result: Result) {
   (h.state.queues[table] ??= []).push(result);
 }
 
-/** Queues a successful activity_type lookup (GitHub #347: isActivityType is now a DB read). */
+/**
+ * Queues a course link + enrollment so checkActivityAccess (lib/activityCourseQueries.ts)
+ * resolves to 'ok' — every activity is now linked to exactly one course, and this route only
+ * serves questions to a caller enrolled in it.
+ */
+function queueEnrolled() {
+  queue('activity_type_course', { data: { course_id: 'course-1', course: { course_name: 'Software Requirements' } }, error: null });
+  queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
+}
+
+/**
+ * Queues a successful activity_type lookup (GitHub #347: isActivityType is now a DB read) plus
+ * an enrolled course link, the two checks every path past "does this activity exist" now runs.
+ */
 function queueValidActivityType(activityType: string) {
   queue('activity_type', { data: { activity_type: activityType }, error: null });
+  queueEnrolled();
 }
 
 vi.mock('../../lib/supabase', () => ({
@@ -85,6 +101,24 @@ describe('GET /api/activities/:activityType/questions', () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toMatch(/unknown activity type/i);
+  });
+
+  it('returns 403 when the activity has no course link at all', async () => {
+    queue('activity_type', { data: { activity_type: 'IDENTIFY_WEAK_USER_STORIES' }, error: null });
+    queue('activity_type_course', { data: null, error: null }); // unlinked
+
+    const res = await GET(makeRequest('IDENTIFY_WEAK_USER_STORIES', '1'), PARAMS('IDENTIFY_WEAK_USER_STORIES'));
+    expect(res.status).toBe(403);
+  });
+
+  it('returns 403 when the caller is not enrolled in the activity\'s linked course', async () => {
+    queue('activity_type', { data: { activity_type: 'IDENTIFY_WEAK_USER_STORIES' }, error: null });
+    queue('activity_type_course', { data: { course_id: 'course-1', course: { course_name: 'Software Requirements' } }, error: null });
+    queue('student_course', { data: [], error: null }); // not enrolled
+
+    const res = await GET(makeRequest('IDENTIFY_WEAK_USER_STORIES', '1'), PARAMS('IDENTIFY_WEAK_USER_STORIES'));
+    expect(res.status).toBe(403);
+    expect(h.state.tables).not.toContain('question');
   });
 
   it('returns 400 when difficulty is missing', async () => {
