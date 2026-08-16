@@ -1,6 +1,6 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { requireInstructor } from '../../../../lib/instructorAuth';
-import { slugifyQuizName } from '../../../../lib/activityTypes';
+import { isGradingKind, slugifyQuizName } from '../../../../lib/activityTypes';
 import { findOwnedCourse } from '../../../../lib/courseQueries';
 import { linkActivityTypeToCourse } from '../../../../lib/activityCourseQueries';
 
@@ -20,7 +20,16 @@ function getToken(request: Request): string | null {
  * more: no student can ever see or start a session against one (lib/activityCourseQueries.ts's
  * checkActivityAccess), so requiring courseId here is what actually enforces that at the source.
  *
- * Body: { name: string, courseId: string, description?: string }. The stored key (activity_type)
+ * Body: { name: string, courseId: string, gradingKind: 'mcq' | 'llm-graded', description?: string }.
+ *
+ * GitHub #379: gradingKind decides which pool the new activity draws from — question/answer rows
+ * for 'mcq', free-text user_story prompts graded by the instructor's configured LLM provider for
+ * 'llm-graded'. It is required with no default even though the column has one: enforcing the
+ * choice only in the create modal would let the route quietly fall back to 'mcq' for any other
+ * caller, and the kind is not editable afterwards, so a silent default is a wrong catalog rather
+ * than a fixable one.
+ *
+ * The stored key (activity_type)
  * is *derived* from name via slugifyQuizName — upper-cased, non-alphanumeric runs collapsed to
  * one underscore, the same format the three built-in keys already have — never client-supplied
  * directly, so an instructor names their quiz the same way they'd name anything else in the app.
@@ -40,7 +49,7 @@ function getToken(request: Request): string | null {
  * failure deletes the activity_type row it was about to belong to, the same hand-rolled-rollback
  * shape that function uses, so a partial write never leaves an unlinked, invisible-forever quiz.
  *
- * Returns: { quiz: { activityType, name, description, courseId, courseName } }
+ * Returns: { quiz: { activityType, name, description, gradingKind, courseId, courseName } }
  */
 export async function POST(request: Request) {
   const supabase = getSupabaseClient();
@@ -60,7 +69,12 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Invalid JSON body.' }, { status: 400 });
   }
 
-  const { name, description, courseId } = (body ?? {}) as { name?: unknown; description?: unknown; courseId?: unknown };
+  const { name, description, courseId, gradingKind } = (body ?? {}) as {
+    name?: unknown;
+    description?: unknown;
+    courseId?: unknown;
+    gradingKind?: unknown;
+  };
 
   if (typeof name !== 'string' || name.trim() === '') {
     return Response.json({ error: 'name is required.' }, { status: 400 });
@@ -68,6 +82,10 @@ export async function POST(request: Request) {
 
   if (typeof courseId !== 'string' || courseId.trim() === '') {
     return Response.json({ error: 'courseId is required.' }, { status: 400 });
+  }
+
+  if (!isGradingKind(gradingKind)) {
+    return Response.json({ error: 'gradingKind must be "mcq" or "llm-graded".' }, { status: 400 });
   }
 
   if (description !== undefined && description !== null && typeof description !== 'string') {
@@ -102,9 +120,10 @@ export async function POST(request: Request) {
       activity_type: key,
       quiz_name: name.trim(),
       description: trimmedDescription,
+      grading_kind: gradingKind,
       creator_id: guard.user_id,
     })
-    .select('activity_type, quiz_name, description')
+    .select('activity_type, quiz_name, description, grading_kind')
     .maybeSingle();
 
   if (error) {
@@ -114,7 +133,7 @@ export async function POST(request: Request) {
     return Response.json({ error: error.message }, { status: 500 });
   }
 
-  const row = data as { activity_type: string; quiz_name: string; description: string | null };
+  const row = data as { activity_type: string; quiz_name: string; description: string | null; grading_kind: string };
 
   const { error: linkError } = await linkActivityTypeToCourse(supabase, { activityType: row.activity_type, courseId: ownedCourse.course.course_id });
   if (linkError) {
@@ -128,6 +147,7 @@ export async function POST(request: Request) {
         activityType: row.activity_type,
         name: row.quiz_name,
         description: row.description,
+        gradingKind: row.grading_kind,
         courseId: ownedCourse.course.course_id,
         courseName: ownedCourse.course.course_name,
       },

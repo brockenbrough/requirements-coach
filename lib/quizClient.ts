@@ -61,14 +61,25 @@ export function loadQuizzes(token: string): Promise<ApiResult<{ quizzes: QuizSum
  * so the create form can show it if useful. courseId is required now: a course-less activity is
  * not a valid end state (see activity_type_course's own header comment in supabase/schema.sql) —
  * no student could ever see or start a session against one.
+ *
+ * GitHub #379: gradingKind is required here rather than optional-with-a-default, which is the
+ * compile-time half of "creation cannot proceed without this choice" — the route enforces the
+ * runtime half. It cannot be changed after creation, so there is no update counterpart.
  */
+export type CreatedQuiz = {
+  activityType: string;
+  name: string;
+  description: string | null;
+  gradingKind: GradingKind;
+  courseId: string;
+  courseName: string;
+};
+
 export function createQuiz(
   token: string,
-  input: { name: string; courseId: string; description?: string },
-): Promise<
-  ApiResult<{ quiz: { activityType: string; name: string; description: string | null; courseId: string; courseName: string } }>
-> {
-  return request<{ quiz: { activityType: string; name: string; description: string | null; courseId: string; courseName: string } }>(
+  input: { name: string; courseId: string; gradingKind: GradingKind; description?: string },
+): Promise<ApiResult<{ quiz: CreatedQuiz }>> {
+  return request<{ quiz: CreatedQuiz }>(
     '/api/activities/types',
     {
       method: 'POST',

@@ -6,7 +6,7 @@ import { AppShell } from '../../../components/AppShell';
 import { CreateCatalogModal } from '../../../components/CreateCatalogModal';
 import { loadCourses } from '../../../lib/courseClient';
 import type { CourseSummary } from '../../../lib/courseTypes';
-import { loadQuizzes, type QuizSummary } from '../../../lib/quizClient';
+import { loadQuizzes, type CreatedQuiz, type QuizSummary } from '../../../lib/quizClient';
 import { useRequireRole } from '../../../lib/useRequireRole';
 
 const ALL_AUTHORS = 'all';
@@ -74,7 +74,7 @@ export default function InstructorQuizzesPage() {
   if (loading || !authorized) return null;
   if (!token || !profile) return null;
 
-  function handleCreated(quiz: { activityType: string; name: string; description: string | null; courseId: string; courseName: string }) {
+  function handleCreated(quiz: CreatedQuiz) {
     // Optimistic insert: the caller is the quiz's creator_id, and its display name follows the
     // same first/last-name-else-username fallback GET /api/instructor/quizzes uses server-side —
     // no need to re-fetch the whole list just to show the one row that just changed.
@@ -87,9 +87,7 @@ export default function InstructorQuizzesPage() {
         name: quiz.name,
         description: quiz.description,
         authorName,
-        // POST /api/activities/types can only produce an MCQ catalog today; when it learns to
-        // take a grading kind, this reads the created quiz's own value instead of assuming.
-        gradingKind: 'mcq',
+        gradingKind: quiz.gradingKind,
         questionCount: 0,
         courseId: quiz.courseId,
         courseName: quiz.courseName,
@@ -183,14 +181,15 @@ export default function InstructorQuizzesPage() {
                     <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Name</th>
                     <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Description</th>
                     <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Author</th>
+                    <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Type</th>
                     <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Course</th>
-                    <th className="whitespace-nowrap px-4 py-3 text-right text-xs font-bold uppercase tracking-wide">Questions</th>
+                    <th className="whitespace-nowrap px-4 py-3 text-right text-xs font-bold uppercase tracking-wide">Items</th>
                   </tr>
                 </thead>
                 <tbody>
                   {visibleQuizzes.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="bg-brand-navy-2 px-4 py-10 text-center text-sm font-semibold text-brand-ink-muted">
+                      <td colSpan={6} className="bg-brand-navy-2 px-4 py-10 text-center text-sm font-semibold text-brand-ink-muted">
                         No catalogs match this filter.
                       </td>
                     </tr>
@@ -204,6 +203,20 @@ export default function InstructorQuizzesPage() {
                         </td>
                         <td className="px-4 py-3 text-gray-500">{quiz.description || '—'}</td>
                         <td className="whitespace-nowrap px-4 py-3 text-gray-500">{quiz.authorName}</td>
+                        <td className="whitespace-nowrap px-4 py-3">
+                          {/* GitHub #379: questionCount counts questions for one kind and prompts
+                              for the other, so the column header alone can't say what the number
+                              means — this badge is what disambiguates it. */}
+                          <span
+                            className={`rounded-full px-2.5 py-1 text-xs font-extrabold ${
+                              quiz.gradingKind === 'llm-graded'
+                                ? 'bg-brand-teal/15 text-brand-teal-dark'
+                                : 'bg-brand-purple/10 text-brand-purple-dark'
+                            }`}
+                          >
+                            {quiz.gradingKind === 'llm-graded' ? 'LLM-graded' : 'Multiple choice'}
+                          </span>
+                        </td>
                         <td className="whitespace-nowrap px-4 py-3 text-gray-500">
                           {quiz.courseName ?? <span className="italic text-gray-400">Not linked yet</span>}
                         </td>

@@ -93,12 +93,13 @@ function activityTypeRow(overrides: Partial<Record<string, unknown>> = {}) {
     activity_type: 'MY_CUSTOM_QUIZ',
     quiz_name: 'My Custom Quiz',
     description: null,
+    grading_kind: 'mcq',
     ...overrides,
   };
 }
 
 function validBody(overrides: Partial<Record<string, unknown>> = {}) {
-  return { name: 'My Custom Quiz', courseId: 'course-1', ...overrides };
+  return { name: 'My Custom Quiz', courseId: 'course-1', gradingKind: 'mcq', ...overrides };
 }
 
 beforeEach(() => {
@@ -154,6 +155,47 @@ describe('POST /api/activities/types', () => {
     queueRole('instructor');
     const res = await POST(makeRequest(validBody({ courseId: '   ' })));
     expect(res.status).toBe(400);
+  });
+
+  // GitHub #379, AC #1: "creation cannot proceed without this choice". Enforcing it only in the
+  // create modal would leave the route defaulting to the column's 'mcq', and the kind can't be
+  // changed afterwards — so a silent default produces a wrong catalog, not a fixable one.
+  it('returns 400 when gradingKind is missing, without touching the course or activity_type', async () => {
+    queueRole('instructor');
+
+    const { gradingKind: _omitted, ...withoutKind } = validBody();
+    const res = await POST(makeRequest(withoutKind));
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/gradingKind/);
+    expect(h.state.tables).not.toContain('course');
+    expect(h.state.tables).not.toContain('activity_type');
+  });
+
+  it('returns 400 for a gradingKind outside the CHECK constraint', async () => {
+    for (const gradingKind of ['MCQ', 'llm', 'peer-reviewed', '', 1, null]) {
+      queueRole('instructor');
+      const res = await POST(makeRequest(validBody({ gradingKind })));
+      expect(res.status).toBe(400);
+      h.state.tables = [];
+    }
+  });
+
+  it('stores llm-graded when that kind is chosen, and reports it back', async () => {
+    queueRole('instructor');
+    queueOwnedCourse();
+    queue('activity_type', { data: activityTypeRow({ grading_kind: 'llm-graded' }), error: null });
+    queue('activity_type_course', { error: null });
+
+    const res = await POST(makeRequest(validBody({ gradingKind: 'llm-graded' })));
+    expect(res.status).toBe(201);
+
+    const insert = h.state.inserts.find((i) => i.table === 'activity_type');
+    expect(insert?.payload).toMatchObject({ grading_kind: 'llm-graded' });
+
+    const body = await res.json();
+    expect(body.quiz.gradingKind).toBe('llm-graded');
   });
 
   it('returns 400 when name has no letters or numbers to derive a key from', async () => {
@@ -227,6 +269,7 @@ describe('POST /api/activities/types', () => {
       activityType: 'MY_CUSTOM_QUIZ',
       name: 'My Custom Quiz',
       description: 'A quiz about things',
+      gradingKind: 'mcq',
       courseId: 'course-1',
       courseName: 'Software Requirements',
     });
