@@ -7,7 +7,7 @@ import { AppShell } from '../../../../components/AppShell';
 import { AddStudentModal } from '../../../../components/AddStudentModal';
 import { CopyCodeButton } from '../../../../components/CopyCodeButton';
 import { CourseQuizzesList } from '../../../../components/CourseQuizzesList';
-import { CourseStudentList } from '../../../../components/CourseStudentList';
+import { CourseStudentsDrawer } from '../../../../components/CourseStudentsDrawer';
 import { DeleteCourseModal } from '../../../../components/DeleteCourseModal';
 import { DuplicateCourseModal } from '../../../../components/DuplicateCourseModal';
 import { EditCourseModal } from '../../../../components/EditCourseModal';
@@ -62,10 +62,13 @@ function DuplicateIcon() {
   );
 }
 
-function PlusIcon() {
+function UsersIcon() {
   return (
-    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round">
-      <path d="M12 5v14M5 12h14" />
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
     </svg>
   );
 }
@@ -89,6 +92,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
   const [duplicateModalOpen, setDuplicateModalOpen] = useState(false);
   const [duplicatedCourse, setDuplicatedCourse] = useState<CourseSummary | null>(null);
   const [addStudentModalOpen, setAddStudentModalOpen] = useState(false);
+  const [studentsDrawerOpen, setStudentsDrawerOpen] = useState(false);
   const [quizzes, setQuizzes] = useState<AssembledQuizSummary[] | null>(null);
   const [quizzesLoadFailed, setQuizzesLoadFailed] = useState(false);
   const [quizzesRetryCount, setQuizzesRetryCount] = useState(0);
@@ -190,7 +194,15 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
                   <CopyCodeButton code={course.code} variant="icon" ariaLabel="Copy course code" />
                 </div>
               </div>
-              <div className="flex flex-none items-center gap-3">
+              <div className="flex flex-none flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setStudentsDrawerOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-full bg-brand-purple px-4 py-2 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark"
+                >
+                  <UsersIcon />
+                  Students ({course.students.length})
+                </button>
                 <button
                   type="button"
                   onClick={handleExport}
@@ -233,23 +245,6 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
             </div>
 
             {error ? <p className="mb-4 text-sm font-semibold text-brand-danger">{error}</p> : null}
-
-            <div className="mb-3 flex items-center justify-between">
-              <p className="text-xs font-extrabold uppercase tracking-wide text-gray-400">
-                Students ({course.students.length})
-              </p>
-              <button
-                type="button"
-                onClick={() => setAddStudentModalOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-full bg-brand-purple px-3.5 py-1.5 text-xs font-extrabold text-white transition hover:bg-brand-purple-dark"
-              >
-                <PlusIcon />
-                Add student
-              </button>
-            </div>
-            <div className="mb-8">
-              <CourseStudentList students={course.students} onRemove={handleRemove} />
-            </div>
 
             <p className="mb-3 text-xs font-extrabold uppercase tracking-wide text-gray-400">
               Quizzes {quizzes ? `(${quizzes.length})` : ''}
@@ -312,6 +307,22 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
         />
       ) : null}
 
+      {studentsDrawerOpen && course ? (
+        <CourseStudentsDrawer
+          courseId={course.id}
+          students={course.students}
+          onClose={() => setStudentsDrawerOpen(false)}
+          onRemove={handleRemove}
+          onOpenAddStudent={() => setAddStudentModalOpen(true)}
+        />
+      ) : null}
+
+      {/*
+        Rendered after the drawer above on purpose: both are fixed-position, z-50 overlays, and at
+        equal z-index a later sibling in the DOM paints on top. "Add student" inside the drawer
+        opens this without closing the drawer first (see CourseStudentsDrawer's own docblock), so
+        this ordering is what makes the modal visually stack above the drawer instead of under it.
+      */}
       {addStudentModalOpen && course ? (
         <AddStudentModal
           token={token}

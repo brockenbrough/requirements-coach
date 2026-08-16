@@ -276,36 +276,6 @@ CREATE TABLE assembled_quiz_catalog (
     activity_type             varchar(50) NOT NULL,
     PRIMARY KEY (assembled_quiz_catalog_id));
 
--- ---------------------------------------------------------------------
--- Activity-Course link
---
--- Ties every activity_type (built-in or instructor-created) to exactly one course: an
--- instructor creating an activity must choose a course they own, and a student can only see
--- and play an activity whose course they're enrolled in (student_course intersection, same
--- mechanism GET /api/courses/{id}/leaderboard and GET /api/students/{id}/public-profile use
--- via isEnrolledInAnyCourse). A real join table, not a course_id column on activity_type
--- itself, so the relationship reads and drops the same way every other course link in this
--- schema does (student_course, assembled_quiz) — uq_activity_type_course_activity_type below
--- is what actually enforces "exactly one," not the table shape.
---
--- The three built-in activity_type rows (supabase/seed.sql) have no row here until an
--- instructor links each one to a course — until then they simply aren't visible to any
--- student, the same as a freshly created catalog with no course yet. That's a consequence of
--- the enrollment filter, not a special case: an activity_type with no matching row here is
--- just as "not available" as one linked to a course nobody in the query is enrolled in.
---
--- ON DELETE CASCADE on course_id (not on activity_type) matches fk_assembled_quiz_course: a
--- link has no meaning once its course is gone, but the activity_type row, its questions, and
--- every session/title/score built on it must survive the course's deletion the same way they
--- already survive an assembled_quiz's course being deleted (see CLAUDE.md's Courses section) —
--- the activity just becomes unlinked (and so, again, simply not visible) until relinked.
--- ---------------------------------------------------------------------
-CREATE TABLE activity_type_course (
-    activity_type_course_id SERIAL      NOT NULL,
-    activity_type            varchar(50) NOT NULL,
-    course_id                uuid        NOT NULL,
-    created_at                timestamp  NOT NULL DEFAULT now(),
-    PRIMARY KEY (activity_type_course_id));
 -- GitHub #361: Quiz Excluded Question
 --
 -- "Displayed as copies of the originals" (the issue's own user story) is implemented as an
@@ -502,11 +472,6 @@ ALTER TABLE assembled_quiz ADD CONSTRAINT fk_assembled_quiz_user FOREIGN KEY (cr
 ALTER TABLE assembled_quiz_catalog ADD CONSTRAINT fk_assembled_quiz_catalog_quiz FOREIGN KEY (assembled_quiz_id) REFERENCES assembled_quiz (assembled_quiz_id) ON DELETE CASCADE;
 ALTER TABLE assembled_quiz_catalog ADD CONSTRAINT fk_assembled_quiz_catalog_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
 
--- No ON DELETE clause, same reasoning as fk_question_activity_type/fk_session_log_activity_type
--- — deleting an activity_type is not a supported operation today, so there is nothing to cascade.
-ALTER TABLE activity_type_course ADD CONSTRAINT fk_activity_type_course_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
--- A link has no meaning once its course is gone, same reasoning as fk_assembled_quiz_course.
-ALTER TABLE activity_type_course ADD CONSTRAINT fk_activity_type_course_course FOREIGN KEY (course_id) REFERENCES course (course_id) ON DELETE CASCADE;
 -- GitHub #361: both cascade — see the quiz_excluded_question table comment above for why this
 -- pair differs from question_to_answer/answered_question_log's lack of one.
 ALTER TABLE quiz_excluded_question ADD CONSTRAINT fk_quiz_excluded_question_quiz FOREIGN KEY (assembled_quiz_id) REFERENCES assembled_quiz (assembled_quiz_id) ON DELETE CASCADE;
@@ -630,14 +595,6 @@ CREATE INDEX ix_assembled_quiz_catalog_quiz_id ON assembled_quiz_catalog (assemb
 CREATE INDEX ix_assembled_quiz_creator_id ON assembled_quiz (creator_id);
 CREATE INDEX ix_assembled_quiz_course_id ON assembled_quiz (course_id);
 
--- One course per activity, enforced here rather than by the table shape (see
--- activity_type_course's own header comment) — a second insert for an already-linked
--- activity_type fails with 23505, the same race handling every other "exactly one" constraint
--- in this schema uses (uq_session_log_one_active, uq_instructor_llm_config_one_active).
-ALTER TABLE activity_type_course ADD CONSTRAINT uq_activity_type_course_activity_type UNIQUE (activity_type);
--- "Every activity available in this course" (the student discovery list, and the instructor's
--- per-course catalog view) filters on exactly this column.
-CREATE INDEX ix_activity_type_course_course_id ON activity_type_course (course_id);
 -- GitHub #361: a quiz cannot exclude the same question twice, and "every question this quiz has
 -- excluded" (subtracted from the draw pool) filters on assembled_quiz_id.
 ALTER TABLE quiz_excluded_question ADD CONSTRAINT uq_quiz_excluded_question UNIQUE (assembled_quiz_id, question_id);
@@ -765,7 +722,6 @@ ALTER TABLE course ENABLE ROW LEVEL SECURITY;
 ALTER TABLE student_course ENABLE ROW LEVEL SECURITY;
 ALTER TABLE assembled_quiz ENABLE ROW LEVEL SECURITY;
 ALTER TABLE assembled_quiz_catalog ENABLE ROW LEVEL SECURITY;
-ALTER TABLE activity_type_course ENABLE ROW LEVEL SECURITY;
 ALTER TABLE quiz_excluded_question ENABLE ROW LEVEL SECURITY;
 ALTER TABLE assembled_quiz_extra_question ENABLE ROW LEVEL SECURITY;
 
@@ -1046,23 +1002,24 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 -- question.activity_type already does, so every catalog created before this migration is
 -- immediately eligible to be referenced by a new quiz.
 
--- Activity-Course link (tie every activity_type to a course, gate student visibility by
--- enrollment): also a brand new table, no rename or backfill path — run its CREATE TABLE
--- statement, both ALTER TABLE ... ADD CONSTRAINT foreign keys, uq_activity_type_course_activity_type,
--- ix_activity_type_course_course_id, and ALTER TABLE activity_type_course ENABLE ROW LEVEL SECURITY
--- from above.
+-- Activity-Course link REMOVED: activity_type_course (which tied every activity_type directly to
+-- exactly one course) is gone — a question catalog (activity_type) is now a standalone,
+-- reusable resource owned only by its creator_id, with no course of its own. A catalog is
+-- reachable by a student only transitively, through an assembled_quiz (GitHub #360) that
+-- references it and belongs to a course they're enrolled in — see
+-- lib/activityCourseQueries.ts's checkActivityAccess/listActivityTypesForCourses, which derive
+-- that path instead of reading a direct link.
 --
--- Every activity_type that existed before this migration — including the three seeded built-ins
--- — starts with no row here, which per this table's own header comment means "not available to
--- any student" until an instructor links it to one of their courses. That is the correct
--- behavior of a fresh migration, not a bug to patch around: nothing before this change ever
--- checked course enrollment, so there is no prior "which course was this really for" data to
--- backfill from. If a deployment needs the built-ins usable immediately, an operator has to link
--- each one explicitly, e.g. for a single default course:
+-- If your database already has activity_type_course from an earlier run of this script, drop it:
 --
---   INSERT INTO activity_type_course (activity_type, course_id)
---   SELECT activity_type, '<course-uuid>' FROM activity_type WHERE creator_id IS NULL
---   ON CONFLICT DO NOTHING;
+--   DROP TABLE IF EXISTS activity_type_course;
+--
+-- Data loss: any existing activity_type <-> course links are gone with the table, and every
+-- catalog that was only reachable through one of them becomes invisible to students immediately
+-- (POST /api/sessions and GET /api/activities/{activityType}/questions both 403 until an
+-- instructor composes an assembled_quiz for the right course that references the catalog — the
+-- only path left). Nothing about the catalog itself (activity_type, question, answer rows) is
+-- touched or lost; only the direct course link disappears.
 -- GitHub #361 (per-quiz question exclusions): another brand new table, same no-rename/no-backfill
 -- path as #360 above — run the CREATE TABLE quiz_excluded_question statement, its two FKs
 -- (fk_quiz_excluded_question_quiz, fk_quiz_excluded_question_question), its unique constraint and

@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 type Result = { data?: unknown; error?: unknown };
 
+// Harness copied from __tests__/api/activities-list.test.ts, since this route composes the same
+// getEnrolledCourseIds + listActivityTypesForCourses pair plus one more title_definition read.
 const h = vi.hoisted(() => {
   const state = {
     queues: {} as Record<string, Result[]>,
@@ -50,13 +52,17 @@ vi.mock('../../lib/supabase', () => ({
   }),
 }));
 
-import { GET } from '../../app/api/activities/route';
+import { GET } from '../../app/api/students/[studentId]/available-titles/route';
+
+const STUDENT_ID = 'student-1';
 
 function req(token: string | null = 'valid-token') {
-  return new Request('http://localhost/api/activities', {
+  return new Request(`http://localhost/api/students/${STUDENT_ID}/available-titles`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
 }
+
+const ctx = { params: { studentId: STUDENT_ID } };
 
 beforeEach(() => {
   h.state.queues = {};
@@ -64,80 +70,85 @@ beforeEach(() => {
   h.state.filters = [];
 });
 
-describe('GET /api/activities', () => {
+describe('GET /api/students/{studentId}/available-titles', () => {
   it('returns 401 without a token', async () => {
-    const res = await GET(req(null));
+    const res = await GET(req(null), ctx);
     expect(res.status).toBe(401);
     expect(h.state.tables).toEqual([]);
   });
 
   it('returns 401 for an invalid token', async () => {
-    const res = await GET(req('bad-token'));
+    const res = await GET(req('bad-token'), ctx);
     expect(res.status).toBe(401);
   });
 
-  it('returns an empty list without querying assembled_quiz_catalog when the caller is in no courses', async () => {
+  it("returns 403 for a studentId that is not the requesting student's", async () => {
+    const res = await GET(req(), { params: { studentId: 'someone-else' } });
+
+    expect(res.status).toBe(403);
+    expect(h.state.tables).toEqual([]);
+  });
+
+  it('returns an empty list without querying assembled_quiz_catalog when enrolled in no course', async () => {
     queue('student_course', { data: [], error: null });
 
-    const res = await GET(req());
+    const res = await GET(req(), ctx);
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.activities).toEqual([]);
     expect(h.state.tables).not.toContain('assembled_quiz_catalog');
   });
 
-  it('returns every activity reachable through an assembled quiz in any of the caller\'s enrolled courses', async () => {
-    queue('student_course', { data: [{ course_id: 'course-1' }, { course_id: 'course-2' }], error: null });
+  it('returns every linked activity with its full title ladder, including a null title for a missing level', async () => {
+    queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
     queue('assembled_quiz_catalog', {
       data: [
         {
           activity_type: 'IDENTIFY_WEAK_USER_STORIES',
-          catalog: { quiz_name: 'Identify Weak User Stories', description: null, grading_kind: 'mcq' },
+          catalog: { quiz_name: 'Identify Weak User Stories', description: null },
           assembled_quiz: { course_id: 'course-1', course: { course_name: 'Software Requirements' } },
-        },
-        {
-          activity_type: 'MY_CUSTOM_QUIZ',
-          catalog: { quiz_name: 'My Custom Quiz', description: 'A quiz about things', grading_kind: 'llm-graded' },
-          assembled_quiz: { course_id: 'course-2', course: { course_name: 'Advanced SE' } },
         },
       ],
       error: null,
     });
+    // Only levels 1 and 2 have a title_definition row — level 3 has none yet.
+    queue('title_definition', {
+      data: [
+        { activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 1, title_name: 'Story Apprentice' },
+        { activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 2, title_name: 'Story Analyst' },
+      ],
+      error: null,
+    });
 
-    const res = await GET(req());
+    const res = await GET(req(), ctx);
     expect(res.status).toBe(200);
     const body = await res.json();
 
     expect(body.activities).toEqual([
       {
         activityType: 'IDENTIFY_WEAK_USER_STORIES',
-        name: 'Identify Weak User Stories',
-        description: null,
-        gradingKind: 'mcq',
+        activityName: 'Identify Weak User Stories',
         courseId: 'course-1',
         courseName: 'Software Requirements',
-      },
-      {
-        activityType: 'MY_CUSTOM_QUIZ',
-        name: 'My Custom Quiz',
-        description: 'A quiz about things',
-        gradingKind: 'llm-graded',
-        courseId: 'course-2',
-        courseName: 'Advanced SE',
+        titles: [
+          { difficultyLevel: 1, title: 'Story Apprentice' },
+          { difficultyLevel: 2, title: 'Story Analyst' },
+          { difficultyLevel: 3, title: null },
+        ],
       },
     ]);
 
     expect(h.state.filters).toContainEqual({
-      table: 'assembled_quiz_catalog',
-      column: 'assembled_quiz.course_id',
-      value: ['course-1', 'course-2'],
+      table: 'title_definition',
+      column: 'activity_type',
+      value: ['IDENTIFY_WEAK_USER_STORIES'],
     });
   });
 
   it('returns 500 when the enrolled-course lookup fails', async () => {
     queue('student_course', { data: null, error: { message: 'DB down' } });
 
-    const res = await GET(req());
+    const res = await GET(req(), ctx);
     expect(res.status).toBe(500);
   });
 
@@ -145,7 +156,25 @@ describe('GET /api/activities', () => {
     queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
     queue('assembled_quiz_catalog', { data: null, error: { message: 'DB down' } });
 
-    const res = await GET(req());
+    const res = await GET(req(), ctx);
+    expect(res.status).toBe(500);
+  });
+
+  it('returns 500 when the title_definition lookup fails', async () => {
+    queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
+    queue('assembled_quiz_catalog', {
+      data: [
+        {
+          activity_type: 'IDENTIFY_WEAK_USER_STORIES',
+          catalog: { quiz_name: 'Identify Weak User Stories', description: null },
+          assembled_quiz: { course_id: 'course-1', course: { course_name: 'Software Requirements' } },
+        },
+      ],
+      error: null,
+    });
+    queue('title_definition', { data: null, error: { message: 'DB down' } });
+
+    const res = await GET(req(), ctx);
     expect(res.status).toBe(500);
   });
 });

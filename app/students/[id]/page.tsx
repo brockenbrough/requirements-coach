@@ -9,8 +9,13 @@ import { MasteryTitleCard } from '../../../components/MasteryTitleCard';
 import { StatTile } from '../../../components/StatTile';
 import { useUser } from '../../../components/UserProvider';
 import { buildMasteryTitleEntries, totalLevelsPassed } from '../../../lib/masteryTitles';
-import type { PublicStudentProfile, PublicStudentTitle } from '../../../lib/leaderboardTypes';
-import { loadPublicStudentProfile, loadStudentScore, loadStudentTitles } from '../../../lib/sessionClient';
+import type { AvailableActivityTitles, PublicStudentProfile, PublicStudentTitle } from '../../../lib/leaderboardTypes';
+import {
+  loadAvailableTitles,
+  loadPublicStudentProfile,
+  loadStudentScore,
+  loadStudentTitles,
+} from '../../../lib/sessionClient';
 import { useRequireRole } from '../../../lib/useRequireRole';
 
 /**
@@ -64,6 +69,7 @@ function StudentProfileContent({ studentId }: { studentId: string }) {
    */
   const [ownScore, setOwnScore] = useState(0);
   const [ownTitles, setOwnTitles] = useState<PublicStudentTitle[]>([]);
+  const [ownAvailableTitles, setOwnAvailableTitles] = useState<AvailableActivityTitles[]>([]);
 
   useEffect(() => {
     if (!isSelf || !token || !ownProfile) return;
@@ -72,10 +78,12 @@ function StudentProfileContent({ studentId }: { studentId: string }) {
     Promise.all([
       loadStudentScore(token, ownProfile.user_id),
       loadStudentTitles(token, ownProfile.user_id),
-    ]).then(([scoreResult, titlesResult]) => {
+      loadAvailableTitles(token, ownProfile.user_id),
+    ]).then(([scoreResult, titlesResult, availableResult]) => {
       if (cancelled) return;
       if (scoreResult.ok) setOwnScore(scoreResult.data.score);
       if (titlesResult.ok) setOwnTitles(titlesResult.data.titles);
+      if (availableResult.ok) setOwnAvailableTitles(availableResult.data.activities);
     });
 
     return () => {
@@ -124,14 +132,15 @@ function StudentProfileContent({ studentId }: { studentId: string }) {
             biography: ownProfile.biography,
             score: ownScore,
             titles: ownTitles,
+            availableTitles: ownAvailableTitles,
           }
         : null;
     }
     return peerProfile ?? null;
-  }, [isSelf, ownProfile, ownScore, ownTitles, peerProfile]);
+  }, [isSelf, ownProfile, ownScore, ownTitles, ownAvailableTitles, peerProfile]);
 
   const masteryEntries = useMemo(
-    () => (profile ? buildMasteryTitleEntries(profile.titles) : []),
+    () => (profile ? buildMasteryTitleEntries(profile.availableTitles, profile.titles) : []),
     [profile],
   );
   // "Earned" is the word in the story: a stranger's unreached levels aren't interesting, unlike

@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { createQuiz, type CreatedQuiz } from '../lib/quizClient';
-import type { CourseSummary } from '../lib/courseClient';
 import type { GradingKind } from '../lib/activityTypes';
 import { useModalDismiss } from './useModalDismiss';
 
@@ -35,19 +34,17 @@ const KIND_OPTIONS: { value: GradingKind; label: string; hint: string }[] = [
  * "Catalog" here and "quiz" in the code (createQuiz, activity_type.quiz_name) are the same
  * concept — see CLAUDE.md's Question Catalogs section.
  *
- * `courses` is passed in rather than fetched here, same reasoning as CreateQuizModal's own
- * `courses` prop — the parent page already loads the instructor's courses for this same field.
- * Every activity now belongs to exactly one course (activity_type_course), so this is no longer
- * optional the way it was before that requirement existed.
+ * No course field: a catalog has no course of its own — activity_type_course, the table that used
+ * to require picking one here, is gone. A catalog is created owned only by its instructor and
+ * becomes visible to students once composed into an assembled_quiz (GitHub #360,
+ * app/instructor/assembled-quizzes/page.tsx) for a course.
  */
 export function CreateCatalogModal({
   token,
-  courses,
   onClose,
   onCreated,
 }: {
   token: string;
-  courses: CourseSummary[];
   onClose: () => void;
   onCreated: (quiz: CreatedQuiz) => void;
 }) {
@@ -56,7 +53,6 @@ export function CreateCatalogModal({
   // Starts null with no pre-selection: "creation cannot proceed without this choice" only holds
   // if there is no kind the instructor can accept by simply not looking at the field.
   const [gradingKind, setGradingKind] = useState<GradingKind | null>(null);
-  const [courseId, setCourseId] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -65,7 +61,7 @@ export function CreateCatalogModal({
     isBlocked: submitting,
   });
 
-  const canSubmit = Boolean(name.trim()) && gradingKind !== null && Boolean(courseId) && !submitting;
+  const canSubmit = Boolean(name.trim()) && gradingKind !== null && !submitting;
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -76,7 +72,6 @@ export function CreateCatalogModal({
 
     const result = await createQuiz(token, {
       name: name.trim(),
-      courseId,
       gradingKind: gradingKind!,
       description: description.trim() || undefined,
     });
@@ -186,27 +181,6 @@ export function CreateCatalogModal({
               This cannot be changed after the catalog is created.
             </p>
           </fieldset>
-
-          <label className="mb-1.5 mt-4 block text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted">
-            Course
-            <select
-              value={courseId}
-              onChange={(event) => setCourseId(event.target.value)}
-              className="mt-1.5 block w-full rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none transition focus:border-brand-purple"
-            >
-              <option value="">Select a course…</option>
-              {courses.map((course) => (
-                <option key={course.id} value={course.id}>
-                  {course.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          {courses.length === 0 ? (
-            <p className="mt-1.5 text-xs font-semibold text-brand-ink-muted">
-              You don&apos;t have any courses yet — create one on the Courses page first.
-            </p>
-          ) : null}
 
           {error ? <p className="mt-3 text-xs font-bold text-brand-danger">{error}</p> : null}
 

@@ -5,13 +5,6 @@ export type ActivityFilterValue = 'all' | ActivityType;
 export type StatusFilterValue = 'all' | ActivityResultState;
 export type SortOrder = 'newest' | 'oldest' | 'highest' | 'lowest';
 
-const ACTIVITY_OPTIONS: { value: ActivityFilterValue; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'IDENTIFY_WEAK_USER_STORIES', label: 'Weak User Stories' },
-  { value: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', label: 'Weak Acceptance Criteria' },
-  { value: 'WRITE_ACCEPTANCE_CRITERIA', label: 'Write Acceptance Criteria' },
-];
-
 const STATUS_OPTIONS: { value: StatusFilterValue; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'passed', label: 'Passed' },
@@ -43,9 +36,17 @@ function PillButton({ active, onClick, children }: { active: boolean; onClick: (
   );
 }
 
-/** Activity + status filters (pills, so the current selection reads at a glance) plus a sort order — all controlled from the Activity Log page so filtering/sorting stays a single, testable state object. */
+/**
+ * Activity + status filters (pills, so the current selection reads at a glance) plus a sort order
+ * — all controlled from the Activity Log page so filtering/sorting stays a single, testable state
+ * object. `activityOptions` is the caller's derived "what has this student actually attempted"
+ * list (lib/activityLogTypes.ts's deriveActivityFilterOptions) — "All" is injected here rather
+ * than required from the caller, so it can never be dropped and an empty `activityOptions` still
+ * renders a usable (if single-pill) filter.
+ */
 export function ActivityFilters({
   activity,
+  activityOptions,
   status,
   sort,
   onActivityChange,
@@ -53,18 +54,24 @@ export function ActivityFilters({
   onSortChange,
 }: {
   activity: ActivityFilterValue;
+  activityOptions: { value: ActivityFilterValue; label: string }[];
   status: StatusFilterValue;
   sort: SortOrder;
   onActivityChange: (value: ActivityFilterValue) => void;
   onStatusChange: (value: StatusFilterValue) => void;
   onSortChange: (value: SortOrder) => void;
 }) {
+  const allActivityOptions: { value: ActivityFilterValue; label: string }[] = [
+    { value: 'all', label: 'All' },
+    ...activityOptions,
+  ];
+
   return (
     <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="mr-0.5 text-[11px] font-extrabold uppercase tracking-wide text-gray-400">Activity</span>
-          {ACTIVITY_OPTIONS.map((option) => (
+          {allActivityOptions.map((option) => (
             <PillButton key={option.value} active={activity === option.value} onClick={() => onActivityChange(option.value)}>
               {option.label}
             </PillButton>

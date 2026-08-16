@@ -71,7 +71,7 @@ function targetRow(overrides: Partial<Record<string, unknown>> = {}) {
   return { username: 'ada', avatar_url: null, biography: 'Hello!', role: 'student', ...overrides };
 }
 
-/** Queues the full happy-path chain: target row, target's courses, shared course, score, titles. */
+/** Queues the full happy-path chain: target row, target's courses, shared course, score, titles, ladder. */
 function queueHappyPath(options: { targetCourseIds?: string[]; sharedCourseIds?: string[] } = {}) {
   queue('user', { data: targetRow(), error: null });
   queue('student_course', { data: (options.targetCourseIds ?? ['course-1']).map((id) => ({ course_id: id })), error: null });
@@ -82,6 +82,21 @@ function queueHappyPath(options: { targetCourseIds?: string[]; sharedCourseIds?:
   });
   queue('session_log', {
     data: [{ activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 1, passed: true }],
+    error: null,
+  });
+  queue('title_definition', {
+    data: [{ activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 1, title_name: 'Requirements Novice' }],
+    error: null,
+  });
+  // availableTitles: the target's own course-scoped activity list, plus its full ladder.
+  queue('assembled_quiz_catalog', {
+    data: [
+      {
+        activity_type: 'IDENTIFY_WEAK_USER_STORIES',
+        catalog: { quiz_name: 'Identify Weak User Stories', description: null },
+        assembled_quiz: { course_id: 'course-1', course: { course_name: 'Course 1' } },
+      },
+    ],
     error: null,
   });
   queue('title_definition', {
@@ -164,6 +179,19 @@ describe('GET /api/students/{studentId}/public-profile', () => {
       biography: 'Hello!',
       score: 100,
       titles: [{ activityType: 'IDENTIFY_WEAK_USER_STORIES', difficultyLevel: 1, title: 'Requirements Novice' }],
+      availableTitles: [
+        {
+          activityType: 'IDENTIFY_WEAK_USER_STORIES',
+          activityName: 'Identify Weak User Stories',
+          courseId: 'course-1',
+          courseName: 'Course 1',
+          titles: [
+            { difficultyLevel: 1, title: 'Requirements Novice' },
+            { difficultyLevel: 2, title: null },
+            { difficultyLevel: 3, title: null },
+          ],
+        },
+      ],
     });
   });
 

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 type Result = { data?: unknown; error?: unknown };
 
 // Same hoisted queue-per-table harness as the MCQ sessions test, plus `in`/`limit` so
-// isEnrolledInAnyCourse's chain resolves.
+// getAccessibleCourseForActivity's chain resolves.
 const h = vi.hoisted(() => {
   const state = {
     queues: {} as Record<string, Result[]>,
@@ -102,10 +102,17 @@ function queueGradingKind(gradingKind: string | null) {
   queue('activity_type', { data: gradingKind === null ? null : { grading_kind: gradingKind }, error: null });
 }
 
-/** checkActivityAccess: the activity is linked to a course, and the caller is enrolled in it. */
+/**
+ * checkActivityAccess: the caller is enrolled in a course, and some assembled_quiz in that course
+ * composes this catalog. getAccessibleCourseForActivity queries student_course (the caller's own
+ * enrolled courses) before assembled_quiz_catalog, so student_course is queued first here too.
+ */
 function queueEnrolled() {
-  queue('activity_type_course', { data: { course_id: 'course-1', course: { course_name: 'SE' } }, error: null });
   queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
+  queue('assembled_quiz_catalog', {
+    data: [{ assembled_quiz: { course_id: 'course-1', course: { course_name: 'SE' } } }],
+    error: null,
+  });
 }
 
 /**
@@ -167,9 +174,10 @@ describe('POST /api/activities/[activityType]/llm/sessions', () => {
 
   // The gate the hardcoded route never had: enrollment is the entire visibility rule for a
   // course-scoped activity.
-  it('returns 403 when the activity is not linked to any course', async () => {
+  it('returns 403 when no assembled quiz composes this catalog for a course the caller is in', async () => {
     queueGradingKind('llm-graded');
-    queue('activity_type_course', { data: null, error: null });
+    queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
+    queue('assembled_quiz_catalog', { data: [], error: null });
 
     const response = await POST(req(), PARAMS());
 
@@ -178,10 +186,11 @@ describe('POST /api/activities/[activityType]/llm/sessions', () => {
     expect(h.state.inserts).toHaveLength(0);
   });
 
-  it('returns 403 when the caller is not enrolled in the linked course', async () => {
+  it('returns 403 when the caller is not enrolled in the course that grants access', async () => {
     queueGradingKind('llm-graded');
-    queue('activity_type_course', { data: { course_id: 'course-1', course: { course_name: 'SE' } }, error: null });
-    queue('student_course', { data: [], error: null });
+    // Enrolled, but in a different course than the one whose assembled quiz composes this catalog.
+    queue('student_course', { data: [{ course_id: 'course-2' }], error: null });
+    queue('assembled_quiz_catalog', { data: [], error: null });
 
     const response = await POST(req(), PARAMS());
 

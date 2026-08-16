@@ -18,13 +18,12 @@ export type QuizSummary = {
   /** Questions for an 'mcq' catalog, prompts for an 'llm-graded' one — a catalog only ever fills
    *  one pool, so one field covers both. */
   questionCount: number;
-  /** The course this activity is linked to (activity_type_course), or null if unlinked — an
-   *  unlinked activity isn't visible to any student yet. */
-  courseId: string | null;
-  courseName: string | null;
+  /** How many assembled quizzes (GitHub #360) currently reference this catalog — a catalog has no
+   *  course of its own, so this is what the browse page shows instead. */
+  quizCount: number;
 };
 
-export type QuizMeta = Omit<QuizSummary, 'questionCount'>;
+export type QuizMeta = Omit<QuizSummary, 'questionCount' | 'quizCount'>;
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number; error: string };
 
@@ -57,11 +56,10 @@ export function loadQuizzes(token: string): Promise<ApiResult<{ quizzes: QuizSum
 }
 
 /**
- * Creates a named quiz, linked to one of the instructor's own courses (POST /api/activities/types).
- * The stored key is derived server-side from name — never sent by the caller — and reported back
- * so the create form can show it if useful. courseId is required now: a course-less activity is
- * not a valid end state (see activity_type_course's own header comment in supabase/schema.sql) —
- * no student could ever see or start a session against one.
+ * Creates a named question catalog, owned only by the creating instructor (POST /api/activities/types)
+ * — a catalog has no course of its own; it becomes visible to students once composed into an
+ * assembled_quiz (GitHub #360) for one. The stored key is derived server-side from name — never
+ * sent by the caller — and reported back so the create form can show it if useful.
  *
  * GitHub #379: gradingKind is required here rather than optional-with-a-default, which is the
  * compile-time half of "creation cannot proceed without this choice" — the route enforces the
@@ -72,13 +70,11 @@ export type CreatedQuiz = {
   name: string;
   description: string | null;
   gradingKind: GradingKind;
-  courseId: string;
-  courseName: string;
 };
 
 export function createQuiz(
   token: string,
-  input: { name: string; courseId: string; gradingKind: GradingKind; description?: string },
+  input: { name: string; gradingKind: GradingKind; description?: string },
 ): Promise<ApiResult<{ quiz: CreatedQuiz }>> {
   return request<{ quiz: CreatedQuiz }>(
     '/api/activities/types',

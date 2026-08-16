@@ -143,8 +143,6 @@ describe('GET /api/instructor/quizzes/[activityType]', () => {
       description: null,
       authorName: 'Built-in',
       gradingKind: 'mcq',
-      courseId: null,
-      courseName: null,
     });
 
     expect(body.questions).toHaveLength(2);

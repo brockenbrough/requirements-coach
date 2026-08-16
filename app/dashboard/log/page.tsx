@@ -11,8 +11,9 @@ import {
 } from '../../../components/ActivityFilters';
 import { ActivityLogTable } from '../../../components/ActivityLogTable';
 import { ActivityStatsCards } from '../../../components/ActivityStatsCards';
-import { resultStateOf, toActivityLogEntry, type ActivityLogEntry } from '../../../lib/activityLogTypes';
-import { loadActivityLog } from '../../../lib/sessionClient';
+import { deriveActivityFilterOptions, resultStateOf, toActivityLogEntry, type ActivityLogEntry } from '../../../lib/activityLogTypes';
+import type { AvailableActivityTitles } from '../../../lib/leaderboardTypes';
+import { loadActivityLog, loadAvailableTitles } from '../../../lib/sessionClient';
 import { useRequireRole } from '../../../lib/useRequireRole';
 
 const PAGE_SIZE = 8;
@@ -24,6 +25,7 @@ export default function ActivityLogPage() {
 
   const [entries, setEntries] = useState<ActivityLogEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [availableTitles, setAvailableTitles] = useState<AvailableActivityTitles[]>([]);
 
   const [activity, setActivity] = useState<ActivityFilterValue>('all');
   const [status, setStatus] = useState<StatusFilterValue>('all');
@@ -42,10 +44,29 @@ export default function ActivityLogPage() {
       else setError(result.error);
     });
 
+    // Not blocking, and no dedicated error state: this only ever upgrades a custom quiz's filter
+    // label from its raw activity_type key to the real activity_type.quiz_name (see
+    // deriveActivityFilterOptions below) — a failure just leaves labels at their entries-only
+    // fallback rather than breaking the filter.
+    loadAvailableTitles(token, profile.user_id).then((result) => {
+      if (cancelled) return;
+      if (result.ok) setAvailableTitles(result.data.activities);
+    });
+
     return () => {
       cancelled = true;
     };
   }, [token, profile?.user_id]);
+
+  const nameByType = useMemo(
+    () => new Map(availableTitles.map((entry) => [entry.activityType, entry.activityName])),
+    [availableTitles],
+  );
+
+  const activityOptions = useMemo(
+    () => deriveActivityFilterOptions(entries ?? [], nameByType),
+    [entries, nameByType],
+  );
 
   // Filtering/sorting stays client-side over the full fetched list — the same shape GitHub #48
   // was originally built against, just sourced from the API now.
@@ -102,6 +123,7 @@ export default function ActivityLogPage() {
 
             <ActivityFilters
               activity={activity}
+              activityOptions={activityOptions}
               status={status}
               sort={sort}
               onActivityChange={handleActivityChange}
