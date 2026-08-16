@@ -5,6 +5,7 @@
 // catalog" in that issue are the same activity_type-backed concept — see CLAUDE.md.
 
 import type { CatalogQuestion } from './quizQuestionTypes';
+import type { CatalogUserStory } from './acceptanceCriteriaTypes';
 import type { GradingKind } from './activityTypes';
 
 export type QuizSummary = {
@@ -91,16 +92,18 @@ export function createQuiz(
 }
 
 /**
- * One catalog's metadata plus every question it contains (GET /api/instructor/quizzes/{activityType},
+ * One catalog's metadata plus its contents (GET /api/instructor/quizzes/{activityType},
  * GitHub #359) — not cached, same reasoning as loadPublicStudentProfile: the data is shared across
  * authors, so a per-instructor client cache would only make it easier to show a colleague's stale
  * edit.
+ *
+ * GitHub #379: both pools always come back, one of them empty — read quiz.gradingKind to know
+ * which one is the real content.
  */
-export function loadQuizDetail(
-  token: string,
-  activityType: string,
-): Promise<ApiResult<{ quiz: QuizMeta; questions: CatalogQuestion[] }>> {
-  return request<{ quiz: QuizMeta; questions: CatalogQuestion[] }>(
+export type QuizDetail = { quiz: QuizMeta; questions: CatalogQuestion[]; userStories: CatalogUserStory[] };
+
+export function loadQuizDetail(token: string, activityType: string): Promise<ApiResult<QuizDetail>> {
+  return request<QuizDetail>(
     `/api/instructor/quizzes/${encodeURIComponent(activityType)}`,
     { method: 'GET' },
     token,

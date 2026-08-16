@@ -4,6 +4,7 @@
 
 import type { SupabaseClient } from './sessionQueries';
 import type { CatalogQuestion } from './quizQuestionTypes';
+import type { CatalogUserStory } from './acceptanceCriteriaTypes';
 import type { ActivityType, GradingKind } from './activityTypes';
 import { isGradingKind } from './activityTypes';
 
@@ -187,4 +188,45 @@ export async function listCatalogQuestions(supabase: SupabaseClient, activityTyp
   });
 
   return { questions, error: null };
+}
+
+type CatalogUserStoryRow = {
+  user_story_id: string;
+  story_text: string;
+  difficulty_level: number;
+  creator_id: string | null;
+};
+
+/**
+ * GitHub #379: every prompt in one LLM-graded catalog, any author — the free-text counterpart to
+ * listCatalogQuestions above, and read by the same catalog detail page.
+ *
+ * Same "catalogs are shared" scoping decision as that function: this returns the whole catalog
+ * rather than only the caller's own rows (which is what GET /api/instructor/user-stories does),
+ * and ownerId travels along so the page can decide whose rows get Edit/Delete icons without a
+ * second round trip.
+ *
+ * Ordered by level, then by text. There is no order_number on user_story the way there is on
+ * question, so text is the tiebreaker — it is stable and it makes the list read alphabetically
+ * within a level rather than in whatever order Postgres happens to return.
+ */
+export async function listCatalogUserStories(supabase: SupabaseClient, activityType: string) {
+  const { data, error } = await supabase
+    .from('user_story')
+    .select('user_story_id, story_text, difficulty_level, creator_id')
+    .eq('activity_type', activityType)
+    .order('difficulty_level', { ascending: true })
+    .order('story_text', { ascending: true });
+
+  if (error) return { userStories: null, error };
+
+  const userStories: CatalogUserStory[] = ((data ?? []) as unknown as CatalogUserStoryRow[]).map((row) => ({
+    id: row.user_story_id,
+    activityType: activityType as ActivityType,
+    level: row.difficulty_level as 1 | 2 | 3,
+    storyText: row.story_text,
+    ownerId: row.creator_id,
+  }));
+
+  return { userStories, error: null };
 }

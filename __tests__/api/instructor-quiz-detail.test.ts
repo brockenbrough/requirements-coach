@@ -207,3 +207,62 @@ describe('GET /api/instructor/quizzes/[activityType]', () => {
     expect(body.error).toBe('question query failed');
   });
 });
+
+// GitHub #379: an llm-graded catalog returns its prompts instead of questions. Both keys are
+// always present so the client reads quiz.gradingKind rather than narrowing the response shape.
+describe('GET /api/instructor/quizzes/[activityType] — llm-graded catalogs', () => {
+  it('returns the prompts and an empty questions array, without querying question', async () => {
+    queueRole('instructor');
+    queue('activity_type', {
+      data: quizRow({
+        activity_type: 'WRITE_ACCEPTANCE_CRITERIA',
+        quiz_name: 'Write Acceptance Criteria',
+        grading_kind: 'llm-graded',
+      }),
+      error: null,
+    });
+    queue('user_story', {
+      data: [
+        { user_story_id: 'story-1', story_text: 'As a shopper, I want a cart.', difficulty_level: 1, creator_id: 'instructor-1' },
+        { user_story_id: 'story-2', story_text: 'As a rider, I want an ETA.', difficulty_level: 2, creator_id: null },
+      ],
+      error: null,
+    });
+
+    const res = await req('WRITE_ACCEPTANCE_CRITERIA');
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.quiz.gradingKind).toBe('llm-graded');
+    expect(body.questions).toEqual([]);
+    expect(body.userStories).toEqual([
+      {
+        id: 'story-1',
+        activityType: 'WRITE_ACCEPTANCE_CRITERIA',
+        level: 1,
+        storyText: 'As a shopper, I want a cart.',
+        ownerId: 'instructor-1',
+      },
+      {
+        id: 'story-2',
+        activityType: 'WRITE_ACCEPTANCE_CRITERIA',
+        level: 2,
+        storyText: 'As a rider, I want an ETA.',
+        ownerId: null,
+      },
+    ]);
+
+    expect(h.state.tables).not.toContain('question');
+  });
+
+  it('returns 500 when the prompt query fails', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded' }), error: null });
+    queue('user_story', { data: null, error: { message: 'DB down' } });
+
+    const res = await req('WRITE_ACCEPTANCE_CRITERIA');
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe('DB down');
+  });
+});

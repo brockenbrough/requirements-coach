@@ -37,3 +37,21 @@ export type InstructorUserStoryEntry = {
   difficultyLevel: 1 | 2 | 3;
   activityType: ActivityType;
 };
+
+/**
+ * One prompt in an LLM-graded catalog, any author, as the catalog detail page shows it
+ * (GitHub #379) — the free-text counterpart to CatalogQuestion in lib/quizQuestionTypes.ts.
+ *
+ * A third type rather than a reuse of InstructorUserStoryEntry above, for the same reason
+ * CatalogQuestion is a separate type from QuizQuestion: that one is scoped to rows the caller
+ * authored, so it has no need to say who owns each row. This one deliberately returns every
+ * prompt in the catalog regardless of author, which is exactly what makes `ownerId` necessary —
+ * it's what lets the page decide whose rows get Edit/Delete without a second round trip.
+ */
+export type CatalogUserStory = {
+  id: string;
+  activityType: ActivityType;
+  level: 1 | 2 | 3;
+  storyText: string;
+  ownerId: string | null;
+};

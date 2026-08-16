@@ -235,3 +235,55 @@ export async function submitAcceptanceCriteria(
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// Prompt authoring (GitHub #379)
+//
+// The instructor-facing counterpart to createQuestion/updateQuestion/deleteQuestion, which live in
+// lib/sessionClient.ts for historical reasons — a student-flow client owning instructor CRUD is an
+// oddity worth not repeating, so the prompt equivalents live here, next to everything else that
+// talks about user_story rows.
+// ---------------------------------------------------------------------------
+
+export type UserStoryDraft = {
+  storyText: string;
+  activityType: string;
+  difficultyLevel: 1 | 2 | 3;
+};
+
+/** Adds a prompt to an LLM-graded catalog (POST /api/instructor/user-stories). */
+export function createUserStory(
+  token: string,
+  input: UserStoryDraft,
+): Promise<ApiResult<{ userStoryId: string }>> {
+  return request<{ userStoryId: string }>("/api/instructor/user-stories", postJson(input), token);
+}
+
+/** Edits a prompt the caller authored (PATCH /api/instructor/user-stories/{userStoryId}). */
+export function updateUserStory(
+  token: string,
+  userStoryId: string,
+  input: UserStoryDraft,
+): Promise<ApiResult<{ userStoryId: string }>> {
+  return request<{ userStoryId: string }>(
+    `/api/instructor/user-stories/${encodeURIComponent(userStoryId)}`,
+    { ...postJson(input), method: "PATCH" },
+    token,
+  );
+}
+
+/**
+ * Removes a prompt the caller authored (DELETE /api/instructor/user-stories/{userStoryId}).
+ * A 409 here means the prompt has already reached a student and is not deletable — surfaced as-is
+ * so the page can show the route's own explanation.
+ */
+export function deleteUserStory(
+  token: string,
+  userStoryId: string,
+): Promise<ApiResult<{ userStoryId: string }>> {
+  return request<{ userStoryId: string }>(
+    `/api/instructor/user-stories/${encodeURIComponent(userStoryId)}`,
+    { method: "DELETE" },
+    token,
+  );
+}
