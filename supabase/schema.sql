@@ -105,12 +105,6 @@ CREATE TABLE question_to_answer (
     answer_id uuid NOT NULL,
     PRIMARY KEY (question_to_answer_id));
 
-CREATE TABLE badge (
-    badge_id uuid NOT NULL,
-    badge_name text NOT NULL,
-    badge_image_uri text,
-    PRIMARY KEY (badge_id));
-
 -- ---------------------------------------------------------------------
 -- User Story Bank
 --
@@ -196,13 +190,6 @@ CREATE TABLE title_definition (
     difficulty_level      int2        NOT NULL,
     title_name            text        NOT NULL,
     PRIMARY KEY (title_definition_id));
-
-CREATE TABLE user_badge (
-    user_badge_id uuid NOT NULL,
-    created_at timestamp NOT NULL,
-    user_id uuid NOT NULL,
-    badge_id uuid NOT NULL,
-    PRIMARY KEY (user_badge_id));
 
 -- ---------------------------------------------------------------------
 -- REQ-DL-5: Course Enrollment Storage
@@ -352,7 +339,6 @@ CREATE TABLE session_log (
     cumulative_score int4        NOT NULL DEFAULT 0,
     max_score        int4        NOT NULL DEFAULT 100,
     passed           bool        NOT NULL DEFAULT false,
-    badge_id         uuid,
     PRIMARY KEY (session_id));
 
 -- The 4 drawn questions, analogous to question_to_answer.
@@ -453,9 +439,6 @@ ALTER TABLE activity_type ADD CONSTRAINT fk_activity_type_user FOREIGN KEY (crea
 ALTER TABLE question_to_answer ADD CONSTRAINT fk_question_to_answer_question FOREIGN KEY (question_id) REFERENCES question (question_id);
 ALTER TABLE question_to_answer ADD CONSTRAINT fk_question_to_answer_answer FOREIGN KEY (answer_id) REFERENCES answer (answer_id);
 
-ALTER TABLE user_badge ADD CONSTRAINT fk_user_badge_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
-ALTER TABLE user_badge ADD CONSTRAINT fk_user_badge_badge FOREIGN KEY (badge_id) REFERENCES badge (badge_id);
-
 -- REQ-DL-5: course belongs to one instructor. No ON DELETE clause, same reasoning as
 -- fk_question_user — a deleted instructor account should not silently cascade-delete courses.
 ALTER TABLE course ADD CONSTRAINT fk_course_user FOREIGN KEY (creator_id) REFERENCES "user" (user_id);
@@ -502,7 +485,6 @@ ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_answer
 ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_session FOREIGN KEY (session_id) REFERENCES session_log (session_id) ON DELETE CASCADE;
 
 ALTER TABLE session_log ADD CONSTRAINT fk_session_log_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
-ALTER TABLE session_log ADD CONSTRAINT fk_session_log_badge FOREIGN KEY (badge_id) REFERENCES badge (badge_id);
 ALTER TABLE session_log ADD CONSTRAINT fk_session_log_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
 
 ALTER TABLE session_to_question ADD CONSTRAINT fk_session_to_question_session FOREIGN KEY (session_id) REFERENCES session_log (session_id) ON DELETE CASCADE;
@@ -731,7 +713,7 @@ ALTER TABLE daily_challenge_attempt ENABLE ROW LEVEL SECURITY;
 -- SELECT is the only policy needed here.
 --
 -- Still open, same class of problem, out of scope for this change:
--- badge, user_badge and title_definition have no RLS either.
+-- title_definition has no RLS either.
 ALTER TABLE "user" ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY own_user_select ON "user"
@@ -790,8 +772,8 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 --
 --   DROP TABLE IF EXISTS session_to_question, session_to_user_story,
 --                        answered_question_log, session_log,
---                        question_to_answer, answer, question, user_badge,
---                        badge, title_definition, activity_type CASCADE;
+--                        question_to_answer, answer, question,
+--                        title_definition, activity_type CASCADE;
 --                        user_story, submission, instructor_llm_config,
 --                        student_course, course CASCADE;
 --   DROP FUNCTION IF EXISTS bump_session_score() CASCADE;

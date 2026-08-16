@@ -25,7 +25,6 @@ const EXPORT_COLUMNS = [
   'passed',
   'questionCount',
   'answeredCount',
-  'badgeId',
 ];
 
 /**
@@ -90,7 +89,6 @@ export async function GET(request: Request, { params }: { params: { id: string }
     a.passed,
     a.questionCount,
     a.answeredCount,
-    a.badge_id,
   ]);
 
   const csv = toCsv(EXPORT_COLUMNS, rows);

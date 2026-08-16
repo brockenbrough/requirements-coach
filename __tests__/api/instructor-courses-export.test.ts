@@ -74,7 +74,6 @@ function sessionRow(overrides: Partial<Record<string, unknown>> = {}) {
     cumulative_score: 3,
     max_score: 4,
     passed: true,
-    badge_id: null,
     student: { first_name: 'Alex', last_name: 'Chen', username: 'achen', role: 'student' },
     ...overrides,
   };
@@ -144,8 +143,8 @@ describe('GET /api/instructor/courses/[id]/export', () => {
     const csv = await res.text();
     expect(csv).not.toMatch(/Alex|Chen|achen/);
     expect(csv).toBe(
-      'studentId,activityType,difficultyLevel,status,startedAt,endedAt,cumulativeScore,maxScore,passed,questionCount,answeredCount,badgeId\r\n' +
-        'student-1,IDENTIFY_WEAK_USER_STORIES,1,completed,2026-08-01T10:00:00Z,2026-08-01T10:10:00Z,3,4,true,0,0,\r\n',
+      'studentId,activityType,difficultyLevel,status,startedAt,endedAt,cumulativeScore,maxScore,passed,questionCount,answeredCount\r\n' +
+        'student-1,IDENTIFY_WEAK_USER_STORIES,1,completed,2026-08-01T10:00:00Z,2026-08-01T10:10:00Z,3,4,true,0,0\r\n',
     );
   });
 
@@ -158,7 +157,7 @@ describe('GET /api/instructor/courses/[id]/export', () => {
     expect(res.status).toBe(200);
     const csv = await res.text();
     expect(csv).toBe(
-      'studentId,activityType,difficultyLevel,status,startedAt,endedAt,cumulativeScore,maxScore,passed,questionCount,answeredCount,badgeId\r\n',
+      'studentId,activityType,difficultyLevel,status,startedAt,endedAt,cumulativeScore,maxScore,passed,questionCount,answeredCount\r\n',
     );
     expect(h.state.tables).not.toContain('session_log');
   });

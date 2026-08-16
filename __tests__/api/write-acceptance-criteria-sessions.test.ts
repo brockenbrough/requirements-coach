@@ -70,7 +70,6 @@ const sessionRow = {
   cumulative_score: 0,
   max_score: 40,
   passed: false,
-  badge_id: null,
 };
 
 const pool = Array.from({ length: 6 }, (_, i) => ({ user_story_id: `story-${i + 1}` }));

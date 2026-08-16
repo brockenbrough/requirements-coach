@@ -32,7 +32,6 @@ const SESSION: InstructorActivityEntry = {
   cumulative_score: 4,
   max_score: 4,
   passed: true,
-  badge_id: null,
   questionCount: 4,
   answeredCount: 4,
   studentId: 'student-1',
