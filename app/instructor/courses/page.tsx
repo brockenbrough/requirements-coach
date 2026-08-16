@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { AppShell } from '../../../components/AppShell';
 import { CourseCard } from '../../../components/CourseCard';
 import { CreateCourseModal } from '../../../components/CreateCourseModal';
+import { DuplicateCourseModal } from '../../../components/DuplicateCourseModal';
 import { loadCourses, type CourseSummary } from '../../../lib/courseClient';
 import { useRequireRole } from '../../../lib/useRequireRole';
 
@@ -26,6 +27,7 @@ export default function InstructorCoursesPage() {
   const [loadFailed, setLoadFailed] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [duplicateSource, setDuplicateSource] = useState<CourseSummary | null>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -91,7 +93,7 @@ export default function InstructorCoursesPage() {
         ) : (
           <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
             {courses.map((course) => (
-              <CourseCard key={course.id} course={course} />
+              <CourseCard key={course.id} course={course} onDuplicate={setDuplicateSource} />
             ))}
           </div>
         )}
@@ -101,6 +103,15 @@ export default function InstructorCoursesPage() {
         <CreateCourseModal
           token={token}
           onClose={() => setShowCreateModal(false)}
+          onCreated={(course) => setCourses((current) => [course, ...(current ?? [])])}
+        />
+      ) : null}
+
+      {duplicateSource ? (
+        <DuplicateCourseModal
+          course={duplicateSource}
+          token={token}
+          onClose={() => setDuplicateSource(null)}
           onCreated={(course) => setCourses((current) => [course, ...(current ?? [])])}
         />
       ) : null}

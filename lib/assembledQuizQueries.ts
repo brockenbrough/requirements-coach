@@ -35,6 +35,21 @@ type AssembledQuizRow = {
   assembled_quiz_catalog: { catalog: { quiz_name: string } | null }[] | null;
 };
 
+const ASSEMBLED_QUIZ_SUMMARY_SELECT =
+  'assembled_quiz_id, quiz_name, description, course_id, created_at, course:course_id(course_name), assembled_quiz_catalog(catalog:activity_type(quiz_name))';
+
+function mapAssembledQuizRow(row: AssembledQuizRow): AssembledQuizSummary {
+  return {
+    id: row.assembled_quiz_id,
+    name: row.quiz_name,
+    description: row.description,
+    courseId: row.course_id,
+    courseName: row.course?.course_name ?? 'Unknown course',
+    catalogNames: (row.assembled_quiz_catalog ?? []).map((link) => link.catalog?.quiz_name ?? 'Unknown catalog'),
+    createdAt: row.created_at,
+  };
+}
+
 /**
  * Every assembled quiz the calling instructor created, newest first — scoped to creator_id like
  * listCoursesForInstructor (lib/courseQueries.ts): courses aren't shared the way catalogs are,
@@ -43,24 +58,34 @@ type AssembledQuizRow = {
 export async function listAssembledQuizzesForInstructor(supabase: SupabaseClient, instructorId: string) {
   const { data, error } = await supabase
     .from('assembled_quiz')
-    .select(
-      'assembled_quiz_id, quiz_name, description, course_id, created_at, course:course_id(course_name), assembled_quiz_catalog(catalog:activity_type(quiz_name))',
-    )
+    .select(ASSEMBLED_QUIZ_SUMMARY_SELECT)
     .eq('creator_id', instructorId)
     .order('created_at', { ascending: false });
 
   if (error) return { quizzes: null, error };
 
-  const quizzes: AssembledQuizSummary[] = ((data ?? []) as unknown as AssembledQuizRow[]).map((row) => ({
-    id: row.assembled_quiz_id,
-    name: row.quiz_name,
-    description: row.description,
-    courseId: row.course_id,
-    courseName: row.course?.course_name ?? 'Unknown course',
-    catalogNames: (row.assembled_quiz_catalog ?? []).map((link) => link.catalog?.quiz_name ?? 'Unknown catalog'),
-    createdAt: row.created_at,
-  }));
+  const quizzes = ((data ?? []) as unknown as AssembledQuizRow[]).map(mapAssembledQuizRow);
+  return { quizzes, error: null };
+}
 
+/**
+ * Every assembled quiz belonging to one course, newest first — the course detail page's own
+ * "Quizzes" section (GitHub #362 follow-up). Same row shape and embed as
+ * listAssembledQuizzesForInstructor just above (mapAssembledQuizRow is shared between the two so
+ * the mapping can't drift), scoped by course_id instead of creator_id: a course's quizzes are
+ * exactly the assembled_quiz rows that name it, regardless of which of this course's
+ * collaborators — today, only its one owning instructor, courses aren't shared — created them.
+ */
+export async function listAssembledQuizzesForCourse(supabase: SupabaseClient, courseId: string) {
+  const { data, error } = await supabase
+    .from('assembled_quiz')
+    .select(ASSEMBLED_QUIZ_SUMMARY_SELECT)
+    .eq('course_id', courseId)
+    .order('created_at', { ascending: false });
+
+  if (error) return { quizzes: null, error };
+
+  const quizzes = ((data ?? []) as unknown as AssembledQuizRow[]).map(mapAssembledQuizRow);
   return { quizzes, error: null };
 }
 
@@ -357,4 +382,63 @@ export async function loadCatalogQuestionPool(
   const pool = ((data ?? []) as CatalogQuestionPoolRow[]).filter((question) => !excludedSet.has(question.question_id));
 
   return { pool, error: null };
+}
+
+/**
+ * GitHub #362: copies every assembled_quiz belonging to `sourceCourseId` onto `targetCourseId` —
+ * same quiz_name/description, the same linked catalogs (assembled_quiz_catalog), and the same
+ * per-quiz question exclusions (quiz_excluded_question), all re-pointed at freshly generated
+ * assembled_quiz ids. Reuses createAssembledQuiz rather than inserting assembled_quiz/
+ * assembled_quiz_catalog by hand, so a link-insert failure for one copied quiz already self-cleans
+ * (see that function's own docblock) — the caller only has to roll back the quizzes that *did*
+ * fully insert, which the route above does by deleting the new course itself: fk_assembled_quiz_course
+ * cascades, taking every assembled_quiz/assembled_quiz_catalog/quiz_excluded_question row this
+ * function has written so far with it.
+ *
+ * Deliberately never touches student_course, session_log, or any attempt/score table — those
+ * aren't reachable from a course anywhere in this schema (see CLAUDE.md's Courses section), so
+ * there is nothing here that could carry enrollment or history into the copy even by accident.
+ */
+export async function duplicateQuizzesForCourse(
+  supabase: SupabaseClient,
+  params: { sourceCourseId: string; targetCourseId: string; creatorId: string },
+): Promise<{ copiedCount: number; error: { message: string } | null }> {
+  const { data, error: sourceError } = await supabase
+    .from('assembled_quiz')
+    .select('assembled_quiz_id, quiz_name, description')
+    .eq('course_id', params.sourceCourseId);
+
+  if (sourceError) return { copiedCount: 0, error: sourceError };
+
+  type SourceQuizRow = { assembled_quiz_id: string; quiz_name: string; description: string | null };
+  const sourceQuizzes = (data ?? []) as SourceQuizRow[];
+  let copiedCount = 0;
+
+  for (const sourceQuiz of sourceQuizzes) {
+    const { activityTypes, error: catalogError } = await listQuizCatalogActivityTypes(supabase, sourceQuiz.assembled_quiz_id);
+    if (catalogError) return { copiedCount, error: catalogError };
+
+    const { excludedIds, error: excludedError } = await listQuizExcludedQuestionIds(supabase, sourceQuiz.assembled_quiz_id);
+    if (excludedError) return { copiedCount, error: excludedError };
+
+    const { quiz: newQuiz, error: createError } = await createAssembledQuiz(supabase, {
+      name: sourceQuiz.quiz_name,
+      description: sourceQuiz.description,
+      courseId: params.targetCourseId,
+      creatorId: params.creatorId,
+      catalogActivityTypes: activityTypes ?? [],
+    });
+    if (createError || !newQuiz) return { copiedCount, error: createError };
+
+    if ((excludedIds ?? []).length > 0) {
+      const { error: exclusionsError } = await supabase.from('quiz_excluded_question').insert(
+        (excludedIds ?? []).map((questionId) => ({ assembled_quiz_id: newQuiz.id, question_id: questionId })),
+      );
+      if (exclusionsError) return { copiedCount, error: exclusionsError };
+    }
+
+    copiedCount++;
+  }
+
+  return { copiedCount, error: null };
 }

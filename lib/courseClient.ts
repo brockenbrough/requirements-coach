@@ -6,6 +6,7 @@
 // genuinely different audiences/routes, not a style variant of each other.
 
 import type { CourseDetail, CourseMeta, CourseStudent, CourseSummary } from './courseTypes';
+import type { AssembledQuizSummary } from './assembledQuizClient';
 import { toInstant } from './dateTime';
 
 export type { CourseDetail, CourseMeta, CourseStudent, CourseSummary } from './courseTypes';
@@ -91,6 +92,25 @@ export async function loadCourse(token: string, courseId: string): Promise<ApiRe
   return { ok: true, data: { course: { ...course, createdAt: toInstant(course.createdAt), students } } };
 }
 
+/**
+ * Duplicates a course's setup — quizzes and settings, never enrollments or attempt history
+ * (GitHub #362, POST /api/instructor/courses/{id}/duplicate). Returns the new course in the same
+ * CourseSummary shape createCourse does (studentCount always 0 here — see the route's own
+ * comment), so both can feed the same list-prepend logic on app/instructor/courses/page.tsx.
+ *
+ * No enrollmentKey parameter, for the same reason createCourse has none.
+ */
+export async function duplicateCourse(token: string, courseId: string, params: { name: string }): Promise<ApiResult<{ course: CourseSummary }>> {
+  const result = await request<{ course: CourseSummary }>(
+    `/api/instructor/courses/${encodeURIComponent(courseId)}/duplicate`,
+    postJson({ name: params.name }),
+    token,
+  );
+  if (!result.ok) return result;
+
+  return { ok: true, data: { course: { ...result.data.course, createdAt: toInstant(result.data.course.createdAt) } } };
+}
+
 /** Renames a course (PATCH /api/instructor/courses/{id}). No enrollmentKey — see createCourse. */
 export async function updateCourse(token: string, courseId: string, updates: { name: string }): Promise<ApiResult<{ course: CourseMeta }>> {
   const result = await request<{ course: CourseMeta }>(
@@ -117,6 +137,21 @@ export function deleteCourse(token: string, courseId: string): Promise<ApiResult
   return request<{ courseId: string; unenrolledCount: number }>(
     `/api/instructor/courses/${encodeURIComponent(courseId)}`,
     { method: 'DELETE' },
+    token,
+  );
+}
+
+/**
+ * Every assembled quiz linked to a course (GET /api/instructor/courses/{id}/quizzes, GitHub #362
+ * follow-up) — backs the course detail page's own "Quizzes" section. Same AssembledQuizSummary
+ * shape lib/assembledQuizClient.ts's loadAssembledQuizzes returns, and like that function, leaves
+ * createdAt as the raw server string — this route's caller never displays it, so there's nothing
+ * for toInstant to protect against misreading here.
+ */
+export function loadCourseQuizzes(token: string, courseId: string): Promise<ApiResult<{ quizzes: AssembledQuizSummary[] }>> {
+  return request<{ quizzes: AssembledQuizSummary[] }>(
+    `/api/instructor/courses/${encodeURIComponent(courseId)}/quizzes`,
+    { method: 'GET' },
     token,
   );
 }

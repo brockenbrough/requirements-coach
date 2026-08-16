@@ -4,12 +4,23 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../../../components/AppShell';
-import { AddStudentForm } from '../../../../components/AddStudentForm';
+import { AddStudentModal } from '../../../../components/AddStudentModal';
 import { CopyCodeButton } from '../../../../components/CopyCodeButton';
+import { CourseQuizzesList } from '../../../../components/CourseQuizzesList';
 import { CourseStudentList } from '../../../../components/CourseStudentList';
 import { DeleteCourseModal } from '../../../../components/DeleteCourseModal';
+import { DuplicateCourseModal } from '../../../../components/DuplicateCourseModal';
 import { EditCourseModal } from '../../../../components/EditCourseModal';
-import { exportCourseReport, loadCourse, removeStudentFromCourse, type CourseDetail, type CourseStudent } from '../../../../lib/courseClient';
+import {
+  exportCourseReport,
+  loadCourse,
+  loadCourseQuizzes,
+  removeStudentFromCourse,
+  type CourseDetail,
+  type CourseStudent,
+  type CourseSummary,
+} from '../../../../lib/courseClient';
+import type { AssembledQuizSummary } from '../../../../lib/assembledQuizClient';
 import { useRequireRole } from '../../../../lib/useRequireRole';
 
 function EditIcon() {
@@ -42,6 +53,23 @@ function TrashIcon() {
   );
 }
 
+function DuplicateIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="9" width="12" height="12" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round">
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
 /**
  * GitHub #241 follow-up: one course's detail view — code + roster management. Fully real
  * (lib/courseClient.ts, REQ-DL-5): GET /api/instructor/courses/{id} already embeds the roster
@@ -58,6 +86,12 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
   const [retryCount, setRetryCount] = useState(0);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [duplicateModalOpen, setDuplicateModalOpen] = useState(false);
+  const [duplicatedCourse, setDuplicatedCourse] = useState<CourseSummary | null>(null);
+  const [addStudentModalOpen, setAddStudentModalOpen] = useState(false);
+  const [quizzes, setQuizzes] = useState<AssembledQuizSummary[] | null>(null);
+  const [quizzesLoadFailed, setQuizzesLoadFailed] = useState(false);
+  const [quizzesRetryCount, setQuizzesRetryCount] = useState(0);
   const [error, setError] = useState('');
   const [exporting, setExporting] = useState(false);
 
@@ -77,6 +111,26 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
       cancelled = true;
     };
   }, [token, params.id, retryCount]);
+
+  // A separate, independent load: the Quizzes section (GitHub #362 follow-up) has nothing to do
+  // with the roster/course-meta fetch above, so a failure here shouldn't block the rest of the
+  // page, and its own Retry only refires this effect.
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+
+    setQuizzesLoadFailed(false);
+
+    loadCourseQuizzes(token, params.id).then((result) => {
+      if (cancelled) return;
+      if (result.ok) setQuizzes(result.data.quizzes);
+      else setQuizzesLoadFailed(true);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, params.id, quizzesRetryCount]);
 
   if (loading || !authorized) return null;
   if (!token || !profile) return null;
@@ -133,10 +187,10 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
                 <h1 className="text-2xl font-extrabold text-brand-navy">{course.name}</h1>
                 <div className="mt-1.5 flex flex-wrap items-center gap-2">
                   <span className="text-sm font-semibold tracking-[0.15em] text-brand-purple">{course.code}</span>
+                  <CopyCodeButton code={course.code} variant="icon" ariaLabel="Copy course code" />
                 </div>
               </div>
               <div className="flex flex-none items-center gap-3">
-                <CopyCodeButton code={course.code} />
                 <button
                   type="button"
                   onClick={handleExport}
@@ -145,6 +199,14 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
                 >
                   <DownloadIcon />
                   {exporting ? 'Exporting…' : 'Export CSV'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDuplicateModalOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-full border border-brand-purple/40 bg-white px-4 py-2 text-sm font-extrabold text-brand-purple transition hover:border-brand-purple"
+                >
+                  <DuplicateIcon />
+                  Duplicate course
                 </button>
                 <button
                   type="button"
@@ -172,23 +234,42 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
 
             {error ? <p className="mb-4 text-sm font-semibold text-brand-danger">{error}</p> : null}
 
-            <p className="mb-3 text-xs font-extrabold uppercase tracking-wide text-gray-400">
-              Students ({course.students.length})
-            </p>
-            <div className="mb-6">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-xs font-extrabold uppercase tracking-wide text-gray-400">
+                Students ({course.students.length})
+              </p>
+              <button
+                type="button"
+                onClick={() => setAddStudentModalOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-full bg-brand-purple px-3.5 py-1.5 text-xs font-extrabold text-white transition hover:bg-brand-purple-dark"
+              >
+                <PlusIcon />
+                Add student
+              </button>
+            </div>
+            <div className="mb-8">
               <CourseStudentList students={course.students} onRemove={handleRemove} />
             </div>
 
-            <AddStudentForm
-              token={token}
-              instructorId={profile.user_id}
-              courseId={course.id}
-              enrolledIds={course.students.map((s) => s.id)}
-              onAdded={(student) => {
-                setError('');
-                setCourse((current) => (current ? { ...current, students: [...current.students, student] } : current));
-              }}
-            />
+            <p className="mb-3 text-xs font-extrabold uppercase tracking-wide text-gray-400">
+              Quizzes {quizzes ? `(${quizzes.length})` : ''}
+            </p>
+            {quizzesLoadFailed ? (
+              <div className="rounded-brand-lg border border-brand-danger/40 bg-brand-danger/10 p-4 text-center">
+                <p className="mb-3 text-sm font-semibold text-brand-danger">Failed to load this course&apos;s quizzes.</p>
+                <button
+                  type="button"
+                  onClick={() => setQuizzesRetryCount((count) => count + 1)}
+                  className="rounded-full bg-brand-purple px-4 py-1.5 text-xs font-extrabold text-white transition hover:bg-brand-purple-dark"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : quizzes === null ? (
+              <p className="text-sm font-semibold text-gray-500">Loading…</p>
+            ) : (
+              <CourseQuizzesList quizzes={quizzes} />
+            )}
           </>
         )}
       </div>
@@ -211,6 +292,37 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
           // list refetches on mount (its effect depends on token/retryCount), so the deleted
           // course is gone from it without any cache to invalidate.
           onDeleted={() => router.push('/instructor/courses')}
+        />
+      ) : null}
+
+      {duplicateModalOpen && course ? (
+        <DuplicateCourseModal
+          course={course}
+          token={token}
+          onCreated={(newCourse) => setDuplicatedCourse(newCourse)}
+          // onClose fires on every dismissal path (Done, Escape, backdrop, the X). Only navigate
+          // away if a duplicate actually happened — a plain Cancel on the empty form must leave
+          // the instructor exactly where they were. The list page (not this one) is what shows
+          // "the copy appears in the list" per its own effect, which refetches on mount.
+          onClose={() => {
+            setDuplicateModalOpen(false);
+            if (duplicatedCourse) router.push('/instructor/courses');
+            setDuplicatedCourse(null);
+          }}
+        />
+      ) : null}
+
+      {addStudentModalOpen && course ? (
+        <AddStudentModal
+          token={token}
+          instructorId={profile.user_id}
+          courseId={course.id}
+          enrolledIds={course.students.map((s) => s.id)}
+          onClose={() => setAddStudentModalOpen(false)}
+          onAdded={(student) => {
+            setError('');
+            setCourse((current) => (current ? { ...current, students: [...current.students, student] } : current));
+          }}
         />
       ) : null}
     </AppShell>
