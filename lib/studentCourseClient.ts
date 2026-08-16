@@ -59,9 +59,20 @@ export async function loadJoinableCourses(token: string): Promise<ApiResult<{ co
 /**
  * POST /api/courses/join — joins a course by its code. Idempotent: joining a course the caller
  * already belongs to returns alreadyMember: true instead of an error (see the route's own docs).
+ *
+ * On success, clears the leaderboard-courses session cache (lib/leaderboardCoursesStore.ts) —
+ * the mirror of leaveCourse's own invalidation below. Without this, a student who had already
+ * viewed the leaderboard/dashboard while enrolled in fewer (or no) courses would keep seeing that
+ * stale course list for the rest of the browser session after joining, since
+ * loadMyLeaderboardCourses is cache-first (GitHub #328).
  */
 export function joinCourseByCode(token: string, code: string): Promise<ApiResult<{ course: CourseMeta; alreadyMember: boolean }>> {
-  return request<{ course: CourseMeta; alreadyMember: boolean }>('/api/courses/join', postJson({ code }), token);
+  return request<{ course: CourseMeta; alreadyMember: boolean }>('/api/courses/join', postJson({ code }), token).then((result) => {
+    if (result.ok) {
+      clearCachedLeaderboardCourses();
+    }
+    return result;
+  });
 }
 
 /**
