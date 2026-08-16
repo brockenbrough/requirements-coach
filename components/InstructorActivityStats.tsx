@@ -28,7 +28,7 @@ export function InstructorActivityStats({
         const passRate =
           completed.length === 0 ? null : Math.round((completed.filter((entry) => entry.passed).length / completed.length) * 100);
         const participationLabel =
-          activity.slug === 'write-acceptance-criteria' && acParticipation !== null
+          activity.gradingKind === 'llm-graded' && acParticipation !== null
             ? `${acParticipation.attempted} of ${acParticipation.total}`
             : null;
 

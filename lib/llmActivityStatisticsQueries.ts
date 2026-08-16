@@ -12,7 +12,7 @@ export type ByUserStoryEntry = {
   averageScore: number | null;
 };
 
-export type AcceptanceCriteriaStatistics = {
+export type LlmActivityStatistics = {
   totalSubmissions: number;
   gradedSubmissions: number;
   averageScore: number | null;
@@ -22,7 +22,14 @@ export type AcceptanceCriteriaStatistics = {
 };
 
 /**
- * Class-wide statistics for the write-acceptance-criteria activity (GitHub #152).
+ * Class-wide statistics for an LLM-graded activity (GitHub #152).
+ *
+ * GitHub #379: `activityType` is optional and scopes both queries to one catalog. Omitting it
+ * aggregates every LLM-graded submission in the system, which is exactly what this did before
+ * instructors could create their own — so the existing caller's numbers do not move. Once a
+ * second llm-graded activity exists, an unscoped call silently pools two different activities
+ * into one average and one byUserStory list; that is an invisible failure rather than a loud one,
+ * which is why the parameter exists before there is a screen asking for it.
  *
  * Pulls only the columns needed for aggregation — user_id, user_story_id, llm_score — rather
  * than every submission row in full (submitted_text, llm_feedback etc. are irrelevant here and
@@ -36,17 +43,31 @@ export type AcceptanceCriteriaStatistics = {
  * nobody has tried yet shows submissionCount: 0 and averageScore: null rather than being
  * omitted, because "nobody has attempted this" is itself signal.
  */
-export async function computeAcceptanceCriteriaStatistics(supabase: SupabaseClient): Promise<{
-  statistics: AcceptanceCriteriaStatistics | null;
+export async function computeLlmActivityStatistics(
+  supabase: SupabaseClient,
+  activityType?: string,
+): Promise<{
+  statistics: LlmActivityStatistics | null;
   error: { message: string } | null;
 }> {
+  // The submission side reaches activity_type through user_story — an !inner embed, for the same
+  // reason loadAllStudentActivity's is: a non-inner one would null the field and the filter would
+  // then drop every row. This is the embed fk_user_story_activity_type was added for.
+  const submissionQuery = activityType
+    ? supabase
+        .from('submission')
+        .select('user_id, user_story_id, llm_score, story:user_story!inner ( activity_type )')
+        .eq('story.activity_type', activityType)
+    : supabase.from('submission').select('user_id, user_story_id, llm_score');
+
+  const storyQuery = activityType
+    ? supabase.from('user_story').select('user_story_id, story_text').eq('activity_type', activityType)
+    : supabase.from('user_story').select('user_story_id, story_text');
+
   const [
     { data: submissionRows, error: submissionError },
     { data: storyRows, error: storyError },
-  ] = await Promise.all([
-    supabase.from('submission').select('user_id, user_story_id, llm_score'),
-    supabase.from('user_story').select('user_story_id, story_text'),
-  ]);
+  ] = await Promise.all([submissionQuery, storyQuery]);
 
   const error = submissionError ?? storyError ?? null;
   if (error) return { statistics: null, error };

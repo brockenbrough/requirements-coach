@@ -453,22 +453,32 @@ function studentDisplayName(student: EmbeddedStudent): string {
  * Carries no question prompts, options, is_correct or explanation — this answers "who did what
  * and how did it go", so SESSION_COLUMNS is the whole payload.
  *
- * Excludes WRITE_ACCEPTANCE_CRITERIA session_log rows: this is the query behind
- * loadInstructorActivities, which app/instructor/page.tsx (GitHub #276) already merges
- * client-side with GET /api/instructor/acceptance-criteria/submissions (one row per graded
- * submission, via toAcSubmissionRow) into the combined dashboard. Now that AC attempts have real
- * session_log rows too, including them here as well would show every AC attempt twice — once
- * (correctly) as a submission row, once (redundantly, and mislabeled as a quiz) as a session row.
+ * Excludes llm-graded activities: this is the query behind loadInstructorActivities, which
+ * app/instructor/page.tsx (GitHub #276) already merges client-side with
+ * GET /api/instructor/acceptance-criteria/submissions (one row per graded submission, via
+ * toAcSubmissionRow) into the combined dashboard. Those attempts have real session_log rows too,
+ * so including them here as well would show every one of them twice — once (correctly) as a
+ * submission row, once (redundantly, and mislabeled as a quiz) as a session row.
+ *
+ * GitHub #379 turned that from a literal .neq on WRITE_ACCEPTANCE_CRITERIA into a filter on the
+ * catalog's grading_kind, because instructors can create llm-graded activities now and a
+ * hardcoded exclusion list would silently start double-counting the moment one appeared.
+ *
+ * The !inner is load-bearing, not stylistic: a non-inner embed nulls the field instead of
+ * dropping the row, and .eq('catalog.grading_kind', …) against a null would then filter out
+ * *everything* and silently empty the instructor dashboard. Same reasoning as STUDENT_EMBED's own
+ * inner join right below it.
+ *
  * loadStudentActivityForIds has no such second source to double against — the course CSV export
- * is the only thing that reads it, and there's no separate AC-submissions merge there — so it
+ * is the only thing that reads it, and there's no separate submissions merge there — so it
  * deliberately keeps including every activity type.
  */
 export async function loadAllStudentActivity(supabase: SupabaseClient) {
   const { data, error } = await supabase
     .from('session_log')
-    .select(`${SESSION_COLUMNS}, ${STUDENT_EMBED}`)
+    .select(`${SESSION_COLUMNS}, ${STUDENT_EMBED}, catalog:activity_type!inner ( grading_kind )`)
     .eq('student.role', 'student')
-    .neq('activity_type', 'WRITE_ACCEPTANCE_CRITERIA')
+    .eq('catalog.grading_kind', 'mcq')
     .order('ended_at', { ascending: false })
     .order('started_at', { ascending: false });
 
@@ -476,6 +486,7 @@ export async function loadAllStudentActivity(supabase: SupabaseClient) {
 
   type SessionRow = Omit<ActivityLogRow, 'questionCount' | 'answeredCount' | 'nextPosition'> & {
     student: EmbeddedStudent;
+    catalog: { grading_kind: string };
   };
 
   const rows = (data ?? []) as unknown as SessionRow[];
@@ -487,9 +498,9 @@ export async function loadAllStudentActivity(supabase: SupabaseClient) {
 
   if (progressError) return { activities: null, error: progressError };
 
-  // The embed is destructured off rather than spread along: it carries role and username,
-  // which are inputs to this query, not part of what the endpoint discloses.
-  const activities: InstructorActivityEntry[] = rows.map(({ student, ...session }) => {
+  // Both embeds are destructured off rather than spread along: they carry role, username and
+  // grading_kind, which are inputs to this query, not part of what the endpoint discloses.
+  const activities: InstructorActivityEntry[] = rows.map(({ student, catalog: _catalog, ...session }) => {
     const sessionProgress = progress!.get(session.session_id);
 
     return {

@@ -3,28 +3,38 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { AppShell } from '../../../../components/AppShell';
-import { AcceptanceCriteriaFeedbackScreen } from '../../../../components/AcceptanceCriteriaFeedbackScreen';
-import { AcceptanceCriteriaWritingScreen } from '../../../../components/AcceptanceCriteriaWritingScreen';
-import { AcceptanceCriteriaWritingScreenSkeleton } from '../../../../components/AcceptanceCriteriaWritingScreenSkeleton';
-import { SessionProgressDots, type ProgressDotStatus } from '../../../../components/SessionProgressDots';
-import { SessionSummaryScreen, type SessionSummaryItem } from '../../../../components/SessionSummaryScreen';
+import { AppShell } from './AppShell';
+import { AcceptanceCriteriaFeedbackScreen } from './AcceptanceCriteriaFeedbackScreen';
+import { AcceptanceCriteriaWritingScreen } from './AcceptanceCriteriaWritingScreen';
+import { AcceptanceCriteriaWritingScreenSkeleton } from './AcceptanceCriteriaWritingScreenSkeleton';
+import { SessionProgressDots, type ProgressDotStatus } from './SessionProgressDots';
+import { SessionSummaryScreen, type SessionSummaryItem } from './SessionSummaryScreen';
 import {
   type LlmSessionStory,
   type CurrentLlmSessionResult,
-  loadCurrentAcceptanceCriteriaSession,
-  submitAcceptanceCriteria,
-} from '../../../../lib/llmActivityClient';
-import { PROMPT_PASS_SCORE, STORIES_PER_SESSION } from '../../../../lib/llmActivityRules';
-import type { LlmGradingResult } from '../../../../lib/llmActivityTypes';
-import { loadActivityLog, loadCompletedAttempts } from '../../../../lib/sessionClient';
-import { deriveStoryTitle } from '../../../../lib/storyMarkdown';
-import { useRequireRole } from '../../../../lib/useRequireRole';
+  loadCurrentLlmSession,
+  submitLlmAnswer,
+} from '../lib/llmActivityClient';
+import type { ActivityDefinition } from '../lib/activityContent';
+import { PROMPT_PASS_SCORE } from '../lib/llmActivityRules';
+import type { LlmGradingResult } from '../lib/llmActivityTypes';
+import { loadActivityLog, loadCompletedAttempts } from '../lib/sessionClient';
+import { deriveStoryTitle } from '../lib/storyMarkdown';
+import { useRequireRole } from '../lib/useRequireRole';
 
 /** What the last submitted story earned, alongside the feedback for it. */
 type Outcome = { userStory: LlmSessionStory; result: LlmGradingResult; completed: boolean };
 
-export default function WriteAcceptanceCriteriaPlayPage() {
+/**
+ * GitHub #379: the play flow for any LLM-graded activity — free-text answer, LLM grading,
+ * per-prompt feedback, session summary. Lifted almost verbatim out of the old
+ * app/activities/write-acceptance-criteria/play/page.tsx, which was a static route hardcoded to
+ * the one seeded activity; everything specific to it now arrives as `activity`.
+ *
+ * Rendered by app/activities/[slug]/play/page.tsx, which resolves the slug and branches on
+ * activity.gradingKind. The MCQ flow lives in that same file, untouched.
+ */
+export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
   const router = useRouter();
   // Also redirects an instructor account away (GitHub #82) — this page is the "activity
   // durchführen" flow itself, exactly what an instructor must not be able to reach.
@@ -53,7 +63,7 @@ export default function WriteAcceptanceCriteriaPlayPage() {
   const syncFromServer = useCallback(async () => {
     if (!token || showSummary) return;
 
-    const result = await loadCurrentAcceptanceCriteriaSession(token);
+    const result = await loadCurrentLlmSession(token, activity.activityType);
 
     if (!result.ok) {
       if (result.status === 401) {
@@ -66,7 +76,7 @@ export default function WriteAcceptanceCriteriaPlayPage() {
 
     // Nothing running: the student got here without starting, or already finished.
     if (!result.data.session) {
-      router.replace('/activities/write-acceptance-criteria');
+      router.replace(`/activities/${activity.slug}`);
       return;
     }
 
@@ -80,7 +90,7 @@ export default function WriteAcceptanceCriteriaPlayPage() {
     if (result.data.nextPosition === null) {
       setShowSummary(true);
     }
-  }, [token, router, showSummary]);
+  }, [token, router, showSummary, activity.activityType]);
 
   useEffect(() => {
     void syncFromServer();
@@ -93,7 +103,7 @@ export default function WriteAcceptanceCriteriaPlayPage() {
       <AppShell active="activities">
         <div className="mx-auto max-w-xl rounded-brand-lg border border-brand-danger/40 bg-brand-danger/10 p-6 text-sm font-semibold text-brand-danger-light">
           {error}
-          <Link href="/activities/write-acceptance-criteria" className="ml-1 underline hover:text-white">
+          <Link href={`/activities/${activity.slug}`} className="ml-1 underline hover:text-white">
             Back to the activity
           </Link>
         </div>
@@ -123,7 +133,13 @@ export default function WriteAcceptanceCriteriaPlayPage() {
     setSubmitError(null);
     setLastAttemptedText(text);
 
-    const result = await submitAcceptanceCriteria(token, session.session.session_id, currentStory.userStoryId, text);
+    const result = await submitLlmAnswer(
+      token,
+      activity.activityType,
+      session.session.session_id,
+      currentStory.userStoryId,
+      text,
+    );
     setSubmitting(false);
 
     if (!result.ok) {
@@ -209,11 +225,11 @@ export default function WriteAcceptanceCriteriaPlayPage() {
       // Await the refresh before navigating so the landing page's cache is already up to date
       // when it mounts — the same reasoning as PlayActivityPage's handleFinishSummary (GitHub #130).
       await Promise.all([
-        loadCompletedAttempts(token, profile.user_id, 'WRITE_ACCEPTANCE_CRITERIA', { forceRefresh: true }),
+        loadCompletedAttempts(token, profile.user_id, activity.activityType, { forceRefresh: true }),
         loadActivityLog(token, profile.user_id, { forceRefresh: true }),
       ]);
     }
-    router.push('/activities/write-acceptance-criteria');
+    router.push(`/activities/${activity.slug}`);
   }
 
   // Once the session is complete, currentStory legitimately becomes undefined (nextPosition is
@@ -230,7 +246,11 @@ export default function WriteAcceptanceCriteriaPlayPage() {
   });
 
   const storyPosition = (currentStory?.position ?? 0) + 1;
-  const isLastStory = currentStory?.position === STORIES_PER_SESSION - 1;
+  // Against the session's own draw, not STORIES_PER_SESSION: a session that drew fewer prompts
+  // than the constant would otherwise never reach "Finish" and strand the student on
+  // "Next story →" with nothing left to answer.
+  const storyTotal = orderedStories.length;
+  const isLastStory = currentStory?.position === storyTotal - 1;
   const allStoriesComplete = nextPosition === null;
 
   // SessionSummaryScreen is generic (score/message/items) — this page maps its own LLM-graded,
@@ -242,12 +262,12 @@ export default function WriteAcceptanceCriteriaPlayPage() {
   const storyCount = session.submissions.length;
   const summaryMessage =
     storyCount === 0
-      ? 'No stories were graded in this session.'
+      ? 'No prompts were graded in this session.'
       : passedCount === storyCount
-        ? `Great job — all ${storyCount} stories passed!`
+        ? `Great job — all ${storyCount} prompts passed!`
         : passedCount === 0
-          ? `Keep practicing — none of the ${storyCount} stories passed this time.`
-          : `Nice progress — ${passedCount} of ${storyCount} stories passed.`;
+          ? `Keep practicing — none of the ${storyCount} prompts passed this time.`
+          : `Nice progress — ${passedCount} of ${storyCount} prompts passed.`;
   const summaryItems: SessionSummaryItem[] = orderedStories.map((story) => {
     const submission = session.submissions.find((s) => s.userStoryId === story.userStoryId);
     return {
@@ -266,8 +286,8 @@ export default function WriteAcceptanceCriteriaPlayPage() {
             <SessionProgressDots statuses={dotStatuses} />
             <span className="text-sm font-bold text-gray-500">
               {allStoriesComplete
-                ? `${STORIES_PER_SESSION} of ${STORIES_PER_SESSION} complete`
-                : `Story ${storyPosition} of ${STORIES_PER_SESSION}`}
+                ? `${storyTotal} of ${storyTotal} complete`
+                : `Prompt ${storyPosition} of ${storyTotal}`}
             </span>
           </div>
         ) : null}

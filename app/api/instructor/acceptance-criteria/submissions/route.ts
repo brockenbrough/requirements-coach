@@ -15,7 +15,7 @@ type SubmissionRow = {
   submitted_at: string;
   graded_at: string | null;
   student: { user_id: string; first_name: string | null; last_name: string | null; username: string | null; role: string };
-  story: { story_text: string; difficulty_level: number };
+  story: { story_text: string; difficulty_level: number; activity_type: string };
 };
 
 function studentDisplayName(student: SubmissionRow['student']): string {
@@ -56,7 +56,7 @@ export async function GET(request: Request) {
   let query = supabase
     .from('submission')
     .select(
-      'submission_id, submitted_text, llm_score, llm_feedback, submitted_at, graded_at, student:user!inner(user_id, first_name, last_name, username, role), story:user_story!inner(story_text, difficulty_level)',
+      'submission_id, submitted_text, llm_score, llm_feedback, submitted_at, graded_at, student:user!inner(user_id, first_name, last_name, username, role), story:user_story!inner(story_text, difficulty_level, activity_type)',
     )
     .eq('student.role', 'student')
     .order('submitted_at', { ascending: false });
@@ -74,6 +74,7 @@ export async function GET(request: Request) {
       studentId: r.student.user_id,
       studentName: studentDisplayName(r.student),
       userStoryDescription: r.story.story_text,
+      activityType: r.story.activity_type,
       difficultyLevel: r.story.difficulty_level,
       submittedText: r.submitted_text,
       llmScore: r.llm_score,
