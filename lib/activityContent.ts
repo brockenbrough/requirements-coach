@@ -1,9 +1,15 @@
 import type { ActivityType, GradingKind } from './activityTypes';
 
 /**
- * 'write-acceptance-criteria' is the Type B (LLM-graded) activity from GitHub #149 (REQ-FU-2).
- * Unlike the MCQ activities it has no questionBank — students write free-text answers that are
- * scored by AI, not by picking from a fixed set of options.
+ * 'write-acceptance-criteria' is the seeded example of an LLM-graded activity (GitHub #149,
+ * REQ-FU-2) — no longer the only one since GitHub #379, which let instructors create their own.
+ * Unlike the MCQ activities it has no questionBank: students write free-text answers scored by
+ * AI, not picked from a fixed set of options.
+ *
+ * That entry is deliberately kept in ACTIVITIES even though its static pages are gone. Because
+ * useResolvedActivity checks this array first, it is what keeps /activities/write-acceptance-criteria
+ * resolving after the cutover — bookmarks survive, at zero network cost, and the rich name/summary/
+ * titles ladder is preserved where a server-resolved custom catalog only gets generic fallbacks.
  *
  * Widened to `string` (kept as an alias purely so existing `: ActivitySlug` annotations keep
  * compiling) for the same reason lib/activityTypes.ts's ActivityType was: since every

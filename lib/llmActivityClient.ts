@@ -94,30 +94,39 @@ export type CurrentLlmSessionResult = {
 };
 
 /**
- * Starts the activity, or picks up the session already running — the AC equivalent of
+ * Starts an LLM-graded activity, or picks up the session already running — the equivalent of
  * sessionClient.ts's startSession. uq_session_log_one_active makes "start" and "resume" the
  * same call here too: 201 for a fresh draw, 200 with resumed: true for the existing one.
+ *
+ * GitHub #379: activityType is a parameter now rather than baked into the URL, and
+ * difficultyLevel is forwarded only when the caller passes one — the same rule startSession
+ * follows, so a plain Start is unaffected and the server picks the auto-advance level itself.
  */
-export function startOrResumeAcceptanceCriteriaSession(
+export function startOrResumeLlmSession(
   token: string,
+  activityType: string,
+  options: { difficultyLevel?: number } = {},
 ): Promise<ApiResult<StartLlmSessionResult>> {
+  const body = options.difficultyLevel === undefined ? {} : { difficultyLevel: options.difficultyLevel };
+
   return request<StartLlmSessionResult>(
-    "/api/activities/write-acceptance-criteria/sessions",
-    postJson({}),
+    `/api/activities/${encodeURIComponent(activityType)}/llm/sessions`,
+    postJson(body),
     token,
   );
 }
 
 /**
- * The running session with its stories and the submissions made so far.
- * session: null (with a 200) means nothing is in progress — not an error, the AC equivalent of
+ * The running session with its prompts and the submissions made so far.
+ * session: null (with a 200) means nothing is in progress — not an error, the equivalent of
  * sessionClient.ts's loadCurrentSession.
  */
-export function loadCurrentAcceptanceCriteriaSession(
+export function loadCurrentLlmSession(
   token: string,
+  activityType: string,
 ): Promise<ApiResult<CurrentLlmSessionResult>> {
   return request<CurrentLlmSessionResult>(
-    "/api/activities/write-acceptance-criteria/sessions/current",
+    `/api/activities/${encodeURIComponent(activityType)}/llm/sessions/current`,
     { method: "GET" },
     token,
   );
@@ -194,8 +203,9 @@ export type SubmitLlmAnswerResult = LlmGradingResult & {
  * sessionId is required (GitHub #256, cost/abuse fix) — every graded submission must belong to
  * a real, in-progress session_log row.
  */
-export async function submitAcceptanceCriteria(
+export async function submitLlmAnswer(
   token: string,
+  activityType: string,
   sessionId: string,
   userStoryId: string,
   submittedText: string,
@@ -214,7 +224,7 @@ export async function submitAcceptanceCriteria(
     nextPosition: number | null;
     completed: boolean;
   }>(
-    "/api/activities/write-acceptance-criteria/submissions",
+    `/api/activities/${encodeURIComponent(activityType)}/llm/submissions`,
     postJson({ userStoryId, submittedText, sessionId }),
     token,
   );
