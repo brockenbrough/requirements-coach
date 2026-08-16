@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../../../components/AppShell';
 import { CreateCatalogModal } from '../../../components/CreateCatalogModal';
+import { loadCourses } from '../../../lib/courseClient';
+import type { CourseSummary } from '../../../lib/courseTypes';
 import { loadQuizzes, type QuizSummary } from '../../../lib/quizClient';
 import { useRequireRole } from '../../../lib/useRequireRole';
 
@@ -27,6 +29,7 @@ export default function InstructorQuizzesPage() {
   const { token, profile, loading, authorized } = useRequireRole('instructor');
 
   const [quizzes, setQuizzes] = useState<QuizSummary[] | null>(null);
+  const [courses, setCourses] = useState<CourseSummary[]>([]);
   const [loadFailed, setLoadFailed] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [authorFilter, setAuthorFilter] = useState(ALL_AUTHORS);
@@ -46,6 +49,14 @@ export default function InstructorQuizzesPage() {
       else setLoadFailed(true);
     });
 
+    // The create-catalog form needs the instructor's own courses for its now-required course
+    // picker (every activity_type is linked to exactly one course) — a failure here just leaves
+    // the picker empty rather than blocking the whole page, the same "a title costs a title, not
+    // the whole page" pattern app/activities/page.tsx uses for loadStudentTitles.
+    loadCourses(token).then((result) => {
+      if (!cancelled && result.ok) setCourses(result.data.courses);
+    });
+
     return () => {
       cancelled = true;
     };
@@ -63,7 +74,7 @@ export default function InstructorQuizzesPage() {
   if (loading || !authorized) return null;
   if (!token || !profile) return null;
 
-  function handleCreated(quiz: { activityType: string; name: string; description: string | null }) {
+  function handleCreated(quiz: { activityType: string; name: string; description: string | null; courseId: string; courseName: string }) {
     // Optimistic insert: the caller is the quiz's creator_id, and its display name follows the
     // same first/last-name-else-username fallback GET /api/instructor/quizzes uses server-side —
     // no need to re-fetch the whole list just to show the one row that just changed.
@@ -71,7 +82,15 @@ export default function InstructorQuizzesPage() {
     const authorName = fullName || profile?.username || 'You';
 
     setQuizzes((current) => [
-      { activityType: quiz.activityType, name: quiz.name, description: quiz.description, authorName, questionCount: 0 },
+      {
+        activityType: quiz.activityType,
+        name: quiz.name,
+        description: quiz.description,
+        authorName,
+        questionCount: 0,
+        courseId: quiz.courseId,
+        courseName: quiz.courseName,
+      },
       ...(current ?? []),
     ]);
 
@@ -161,13 +180,14 @@ export default function InstructorQuizzesPage() {
                     <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Name</th>
                     <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Description</th>
                     <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Author</th>
+                    <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Course</th>
                     <th className="whitespace-nowrap px-4 py-3 text-right text-xs font-bold uppercase tracking-wide">Questions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {visibleQuizzes.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="bg-brand-navy-2 px-4 py-10 text-center text-sm font-semibold text-brand-ink-muted">
+                      <td colSpan={5} className="bg-brand-navy-2 px-4 py-10 text-center text-sm font-semibold text-brand-ink-muted">
                         No catalogs match this filter.
                       </td>
                     </tr>
@@ -181,6 +201,9 @@ export default function InstructorQuizzesPage() {
                         </td>
                         <td className="px-4 py-3 text-gray-500">{quiz.description || '—'}</td>
                         <td className="whitespace-nowrap px-4 py-3 text-gray-500">{quiz.authorName}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-gray-500">
+                          {quiz.courseName ?? <span className="italic text-gray-400">Not linked yet</span>}
+                        </td>
                         <td className="whitespace-nowrap px-4 py-3 text-right font-bold text-gray-600">{quiz.questionCount}</td>
                       </tr>
                     ))
@@ -194,7 +217,7 @@ export default function InstructorQuizzesPage() {
       </div>
 
       {showCreateModal ? (
-        <CreateCatalogModal token={token} onClose={() => setShowCreateModal(false)} onCreated={handleCreated} />
+        <CreateCatalogModal token={token} courses={courses} onClose={() => setShowCreateModal(false)} onCreated={handleCreated} />
       ) : null}
     </AppShell>
   );
