@@ -113,8 +113,29 @@ export function nextUnansweredStoryPosition(
   return nextUnansweredPosition(positions, submittedUserStoryIds);
 }
 
-/** The student's running Write Acceptance Criteria session, or null — thin wrapper so callers
- * don't repeat the activity_type literal. */
-export function findInProgressAcSession(supabase: SupabaseClient, userId: string) {
-  return findInProgressSession(supabase, userId, 'WRITE_ACCEPTANCE_CRITERIA');
+/**
+ * The prompts an LLM-graded session may draw from: one activity_type, one difficulty level.
+ *
+ * GitHub #379 made this level-scoped. Before it, the draw ignored user_story.difficulty_level
+ * entirely and picked from the whole table — the column existed, was CHECK-constrained and
+ * indexed, and was read by nothing. An LLM-graded activity now progresses through levels exactly
+ * the way an MCQ one does, so the pool that matters is the per-level one.
+ *
+ * Deliberately a plain .eq on activity_type rather than the !inner join against activity_type
+ * that the MCQ draw uses: that join predates fk_user_story_activity_type and exists to enforce a
+ * relationship the foreign key now enforces at the database.
+ */
+export async function loadUserStoryPool(
+  supabase: SupabaseClient,
+  activityType: string,
+  difficultyLevel: number,
+): Promise<{ pool: { user_story_id: string }[] | null; error: { message: string } | null }> {
+  const { data, error } = await supabase
+    .from('user_story')
+    .select('user_story_id')
+    .eq('activity_type', activityType)
+    .eq('difficulty_level', difficultyLevel);
+
+  if (error) return { pool: null, error };
+  return { pool: (data ?? []) as { user_story_id: string }[], error: null };
 }
