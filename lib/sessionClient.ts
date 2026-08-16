@@ -10,7 +10,7 @@
 
 import type { ActivityType } from './activityTypes';
 import { toInstant } from './dateTime';
-import type { PublicStudentProfile, PublicStudentTitle } from './leaderboardTypes';
+import type { AvailableActivityTitles, PublicStudentProfile, PublicStudentTitle } from './leaderboardTypes';
 import type { InstructorActivityEntry, SessionListEntry, SessionRecord } from './sessionTypes';
 import type { QuizQuestion } from './quizQuestionTypes';
 import { getCachedCompletedAttempts, setCachedCompletedAttempts } from './completedAttemptsStore';
@@ -604,6 +604,21 @@ export function loadStudentTitles(token: string, studentId: string) {
   );
 }
 
+/**
+ * Every title the student could ever earn (GET /api/students/{id}/available-titles) — one entry
+ * per activity type linked to a course they're enrolled in, each with its full title_definition
+ * ladder. Not cached, same reasoning as loadStudentTitles: it changes whenever course enrollment
+ * or an instructor's catalog changes, and the pages that use it (dashboard, profile) already
+ * re-fetch on every mount.
+ */
+export function loadAvailableTitles(token: string, studentId: string) {
+  return request<{ activities: AvailableActivityTitles[] }>(
+    `/api/students/${encodeURIComponent(studentId)}/available-titles`,
+    { method: 'GET' },
+    token,
+  );
+}
+
 /** The wire shape of GET /api/students/{id}/public-profile — no studentId; the caller knows it. */
 type PublicProfileResponse = {
   username: string;
@@ -611,6 +626,7 @@ type PublicProfileResponse = {
   biography: string;
   score: number;
   titles: PublicStudentTitle[];
+  availableTitles: AvailableActivityTitles[];
 };
 
 /**

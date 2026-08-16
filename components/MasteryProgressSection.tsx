@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { buildMasteryTitleEntries, totalLevelsPassed, type MasteryTitleEntry } from '../lib/masteryTitles';
-import { loadStudentScore, loadStudentTitles } from '../lib/sessionClient';
+import { loadAvailableTitles, loadStudentScore, loadStudentTitles } from '../lib/sessionClient';
 import { CompletedSessionsSummary } from './CompletedSessionsSummary';
 import { MasteryProgressSkeleton } from './MasteryProgressSkeleton';
 import { MasteryTitleCard } from './MasteryTitleCard';
@@ -12,10 +12,11 @@ import { MasteryTitleCard } from './MasteryTitleCard';
  * its own fetch, loading, and error state), so app/profile/page.tsx just renders it for a student
  * and doesn't otherwise know how it works.
  *
- * Loads GET /api/students/{id}/score and GET /api/students/{id}/titles in parallel (the two
- * endpoints the issue names) and reconciles the titles response with every known activity type
- * via lib/masteryTitles.ts, since the titles route itself only returns entries for activity
- * types the student has actually attempted.
+ * Loads GET /api/students/{id}/score, GET /api/students/{id}/titles, and
+ * GET /api/students/{id}/available-titles in parallel, then reconciles the latter two via
+ * lib/masteryTitles.ts: /titles only returns entries for activity types the student has actually
+ * attempted, and /available-titles is the course-scoped list of every activity (and its full
+ * title ladder) the student could attempt at all.
  */
 export function MasteryProgressSection({ token, studentId }: { token: string; studentId: string }) {
   const [cumulativeScore, setCumulativeScore] = useState<number | null>(null);
@@ -28,24 +29,30 @@ export function MasteryProgressSection({ token, studentId }: { token: string; st
     let cancelled = false;
     setError(null);
 
-    Promise.all([loadStudentScore(token, studentId), loadStudentTitles(token, studentId)]).then(
-      ([scoreResult, titlesResult]) => {
-        if (cancelled) return;
+    Promise.all([
+      loadStudentScore(token, studentId),
+      loadStudentTitles(token, studentId),
+      loadAvailableTitles(token, studentId),
+    ]).then(([scoreResult, titlesResult, availableResult]) => {
+      if (cancelled) return;
 
-        if (!scoreResult.ok) {
-          setError(scoreResult.error);
-          return;
-        }
-        if (!titlesResult.ok) {
-          setError(titlesResult.error);
-          return;
-        }
+      if (!scoreResult.ok) {
+        setError(scoreResult.error);
+        return;
+      }
+      if (!titlesResult.ok) {
+        setError(titlesResult.error);
+        return;
+      }
+      if (!availableResult.ok) {
+        setError(availableResult.error);
+        return;
+      }
 
-        setCumulativeScore(scoreResult.data.score);
-        setSessionsCompleted(scoreResult.data.sessionsCompleted);
-        setEntries(buildMasteryTitleEntries(titlesResult.data.titles));
-      },
-    );
+      setCumulativeScore(scoreResult.data.score);
+      setSessionsCompleted(scoreResult.data.sessionsCompleted);
+      setEntries(buildMasteryTitleEntries(availableResult.data.activities, titlesResult.data.titles));
+    });
 
     return () => {
       cancelled = true;
@@ -81,9 +88,16 @@ export function MasteryProgressSection({ token, studentId }: { token: string; st
             levelsPassed={totalLevelsPassed(entries ?? [])}
           />
           <div className="space-y-4">
-            {(entries ?? []).map((entry) => (
-              <MasteryTitleCard key={entry.activityType} entry={entry} />
-            ))}
+            {entries && entries.length === 0 ? (
+              // Genuinely possible now that this is course-scoped (GET /api/students/{id}/
+              // available-titles), not a fixed set of three: a student enrolled in no course, or
+              // in courses with nothing linked yet, sees this instead of an empty list.
+              <p className="text-sm font-semibold text-gray-500">
+                No mastery titles yet — join a course to see what you can earn.
+              </p>
+            ) : (
+              (entries ?? []).map((entry) => <MasteryTitleCard key={entry.activityType} entry={entry} />)
+            )}
           </div>
         </div>
       )}

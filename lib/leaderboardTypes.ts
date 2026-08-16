@@ -59,6 +59,20 @@ export type PublicStudentTitle = {
 };
 
 /**
+ * One activity type's full earnable title ladder, in exactly the shape
+ * lib/titleQueries.ts's loadAvailableTitleLadders returns. Re-declared here for the same reason
+ * PublicStudentTitle is above — this file stays import-free so a server route can use it without
+ * pulling in anything else.
+ */
+export type AvailableActivityTitles = {
+  activityType: string;
+  activityName: string;
+  courseId: string;
+  courseName: string;
+  titles: { difficultyLevel: number; title: string | null }[];
+};
+
+/**
  * Everything a student may see about a classmate, and nothing else.
  *
  * This type is the privacy contract in code form: US-5's
@@ -67,8 +81,9 @@ export type PublicStudentTitle = {
  * and anything about individual answers or attempts — all of which exist on the "user" row or a
  * join away from it, and none of which a peer has a reason to see.
  *
- * titles stays in the raw API shape rather than a pre-built MasteryTitleEntry[] so that
- * lib/masteryTitles.ts remains the single place that reconciles titles against ACTIVITIES.
+ * titles and availableTitles both stay in the raw API shape rather than a pre-built
+ * MasteryTitleEntry[] so that lib/masteryTitles.ts remains the single place that reconciles the
+ * two into a display-ready progression.
  */
 export type PublicStudentProfile = {
   studentId: string;
@@ -79,4 +94,6 @@ export type PublicStudentProfile = {
   /** Cumulative score, same definition as computeStudentScore (lib/scoreQueries.ts). */
   score: number;
   titles: PublicStudentTitle[];
+  /** The target's full earnable title ladder — lib/titleQueries.ts's loadAvailableTitleLadders. */
+  availableTitles: AvailableActivityTitles[];
 };
