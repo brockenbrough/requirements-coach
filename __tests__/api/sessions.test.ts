@@ -109,20 +109,23 @@ function req(body?: object, token: string | null = 'valid-token') {
 }
 
 /**
- * Queues a course link + enrollment so checkActivityAccess (lib/activityCourseQueries.ts)
- * resolves to 'ok' — every activity is now linked to exactly one course, and a student can only
- * start/resume a session against one whose course they're enrolled in.
+ * Queues the two-query derivation so checkActivityAccess (lib/activityCourseQueries.ts) resolves
+ * to 'ok' — a catalog has no course of its own; a student can only start/resume a session against
+ * one reachable through an assembled quiz in a course they're enrolled in.
  */
 function queueEnrolled() {
-  queue('activity_type_course', { data: { course_id: 'course-1', course: { course_name: 'Software Requirements' } }, error: null });
   queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
+  queue('assembled_quiz_catalog', {
+    data: [{ assembled_quiz: { course_id: 'course-1', course: { course_name: 'Software Requirements' } } }],
+    error: null,
+  });
 }
 
 /**
- * Queues a successful activity_type lookup (GitHub #347: isActivityType is now a DB read) plus
- * an enrolled course link — the two checks every path past "does this activity exist" now runs
- * before touching session_log. Tests that specifically exercise the enrollment gate itself queue
- * activity_type_course/student_course directly instead of calling this.
+ * Queues a successful activity_type lookup (GitHub #347: isActivityType is now a DB read) plus an
+ * accessible course (queueEnrolled) — the two checks every path past "does this activity exist"
+ * now runs before touching session_log. Tests that specifically exercise the access gate itself
+ * queue student_course/assembled_quiz_catalog directly instead of calling this.
  */
 function queueValidActivityType(activityType = 'IDENTIFY_WEAK_USER_STORIES') {
   queue('activity_type', { data: { activity_type: activityType }, error: null });
@@ -510,12 +513,12 @@ describe('POST /api/sessions', () => {
     expect(h.state.deletes).toContain('session_log');
   });
 
-  // GitHub #<activity-course link>: every activity now belongs to exactly one course
-  // (activity_type_course) — a student can only start a session against one whose course
-  // they're enrolled in.
-  it('returns 403 when the activity has no course link at all', async () => {
+  // A catalog has no course of its own — it's reachable only through an assembled quiz that
+  // belongs to a course, and a student can only start a session against one they're enrolled in.
+  it('returns 403 when no assembled quiz reaches the activity at all', async () => {
     queue('activity_type', { data: { activity_type: 'IDENTIFY_WEAK_USER_STORIES' }, error: null });
-    queue('activity_type_course', { data: null, error: null }); // unlinked
+    queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
+    queue('assembled_quiz_catalog', { data: [], error: null }); // unreachable
 
     const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES' }));
     const body = await response.json();
@@ -525,9 +528,8 @@ describe('POST /api/sessions', () => {
     expect(h.state.tables).not.toContain('session_log');
   });
 
-  it('returns 403 when the caller is not enrolled in the activity\'s linked course', async () => {
+  it('returns 403 when the caller is not enrolled in any course', async () => {
     queue('activity_type', { data: { activity_type: 'IDENTIFY_WEAK_USER_STORIES' }, error: null });
-    queue('activity_type_course', { data: { course_id: 'course-1', course: { course_name: 'Software Requirements' } }, error: null });
     queue('student_course', { data: [], error: null }); // not enrolled
 
     const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES' }));

@@ -1,10 +1,11 @@
 'use client';
 
-// GitHub #<activity-course link>: real client for the student-facing activity discovery routes
-// (GET /api/activities, GET /api/activities/{activityType}) — same thin-wrapper shape as
-// lib/quizClient.ts. Every activity is now linked to exactly one course
-// (activity_type_course), and these two routes are how a student finds out which ones their own
-// enrolled courses actually offer.
+// Real client for the student-facing activity discovery routes (GET /api/activities,
+// GET /api/activities/{activityType}) — same thin-wrapper shape as lib/quizClient.ts. A catalog
+// has no course of its own; it's reachable by a student only through an assembled_quiz (GitHub
+// #360) that references it and belongs to a course they're enrolled in
+// (lib/activityCourseQueries.ts), and these two routes are how a student finds out which ones
+// their own enrolled courses actually offer.
 
 export type CourseActivity = {
   activityType: string;

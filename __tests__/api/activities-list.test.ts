@@ -76,31 +76,29 @@ describe('GET /api/activities', () => {
     expect(res.status).toBe(401);
   });
 
-  it('returns an empty list without querying activity_type_course when the caller is in no courses', async () => {
+  it('returns an empty list without querying assembled_quiz_catalog when the caller is in no courses', async () => {
     queue('student_course', { data: [], error: null });
 
     const res = await GET(req());
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.activities).toEqual([]);
-    expect(h.state.tables).not.toContain('activity_type_course');
+    expect(h.state.tables).not.toContain('assembled_quiz_catalog');
   });
 
-  it('returns every activity linked to any of the caller\'s enrolled courses', async () => {
+  it('returns every activity reachable through an assembled quiz in any of the caller\'s enrolled courses', async () => {
     queue('student_course', { data: [{ course_id: 'course-1' }, { course_id: 'course-2' }], error: null });
-    queue('activity_type_course', {
+    queue('assembled_quiz_catalog', {
       data: [
         {
           activity_type: 'IDENTIFY_WEAK_USER_STORIES',
-          course_id: 'course-1',
-          course: { course_name: 'Software Requirements' },
           catalog: { quiz_name: 'Identify Weak User Stories', description: null },
+          assembled_quiz: { course_id: 'course-1', course: { course_name: 'Software Requirements' } },
         },
         {
           activity_type: 'MY_CUSTOM_QUIZ',
-          course_id: 'course-2',
-          course: { course_name: 'Advanced SE' },
           catalog: { quiz_name: 'My Custom Quiz', description: 'A quiz about things' },
+          assembled_quiz: { course_id: 'course-2', course: { course_name: 'Advanced SE' } },
         },
       ],
       error: null,
@@ -127,7 +125,11 @@ describe('GET /api/activities', () => {
       },
     ]);
 
-    expect(h.state.filters).toContainEqual({ table: 'activity_type_course', column: 'course_id', value: ['course-1', 'course-2'] });
+    expect(h.state.filters).toContainEqual({
+      table: 'assembled_quiz_catalog',
+      column: 'assembled_quiz.course_id',
+      value: ['course-1', 'course-2'],
+    });
   });
 
   it('returns 500 when the enrolled-course lookup fails', async () => {
@@ -139,7 +141,7 @@ describe('GET /api/activities', () => {
 
   it('returns 500 when the activity lookup fails', async () => {
     queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
-    queue('activity_type_course', { data: null, error: { message: 'DB down' } });
+    queue('assembled_quiz_catalog', { data: null, error: { message: 'DB down' } });
 
     const res = await GET(req());
     expect(res.status).toBe(500);

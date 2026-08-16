@@ -1,10 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import {
-  checkActivityAccess,
-  getCourseForActivityType,
-  linkActivityTypeToCourse,
-  listActivityTypesForCourses,
-} from '../../lib/activityCourseQueries';
+import { checkActivityAccess, getAccessibleCourseForActivity, listActivityTypesForCourses } from '../../lib/activityCourseQueries';
 
 type Result = { data?: unknown; error?: unknown };
 
@@ -14,7 +9,6 @@ const state = {
   queues: {} as Record<string, Result[]>,
   tables: [] as string[],
   filters: [] as { table: string; column: string; value: unknown }[],
-  inserts: [] as { table: string; row: unknown }[],
 };
 
 function queue(table: string, result: Result) {
@@ -33,11 +27,6 @@ function makeBuilder(table: string, result: Result) {
       return builder;
     },
     limit: () => builder,
-    insert: (row: unknown) => {
-      state.inserts.push({ table, row });
-      return builder;
-    },
-    maybeSingle: async () => result,
     then: (onOk: (r: Result) => unknown, onErr?: (e: unknown) => unknown) =>
       Promise.resolve(result).then(onOk, onErr),
   };
@@ -59,83 +48,94 @@ beforeEach(() => {
   state.queues = {};
   state.tables = [];
   state.filters = [];
-  state.inserts = [];
 });
 
-describe('linkActivityTypeToCourse', () => {
-  it('inserts a link row and returns no error', async () => {
-    queue('activity_type_course', { error: null });
+describe('getAccessibleCourseForActivity', () => {
+  it('returns null without querying assembled_quiz_catalog when the caller is enrolled in nothing', async () => {
+    queue('student_course', { data: [], error: null });
 
-    const result = await linkActivityTypeToCourse(makeSupabase(), { activityType: 'CUSTOM_QUIZ', courseId: 'course-1' });
+    const result = await getAccessibleCourseForActivity(makeSupabase(), 'CUSTOM_QUIZ', 'student-1');
 
-    expect(result.error).toBeNull();
-    expect(state.inserts).toEqual([{ table: 'activity_type_course', row: { activity_type: 'CUSTOM_QUIZ', course_id: 'course-1' } }]);
+    expect(result).toEqual({ link: null, error: null });
+    expect(state.tables).not.toContain('assembled_quiz_catalog');
   });
 
-  it('surfaces a 23505 (already linked) as-is', async () => {
-    queue('activity_type_course', { error: { code: '23505', message: 'duplicate' } });
+  it('returns null when no assembled quiz in an enrolled course references the catalog', async () => {
+    queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
+    queue('assembled_quiz_catalog', { data: [], error: null });
 
-    const result = await linkActivityTypeToCourse(makeSupabase(), { activityType: 'CUSTOM_QUIZ', courseId: 'course-1' });
-
-    expect((result.error as { code: string }).code).toBe('23505');
-  });
-});
-
-describe('getCourseForActivityType', () => {
-  it('returns null when the activity has no course link', async () => {
-    queue('activity_type_course', { data: null, error: null });
-
-    const result = await getCourseForActivityType(makeSupabase(), 'UNLINKED');
+    const result = await getAccessibleCourseForActivity(makeSupabase(), 'CUSTOM_QUIZ', 'student-1');
 
     expect(result).toEqual({ link: null, error: null });
   });
 
-  it('returns the linked course id and name', async () => {
-    queue('activity_type_course', { data: { course_id: 'course-1', course: { course_name: 'Intro to SE' } }, error: null });
+  it('returns the granting course when an assembled quiz in an enrolled course references the catalog', async () => {
+    queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
+    queue('assembled_quiz_catalog', {
+      data: [{ assembled_quiz: { course_id: 'course-1', course: { course_name: 'Intro to SE' } } }],
+      error: null,
+    });
 
-    const result = await getCourseForActivityType(makeSupabase(), 'LINKED');
+    const result = await getAccessibleCourseForActivity(makeSupabase(), 'CUSTOM_QUIZ', 'student-1');
 
     expect(result).toEqual({ link: { courseId: 'course-1', courseName: 'Intro to SE' }, error: null });
+    expect(state.filters).toContainEqual({ table: 'assembled_quiz_catalog', column: 'activity_type', value: 'CUSTOM_QUIZ' });
+    expect(state.filters).toContainEqual({ table: 'assembled_quiz_catalog', column: 'assembled_quiz.course_id', value: ['course-1'] });
   });
 
   it('falls back to a placeholder name if the embedded course is missing', async () => {
-    queue('activity_type_course', { data: { course_id: 'course-1', course: null }, error: null });
+    queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
+    queue('assembled_quiz_catalog', {
+      data: [{ assembled_quiz: { course_id: 'course-1', course: null } }],
+      error: null,
+    });
 
-    const result = await getCourseForActivityType(makeSupabase(), 'LINKED');
+    const result = await getAccessibleCourseForActivity(makeSupabase(), 'CUSTOM_QUIZ', 'student-1');
 
     expect(result.link).toEqual({ courseId: 'course-1', courseName: 'Unknown course' });
+  });
+
+  it('surfaces an enrolled-course lookup error', async () => {
+    queue('student_course', { data: null, error: { message: 'db down' } });
+
+    const result = await getAccessibleCourseForActivity(makeSupabase(), 'CUSTOM_QUIZ', 'student-1');
+
+    expect(result).toEqual({ link: null, error: { message: 'db down' } });
+  });
+
+  it('surfaces a quiz-catalog lookup error', async () => {
+    queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
+    queue('assembled_quiz_catalog', { data: null, error: { message: 'db down' } });
+
+    const result = await getAccessibleCourseForActivity(makeSupabase(), 'CUSTOM_QUIZ', 'student-1');
+
+    expect(result).toEqual({ link: null, error: { message: 'db down' } });
   });
 });
 
 describe('checkActivityAccess', () => {
-  it('is forbidden when the activity has no course link at all', async () => {
-    queue('activity_type_course', { data: null, error: null });
+  it('is forbidden when no course grants access', async () => {
+    queue('student_course', { data: [], error: null });
 
     const result = await checkActivityAccess(makeSupabase(), 'UNLINKED', 'student-1');
 
     expect(result).toEqual({ status: 'forbidden' });
   });
 
-  it('is forbidden when the caller is not enrolled in the linked course', async () => {
-    queue('activity_type_course', { data: { course_id: 'course-1', course: { course_name: 'Intro to SE' } }, error: null });
-    queue('student_course', { data: [], error: null });
-
-    const result = await checkActivityAccess(makeSupabase(), 'LINKED', 'student-1');
-
-    expect(result).toEqual({ status: 'forbidden' });
-  });
-
-  it('is ok when the caller is enrolled in the linked course', async () => {
-    queue('activity_type_course', { data: { course_id: 'course-1', course: { course_name: 'Intro to SE' } }, error: null });
+  it('is ok when an enrolled course grants access through an assembled quiz', async () => {
     queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
+    queue('assembled_quiz_catalog', {
+      data: [{ assembled_quiz: { course_id: 'course-1', course: { course_name: 'Intro to SE' } } }],
+      error: null,
+    });
 
     const result = await checkActivityAccess(makeSupabase(), 'LINKED', 'student-1');
 
     expect(result).toEqual({ status: 'ok' });
   });
 
-  it('surfaces a link-lookup error', async () => {
-    queue('activity_type_course', { data: null, error: { message: 'db down' } });
+  it('surfaces a lookup error', async () => {
+    queue('student_course', { data: null, error: { message: 'db down' } });
 
     const result = await checkActivityAccess(makeSupabase(), 'LINKED', 'student-1');
 
@@ -151,14 +151,13 @@ describe('listActivityTypesForCourses', () => {
     expect(state.tables).toEqual([]);
   });
 
-  it('maps every linked activity with its catalog and course info', async () => {
-    queue('activity_type_course', {
+  it('maps every reachable activity with its catalog and granting-course info', async () => {
+    queue('assembled_quiz_catalog', {
       data: [
         {
           activity_type: 'CUSTOM_QUIZ',
-          course_id: 'course-1',
-          course: { course_name: 'Intro to SE' },
           catalog: { quiz_name: 'Sprint 1 Check', description: 'Covers sprint basics' },
+          assembled_quiz: { course_id: 'course-1', course: { course_name: 'Intro to SE' } },
         },
       ],
       error: null,
@@ -178,5 +177,37 @@ describe('listActivityTypesForCourses', () => {
       ],
       error: null,
     });
+    expect(state.filters).toContainEqual({ table: 'assembled_quiz_catalog', column: 'assembled_quiz.course_id', value: ['course-1'] });
+  });
+
+  it('deduplicates a catalog reachable through more than one quiz, keeping the first match', async () => {
+    queue('assembled_quiz_catalog', {
+      data: [
+        {
+          activity_type: 'CUSTOM_QUIZ',
+          catalog: { quiz_name: 'Sprint 1 Check', description: null },
+          assembled_quiz: { course_id: 'course-1', course: { course_name: 'Intro to SE' } },
+        },
+        {
+          activity_type: 'CUSTOM_QUIZ',
+          catalog: { quiz_name: 'Sprint 1 Check', description: null },
+          assembled_quiz: { course_id: 'course-2', course: { course_name: 'Advanced SE' } },
+        },
+      ],
+      error: null,
+    });
+
+    const result = await listActivityTypesForCourses(makeSupabase(), ['course-1', 'course-2']);
+
+    expect(result.activities).toHaveLength(1);
+    expect(result.activities?.[0].courseId).toBe('course-1');
+  });
+
+  it('surfaces a query error', async () => {
+    queue('assembled_quiz_catalog', { data: null, error: { message: 'db down' } });
+
+    const result = await listActivityTypesForCourses(makeSupabase(), ['course-1']);
+
+    expect(result).toEqual({ activities: null, error: { message: 'db down' } });
   });
 });

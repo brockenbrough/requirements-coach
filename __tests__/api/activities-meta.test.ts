@@ -54,7 +54,7 @@ function req(activityType: string, token: string | null = 'valid-token') {
 
 const PARAMS = (activityType: string) => ({ params: { activityType } });
 
-/** An activity_type row as getQuizByActivityType's embed actually returns it. */
+/** An activity_type row as getQuizByActivityType returns it. */
 function quizRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     activity_type: 'MY_CUSTOM_QUIZ',
@@ -62,14 +62,21 @@ function quizRow(overrides: Partial<Record<string, unknown>> = {}) {
     description: 'A quiz about things',
     creator_id: 'instructor-1',
     creator: { first_name: 'Ada', last_name: 'Brockenbrough', username: 'abrock' },
-    activity_type_course: [{ course_id: 'course-1', course: { course_name: 'Software Requirements' } }],
     ...overrides,
   };
 }
 
+/**
+ * Queues the two-query derivation getAccessibleCourseForActivity now uses: the caller's own
+ * enrolled courses (student_course), then an assembled_quiz in one of them that references the
+ * catalog (assembled_quiz_catalog) — a catalog has no course of its own any more.
+ */
 function queueEnrolled() {
-  queue('activity_type_course', { data: { course_id: 'course-1', course: { course_name: 'Software Requirements' } }, error: null });
   queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
+  queue('assembled_quiz_catalog', {
+    data: [{ assembled_quiz: { course_id: 'course-1', course: { course_name: 'Software Requirements' } } }],
+    error: null,
+  });
 }
 
 beforeEach(() => {
@@ -95,21 +102,22 @@ describe('GET /api/activities/:activityType', () => {
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body.error).toMatch(/not found/i);
-    expect(h.state.tables).not.toContain('activity_type_course');
+    expect(h.state.tables).not.toContain('assembled_quiz_catalog');
   });
 
-  it('returns 403 when the activity has no course link at all', async () => {
-    queue('activity_type', { data: quizRow({ activity_type_course: null }), error: null });
-    queue('activity_type_course', { data: null, error: null }); // unlinked
+  it('returns 403 when the caller is enrolled in nothing', async () => {
+    queue('activity_type', { data: quizRow(), error: null });
+    queue('student_course', { data: [], error: null }); // not enrolled anywhere
 
     const res = await GET(req('MY_CUSTOM_QUIZ'), PARAMS('MY_CUSTOM_QUIZ'));
     expect(res.status).toBe(403);
+    expect(h.state.tables).not.toContain('assembled_quiz_catalog');
   });
 
-  it('returns 403 when the caller is not enrolled in the linked course', async () => {
+  it('returns 403 when no assembled quiz in an enrolled course references the catalog', async () => {
     queue('activity_type', { data: quizRow(), error: null });
-    queue('activity_type_course', { data: { course_id: 'course-1', course: { course_name: 'Software Requirements' } }, error: null });
-    queue('student_course', { data: [], error: null }); // not enrolled
+    queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
+    queue('assembled_quiz_catalog', { data: [], error: null }); // reachable through nothing the caller is in
 
     const res = await GET(req('MY_CUSTOM_QUIZ'), PARAMS('MY_CUSTOM_QUIZ'));
     expect(res.status).toBe(403);
