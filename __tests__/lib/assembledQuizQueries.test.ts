@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pickRandomQuestions } from '../../lib/assembledQuizQueries';
+import { loadCatalogQuestionPool, pickRandomQuestions } from '../../lib/assembledQuizQueries';
 
 type PoolItem = { question_id: string };
 
@@ -61,5 +61,75 @@ describe('pickRandomQuestions', () => {
     );
 
     expect(draws.size).toBeGreaterThan(1);
+  });
+});
+
+// Same fake-client shape as __tests__/lib/instructorAuth.test.ts — loadCatalogQuestionPool takes
+// `supabase` as a plain argument, so there is nothing to vi.mock('../../lib/supabase') for here.
+function makeSupabase(questionRows: { question_id: string; max_score: number | null; activity_type: string }[]) {
+  const filters: { column: string; value: unknown }[] = [];
+
+  const builder = {
+    select: () => builder,
+    in: (column: string, value: unknown) => {
+      filters.push({ column, value });
+      return builder;
+    },
+    eq: (column: string, value: unknown) => {
+      filters.push({ column, value });
+      return builder;
+    },
+    then: (onOk: (r: { data: unknown; error: null }) => unknown) => Promise.resolve({ data: questionRows, error: null }).then(onOk),
+  };
+
+  return {
+    filters,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    supabase: { from: () => builder } as any,
+  };
+}
+
+describe('loadCatalogQuestionPool', () => {
+  it('GitHub #361: never returns a question that this quiz has excluded', async () => {
+    const { supabase } = makeSupabase([
+      { question_id: 'q-1', max_score: 25, activity_type: 'CATALOG_A' },
+      { question_id: 'q-2', max_score: 25, activity_type: 'CATALOG_A' },
+      { question_id: 'q-3', max_score: 25, activity_type: 'CATALOG_B' },
+    ]);
+
+    const { pool, error } = await loadCatalogQuestionPool(supabase, ['CATALOG_A', 'CATALOG_B'], 1, ['q-2']);
+
+    expect(error).toBeNull();
+    expect(pool?.map((q) => q.question_id).sort()).toEqual(['q-1', 'q-3']);
+  });
+
+  it('returns the full pool when no questions are excluded', async () => {
+    const { supabase } = makeSupabase([{ question_id: 'q-1', max_score: 25, activity_type: 'CATALOG_A' }]);
+
+    const { pool } = await loadCatalogQuestionPool(supabase, ['CATALOG_A'], 1);
+
+    expect(pool).toHaveLength(1);
+  });
+
+  it('filters by catalog and difficulty level, scoping the query rather than filtering client-side', async () => {
+    const { supabase, filters } = makeSupabase([]);
+
+    await loadCatalogQuestionPool(supabase, ['CATALOG_A', 'CATALOG_B'], 2, []);
+
+    expect(filters).toContainEqual({ column: 'activity_type', value: ['CATALOG_A', 'CATALOG_B'] });
+    expect(filters).toContainEqual({ column: 'difficulty_level', value: 2 });
+  });
+
+  it('composes with pickRandomQuestions to draw only from the non-excluded pool', async () => {
+    const { supabase } = makeSupabase([
+      { question_id: 'q-1', max_score: 25, activity_type: 'CATALOG_A' },
+      { question_id: 'q-2', max_score: 25, activity_type: 'CATALOG_A' },
+      { question_id: 'q-3', max_score: 25, activity_type: 'CATALOG_A' },
+    ]);
+
+    const { pool } = await loadCatalogQuestionPool(supabase, ['CATALOG_A'], 1, ['q-1', 'q-2']);
+    const draw = pickRandomQuestions(pool ?? [], 4);
+
+    expect(draw).toEqual([{ question_id: 'q-3', max_score: 25, activity_type: 'CATALOG_A' }]);
   });
 });

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../../components/AppShell';
 import { CreateQuizModal } from '../../../components/CreateQuizModal';
@@ -159,8 +160,12 @@ export default function InstructorAssembledQuizzesPage() {
                       </tr>
                     ) : (
                       quizzes.map((quiz) => (
-                        <tr key={quiz.id} className="border-t border-gray-100 bg-white">
-                          <td className="whitespace-nowrap px-4 py-3 font-extrabold text-brand-navy">{quiz.name}</td>
+                        <tr key={quiz.id} className="border-t border-gray-100 bg-white transition hover:bg-gray-50">
+                          <td className="whitespace-nowrap px-4 py-3 font-extrabold text-brand-navy">
+                            <Link href={`/instructor/assembled-quizzes/${encodeURIComponent(quiz.id)}`} className="hover:text-brand-purple hover:underline">
+                              {quiz.name}
+                            </Link>
+                          </td>
                           <td className="whitespace-nowrap px-4 py-3 text-gray-500">{quiz.courseName}</td>
                           <td className="px-4 py-3 text-gray-500">{quiz.catalogNames.join(', ') || '—'}</td>
                         </tr>

@@ -304,6 +304,28 @@ CREATE TABLE activity_type_course (
     course_id                uuid        NOT NULL,
     created_at                timestamp  NOT NULL DEFAULT now(),
     PRIMARY KEY (activity_type_course_id));
+-- GitHub #361: Quiz Excluded Question
+--
+-- "Displayed as copies of the originals" (the issue's own user story) is implemented as an
+-- exclusion list, not a duplication: a quiz still references the ORIGINAL catalogs via
+-- assembled_quiz_catalog above, and this table only records which of those catalogs' questions
+-- this one quiz should skip when drawing a round (lib/assembledQuizQueries.ts). The original
+-- question row is never touched — excluding it for one quiz is invisible to every other quiz,
+-- to the catalog's own detail page (GitHub #359), and to any student already working through
+-- that catalog directly. This avoids the alternative (cloning question/answer rows per quiz),
+-- which would need its own sync story the moment the original catalog changes.
+--
+-- Both FKs cascade: a quiz_excluded_question row means nothing once either the quiz or the
+-- question it names is gone. This is a deliberately different cascade choice from
+-- question_to_answer/answered_question_log's *lack* of one — those protect a student's answer
+-- history from disappearing silently; an instructor's own "skip this question" preference has no
+-- such history to protect.
+-- ---------------------------------------------------------------------
+CREATE TABLE quiz_excluded_question (
+    quiz_excluded_question_id SERIAL NOT NULL,
+    assembled_quiz_id         uuid   NOT NULL,
+    question_id                uuid   NOT NULL,
+    PRIMARY KEY (quiz_excluded_question_id));
 
 
 -- =====================================================================
@@ -458,6 +480,10 @@ ALTER TABLE assembled_quiz_catalog ADD CONSTRAINT fk_assembled_quiz_catalog_acti
 ALTER TABLE activity_type_course ADD CONSTRAINT fk_activity_type_course_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
 -- A link has no meaning once its course is gone, same reasoning as fk_assembled_quiz_course.
 ALTER TABLE activity_type_course ADD CONSTRAINT fk_activity_type_course_course FOREIGN KEY (course_id) REFERENCES course (course_id) ON DELETE CASCADE;
+-- GitHub #361: both cascade — see the quiz_excluded_question table comment above for why this
+-- pair differs from question_to_answer/answered_question_log's lack of one.
+ALTER TABLE quiz_excluded_question ADD CONSTRAINT fk_quiz_excluded_question_quiz FOREIGN KEY (assembled_quiz_id) REFERENCES assembled_quiz (assembled_quiz_id) ON DELETE CASCADE;
+ALTER TABLE quiz_excluded_question ADD CONSTRAINT fk_quiz_excluded_question_question FOREIGN KEY (question_id) REFERENCES question (question_id) ON DELETE CASCADE;
 
 ALTER TABLE title_definition ADD CONSTRAINT fk_title_definition_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
 -- Who authored the story, for attribution/moderation.
@@ -567,6 +593,10 @@ ALTER TABLE activity_type_course ADD CONSTRAINT uq_activity_type_course_activity
 -- "Every activity available in this course" (the student discovery list, and the instructor's
 -- per-course catalog view) filters on exactly this column.
 CREATE INDEX ix_activity_type_course_course_id ON activity_type_course (course_id);
+-- GitHub #361: a quiz cannot exclude the same question twice, and "every question this quiz has
+-- excluded" (subtracted from the draw pool) filters on assembled_quiz_id.
+ALTER TABLE quiz_excluded_question ADD CONSTRAINT uq_quiz_excluded_question UNIQUE (assembled_quiz_id, question_id);
+CREATE INDEX ix_quiz_excluded_question_quiz_id ON quiz_excluded_question (assembled_quiz_id);
 
 -- At most one running session per student and activity type. This is what
 -- makes POST /api/sessions idempotent: "start" and "resume" are the same
@@ -685,6 +715,7 @@ ALTER TABLE student_course ENABLE ROW LEVEL SECURITY;
 ALTER TABLE assembled_quiz ENABLE ROW LEVEL SECURITY;
 ALTER TABLE assembled_quiz_catalog ENABLE ROW LEVEL SECURITY;
 ALTER TABLE activity_type_course ENABLE ROW LEVEL SECURITY;
+ALTER TABLE quiz_excluded_question ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE session_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE answered_question_log ENABLE ROW LEVEL SECURITY;
@@ -980,3 +1011,9 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 --   INSERT INTO activity_type_course (activity_type, course_id)
 --   SELECT activity_type, '<course-uuid>' FROM activity_type WHERE creator_id IS NULL
 --   ON CONFLICT DO NOTHING;
+-- GitHub #361 (per-quiz question exclusions): another brand new table, same no-rename/no-backfill
+-- path as #360 above — run the CREATE TABLE quiz_excluded_question statement, its two FKs
+-- (fk_quiz_excluded_question_quiz, fk_quiz_excluded_question_question), its unique constraint and
+-- index, and ALTER TABLE quiz_excluded_question ENABLE ROW LEVEL SECURITY. No existing table's
+-- shape changes; a database that already has assembled_quiz/assembled_quiz_catalog from #360
+-- needs nothing else.
