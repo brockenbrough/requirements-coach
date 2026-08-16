@@ -12,10 +12,11 @@ import type { ActivityType, GradingKind } from './activityTypes';
  * titles ladder is preserved where a server-resolved custom catalog only gets generic fallbacks.
  *
  * Widened to `string` (kept as an alias purely so existing `: ActivitySlug` annotations keep
- * compiling) for the same reason lib/activityTypes.ts's ActivityType was: since every
- * activity_type is now linked to a course (activity_type_course) and reachable by students who
- * are enrolled in it, app/activities/[slug]/page.tsx routes on more than these three known
- * slugs — see buildCustomActivityDefinition below for how an unrecognized one is resolved.
+ * compiling) for the same reason lib/activityTypes.ts's ActivityType was: a catalog reachable
+ * through an assembled quiz belonging to a course a student is enrolled in
+ * (lib/activityCourseQueries.ts) can be any activity_type, so app/activities/[slug]/page.tsx
+ * routes on more than these three known slugs — see buildCustomActivityDefinition below for how
+ * an unrecognized one is resolved.
  */
 export type ActivitySlug = string;
 

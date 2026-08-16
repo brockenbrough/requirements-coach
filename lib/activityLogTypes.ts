@@ -42,6 +42,36 @@ export function resultStateOf(entry: Pick<ActivityLogEntry, 'status' | 'passed'>
   return entry.passed ? 'passed' : 'not-passed';
 }
 
+export type ActivityFilterOption = { value: ActivityType; label: string };
+
+/**
+ * The Activity Log filter's options (GitHub #380-ish "filter by what I've actually attempted") —
+ * distinct activityTypes present in `entries`, each with a human-readable label. Replaces a
+ * hardcoded 3-item list that could never surface a custom quiz and never shrank when a built-in
+ * type had zero attempts: since the options come only from `entries`, an unattempted type can
+ * never appear and an empty log yields an empty list (the filter then shows only "All").
+ *
+ * `nameByType` (activityType -> activityName, e.g. from GET /api/students/{id}/available-titles,
+ * which resolves the real activity_type.quiz_name) is optional context for a better label than an
+ * entry's own denormalized activityName can offer — toActivityLogEntry falls back to the raw
+ * activity_type key for a custom quiz, since getActivityByType only knows the three built-ins.
+ * Purely a label upgrade: it never changes which types show up as options.
+ */
+export function deriveActivityFilterOptions(
+  entries: ActivityLogEntry[],
+  nameByType: Map<string, string> = new Map(),
+): ActivityFilterOption[] {
+  const labelByType = new Map<string, string>();
+  for (const entry of entries) {
+    if (labelByType.has(entry.activityType)) continue;
+    labelByType.set(entry.activityType, nameByType.get(entry.activityType) ?? entry.activityName);
+  }
+
+  return [...labelByType.entries()]
+    .map(([value, label]) => ({ value: value as ActivityType, label }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
 /**
  * One student's attempt, as the Instructor Dashboard (GitHub #82) needs it — every field of
  * ActivityLogEntry plus who it belongs to. Deliberately an extension rather than a parallel

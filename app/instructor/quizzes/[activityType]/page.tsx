@@ -262,8 +262,7 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
                 <p className="max-w-2xl text-sm font-semibold text-gray-500">
                   {quiz.description ? `${quiz.description} · ` : ''}
                   {items.length} {llmGraded ? 'prompt' : 'question'}
-                  {items.length === 1 ? '' : 's'} · by {quiz.authorName} ·{' '}
-                  {quiz.courseName ?? 'Not linked to a course yet'}
+                  {items.length === 1 ? '' : 's'} · by {quiz.authorName}
                 </p>
               </div>
               <div className="flex flex-none items-center gap-2">

@@ -159,10 +159,10 @@ export async function POST(request: Request) {
   const { data: { user }, error: authError } = await supabase.auth.getUser(token);
   if (authError || !user) return Response.json({ error: 'Invalid or expired token.' }, { status: 401 });
 
-  // Every activity now belongs to exactly one course (activity_type_course) — a student can only
-  // start a session against one whose course they're enrolled in. Checked here rather than
-  // folded into isActivityType above: "does this exist" and "can this caller see it" are
-  // different questions, and only the second one needs the caller's identity.
+  // A catalog has no course of its own — it's reachable only through an assembled quiz that
+  // references it and belongs to a course (lib/activityCourseQueries.ts's checkActivityAccess).
+  // Checked here rather than folded into isActivityType above: "does this exist" and "can this
+  // caller see it" are different questions, and only the second one needs the caller's identity.
   const access = await checkActivityAccess(supabase, activityType, user.id);
   if (access.status === 'error') return Response.json({ error: access.error.message }, { status: 500 });
   if (access.status === 'forbidden') {

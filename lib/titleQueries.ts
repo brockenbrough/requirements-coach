@@ -2,8 +2,9 @@
 // so the student-facing titles route and any future consumer (e.g. the "new title earned"
 // notification from REQ-GAM-PL-2.4) cannot drift apart.
 
-import { highestPassedLevelByType, type PassedSessionRow } from './sessionRules';
+import { highestPassedLevelByType, MAX_DIFFICULTY_LEVEL, type PassedSessionRow } from './sessionRules';
 import type { SupabaseClient } from './sessionQueries';
+import { listActivityTypesForCourses } from './activityCourseQueries';
 
 export type StudentTitle = {
   activityType: string;
@@ -55,4 +56,68 @@ export async function computeStudentTitles(supabase: SupabaseClient, userId: str
   });
 
   return { titles, error: null };
+}
+
+/** One difficulty level's earnable title within an activity type's ladder — null if no title_definition row exists for it yet. */
+export type TitleLadderRung = { difficultyLevel: number; title: string | null };
+
+/**
+ * One activity type's full earnable title ladder (every difficulty level, not just the one a
+ * student has reached), replacing the compile-time-fixed ladder that used to live on
+ * ActivityDefinition.titles (lib/activityContent.ts). Course metadata is carried alongside since
+ * this is always built from a course-scoped activity list (see loadAvailableTitleLadders below).
+ */
+export type AvailableActivityTitles = {
+  activityType: string;
+  activityName: string;
+  courseId: string;
+  courseName: string;
+  titles: TitleLadderRung[];
+};
+
+/**
+ * Every activity type linked to any of the given courses, each with its full title_definition
+ * ladder (levels 1..MAX_DIFFICULTY_LEVEL) — "all titles you can earn" for whoever those courses
+ * belong to. Callers already have courseIds on hand for their own reasons (a student's own
+ * enrollments for the self-only route, or the target's enrollments already fetched for the
+ * shared-course check on the public-profile route), so this takes the id list directly rather
+ * than a userId, avoiding a second getEnrolledCourseIds read in either case.
+ *
+ * A level with no title_definition row yet (a freshly created custom quiz, or
+ * WRITE_ACCEPTANCE_CRITERIA today) gets title: null rather than being omitted — callers decide
+ * how to render that gap (lib/masteryTitles.ts falls back to a generic "Level N" label, the same
+ * placeholder buildCustomActivityDefinition used to hardcode).
+ */
+export async function loadAvailableTitleLadders(supabase: SupabaseClient, courseIds: string[]) {
+  const { activities: courseActivities, error: activitiesError } = await listActivityTypesForCourses(
+    supabase,
+    courseIds,
+  );
+  if (activitiesError || !courseActivities) return { activities: null, error: activitiesError };
+  if (courseActivities.length === 0) return { activities: [], error: null };
+
+  const activityTypes = courseActivities.map((activity) => activity.activityType);
+  const { data: titleRows, error: titleError } = await supabase
+    .from('title_definition')
+    .select('activity_type, difficulty_level, title_name')
+    .in('activity_type', activityTypes);
+
+  if (titleError) return { activities: null, error: titleError };
+
+  const titleByKey = new Map(
+    ((titleRows ?? []) as TitleDefinitionRow[]).map((row) => [`${row.activity_type}:${row.difficulty_level}`, row.title_name]),
+  );
+
+  const activities: AvailableActivityTitles[] = courseActivities.map((activity) => ({
+    activityType: activity.activityType,
+    activityName: activity.name,
+    courseId: activity.courseId,
+    courseName: activity.courseName,
+    titles: Array.from({ length: MAX_DIFFICULTY_LEVEL }, (_, index) => {
+      const difficultyLevel = index + 1;
+      return { difficultyLevel, title: titleByKey.get(`${activity.activityType}:${difficultyLevel}`) ?? null };
+    }),
+  }));
+
+  return { activities, error: null };
 }

@@ -5,18 +5,6 @@ export type ActivityFilterValue = 'all' | ActivityType;
 export type StatusFilterValue = 'all' | ActivityResultState;
 export type SortOrder = 'newest' | 'oldest' | 'highest' | 'lowest';
 
-/**
- * GitHub #379: the activity pills are derived from the entries on screen rather than being a
- * hardcoded list of the three built-ins. That list had quietly been wrong since instructors could
- * create their own activity types (#347) — a custom catalog's attempts showed up in the table but
- * could never be filtered for, and this issue adds a whole second kind of them.
- *
- * Derived by the caller and passed in, not computed here, because only the caller knows which
- * entries are in scope; this component stays a presentational control. 'All' is prepended here so
- * no caller has to remember to.
- */
-export type ActivityFilterOption = { value: ActivityType; label: string };
-
 const STATUS_OPTIONS: { value: StatusFilterValue; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'passed', label: 'Passed' },
@@ -48,7 +36,14 @@ function PillButton({ active, onClick, children }: { active: boolean; onClick: (
   );
 }
 
-/** Activity + status filters (pills, so the current selection reads at a glance) plus a sort order — all controlled from the Activity Log page so filtering/sorting stays a single, testable state object. */
+/**
+ * Activity + status filters (pills, so the current selection reads at a glance) plus a sort order
+ * — all controlled from the Activity Log page so filtering/sorting stays a single, testable state
+ * object. `activityOptions` is the caller's derived "what has this student actually attempted"
+ * list (lib/activityLogTypes.ts's deriveActivityFilterOptions) — "All" is injected here rather
+ * than required from the caller, so it can never be dropped and an empty `activityOptions` still
+ * renders a usable (if single-pill) filter.
+ */
 export function ActivityFilters({
   activity,
   activityOptions,
@@ -59,14 +54,14 @@ export function ActivityFilters({
   onSortChange,
 }: {
   activity: ActivityFilterValue;
-  activityOptions: ActivityFilterOption[];
+  activityOptions: { value: ActivityFilterValue; label: string }[];
   status: StatusFilterValue;
   sort: SortOrder;
   onActivityChange: (value: ActivityFilterValue) => void;
   onStatusChange: (value: StatusFilterValue) => void;
   onSortChange: (value: SortOrder) => void;
 }) {
-  const options: { value: ActivityFilterValue; label: string }[] = [
+  const allActivityOptions: { value: ActivityFilterValue; label: string }[] = [
     { value: 'all', label: 'All' },
     ...activityOptions,
   ];
@@ -76,7 +71,7 @@ export function ActivityFilters({
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="mr-0.5 text-[11px] font-extrabold uppercase tracking-wide text-gray-400">Activity</span>
-          {options.map((option) => (
+          {allActivityOptions.map((option) => (
             <PillButton key={option.value} active={activity === option.value} onClick={() => onActivityChange(option.value)}>
               {option.label}
             </PillButton>

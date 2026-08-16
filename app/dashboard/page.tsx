@@ -11,7 +11,14 @@ import { toActivityLogEntry } from "../../lib/activityLogTypes";
 import { ActivityState, getActivityState } from "../../lib/activityStore";
 import { loadDailyChallenge } from "../../lib/dailyChallengeClient";
 import type { DailyChallengeState } from "../../lib/dailyChallengeTypes";
-import { type SessionListEntry, type StudentTitle, loadSessions, loadStudentTitles } from "../../lib/sessionClient";
+import type { AvailableActivityTitles } from "../../lib/leaderboardTypes";
+import {
+  type SessionListEntry,
+  type StudentTitle,
+  loadAvailableTitles,
+  loadSessions,
+  loadStudentTitles,
+} from "../../lib/sessionClient";
 import { useRequireRole } from "../../lib/useRequireRole";
 
 const RECENT_LIMIT = 3;
@@ -34,6 +41,7 @@ export default function DashboardPage() {
   > | null>(null);
   const [recent, setRecent] = useState<SessionListEntry[] | null>(null);
   const [titles, setTitles] = useState<StudentTitle[] | null>(null);
+  const [availableTitles, setAvailableTitles] = useState<AvailableActivityTitles[] | null>(null);
   const [dailyChallenge, setDailyChallenge] = useState<DailyChallengeState | null>(null);
 
   useEffect(() => {
@@ -67,6 +75,16 @@ export default function DashboardPage() {
     loadStudentTitles(token, profile.user_id).then((result) => {
       if (cancelled) return;
       if (result.ok) setTitles(result.data.titles);
+    });
+    return () => { cancelled = true; };
+  }, [token, profile?.user_id]);
+
+  useEffect(() => {
+    if (!token || !profile?.user_id) return;
+    let cancelled = false;
+    loadAvailableTitles(token, profile.user_id).then((result) => {
+      if (cancelled) return;
+      if (result.ok) setAvailableTitles(result.data.activities);
     });
     return () => { cancelled = true; };
   }, [token, profile?.user_id]);
@@ -271,71 +289,82 @@ export default function DashboardPage() {
       <h3 className="mb-4 text-lg font-extrabold text-[#1B1642]">
         Mastery titles
       </h3>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {ACTIVITIES.map((activity) => {
-          const titleEntry = titles?.find((t) => t.activityType === activity.activityType);
-          const highest = (titleEntry?.difficultyLevel ?? null) as Difficulty | null;
-          return (
-            <div
-              key={activity.slug}
-              className="rounded-2xl border border-gray-100 bg-gray-50 p-4"
-            >
-              <p className="mb-3 text-sm font-extrabold text-[#1B1642]">
-                {activity.name}
-              </p>
-              <div className="flex flex-col gap-2">
-                {([1, 2, 3] as Difficulty[]).map((level) => {
-                  const earned = highest !== null && level <= highest;
-                  const isCurrent = level === highest;
-                  return (
-                    <div
-                      key={level}
-                      className={`flex items-center justify-between gap-2 rounded-xl px-3 py-2 ${
-                        isCurrent ? "bg-[#7C4DFF] text-white" : "bg-white"
-                      }`}
-                    >
-                      <div>
-                        <div
-                          className={`text-sm font-extrabold ${isCurrent ? "text-white" : "text-[#1B1642]"}`}
-                        >
-                          {activity.titles[level]}
-                        </div>
-                        {!earned ? (
-                          <div className="text-xs font-semibold text-gray-400">
-                            Reach level {level} with 75%+
+      {availableTitles && availableTitles.length === 0 ? (
+        // Course-scoped now (GET /api/students/{id}/available-titles), not the fixed set of
+        // three ACTIVITIES used to hardcode — a student enrolled in no course, or in courses with
+        // nothing linked yet, sees this instead of an empty grid.
+        <p className="rounded-2xl border border-gray-100 bg-gray-50 p-6 text-sm font-semibold text-gray-500">
+          No mastery titles yet — join a course to see what you can earn.
+        </p>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {(availableTitles ?? []).map((activity) => {
+            const titleEntry = titles?.find((t) => t.activityType === activity.activityType);
+            const highest = titleEntry?.difficultyLevel ?? null;
+            const ladder = activity.titles.slice().sort((a, b) => a.difficultyLevel - b.difficultyLevel);
+            return (
+              <div
+                key={activity.activityType}
+                className="rounded-2xl border border-gray-100 bg-gray-50 p-4"
+              >
+                <p className="mb-3 text-sm font-extrabold text-[#1B1642]">
+                  {activity.activityName}
+                </p>
+                <div className="flex flex-col gap-2">
+                  {ladder.map((rung) => {
+                    const level = rung.difficultyLevel;
+                    const earned = highest !== null && level <= highest;
+                    const isCurrent = level === highest;
+                    return (
+                      <div
+                        key={level}
+                        className={`flex items-center justify-between gap-2 rounded-xl px-3 py-2 ${
+                          isCurrent ? "bg-[#7C4DFF] text-white" : "bg-white"
+                        }`}
+                      >
+                        <div>
+                          <div
+                            className={`text-sm font-extrabold ${isCurrent ? "text-white" : "text-[#1B1642]"}`}
+                          >
+                            {rung.title ?? `Level ${level}`}
                           </div>
-                        ) : null}
+                          {!earned ? (
+                            <div className="text-xs font-semibold text-gray-400">
+                              Reach level {level} with 75%+
+                            </div>
+                          ) : null}
+                        </div>
+                        {earned ? (
+                          <span
+                            className={`flex h-6 w-6 flex-none items-center justify-center rounded-full text-xs ${
+                              isCurrent
+                                ? "bg-white/25 text-white"
+                                : "bg-[#2DD4BF]/20 text-[#0f7d70]"
+                            }`}
+                          >
+                            ✓
+                          </span>
+                        ) : (
+                          <svg
+                            viewBox="0 0 24 24"
+                            className="h-5 w-5 flex-none text-gray-300"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                          >
+                            <rect x="5" y="11" width="14" height="9" rx="2" />
+                            <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+                          </svg>
+                        )}
                       </div>
-                      {earned ? (
-                        <span
-                          className={`flex h-6 w-6 flex-none items-center justify-center rounded-full text-xs ${
-                            isCurrent
-                              ? "bg-white/25 text-white"
-                              : "bg-[#2DD4BF]/20 text-[#0f7d70]"
-                          }`}
-                        >
-                          ✓
-                        </span>
-                      ) : (
-                        <svg
-                          viewBox="0 0 24 24"
-                          className="h-5 w-5 flex-none text-gray-300"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth={2}
-                        >
-                          <rect x="5" y="11" width="14" height="9" rx="2" />
-                          <path d="M8 11V7a4 4 0 0 1 8 0v4" />
-                        </svg>
-                      )}
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </AppShell>
   );
 }

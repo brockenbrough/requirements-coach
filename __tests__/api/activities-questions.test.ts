@@ -33,13 +33,16 @@ function queue(table: string, result: Result) {
 }
 
 /**
- * Queues a course link + enrollment so checkActivityAccess (lib/activityCourseQueries.ts)
- * resolves to 'ok' — every activity is now linked to exactly one course, and this route only
- * serves questions to a caller enrolled in it.
+ * Queues the two-query derivation so checkActivityAccess (lib/activityCourseQueries.ts) resolves
+ * to 'ok' — a catalog has no course of its own; this route only serves questions to a caller
+ * enrolled in a course whose assembled quizzes reference the catalog.
  */
 function queueEnrolled() {
-  queue('activity_type_course', { data: { course_id: 'course-1', course: { course_name: 'Software Requirements' } }, error: null });
   queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
+  queue('assembled_quiz_catalog', {
+    data: [{ assembled_quiz: { course_id: 'course-1', course: { course_name: 'Software Requirements' } } }],
+    error: null,
+  });
 }
 
 /**
@@ -103,17 +106,17 @@ describe('GET /api/activities/:activityType/questions', () => {
     expect(body.error).toMatch(/unknown activity type/i);
   });
 
-  it('returns 403 when the activity has no course link at all', async () => {
+  it('returns 403 when no assembled quiz reaches the activity at all', async () => {
     queue('activity_type', { data: { activity_type: 'IDENTIFY_WEAK_USER_STORIES' }, error: null });
-    queue('activity_type_course', { data: null, error: null }); // unlinked
+    queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
+    queue('assembled_quiz_catalog', { data: [], error: null }); // unreachable
 
     const res = await GET(makeRequest('IDENTIFY_WEAK_USER_STORIES', '1'), PARAMS('IDENTIFY_WEAK_USER_STORIES'));
     expect(res.status).toBe(403);
   });
 
-  it('returns 403 when the caller is not enrolled in the activity\'s linked course', async () => {
+  it('returns 403 when the caller is not enrolled in any course', async () => {
     queue('activity_type', { data: { activity_type: 'IDENTIFY_WEAK_USER_STORIES' }, error: null });
-    queue('activity_type_course', { data: { course_id: 'course-1', course: { course_name: 'Software Requirements' } }, error: null });
     queue('student_course', { data: [], error: null }); // not enrolled
 
     const res = await GET(makeRequest('IDENTIFY_WEAK_USER_STORIES', '1'), PARAMS('IDENTIFY_WEAK_USER_STORIES'));

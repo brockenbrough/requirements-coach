@@ -21,12 +21,10 @@ export type QuizSummary = {
    *  field rather than two so the browse page's existing column needs only a label change — a
    *  catalog only ever has one of the two pools, so a combined count is never ambiguous. */
   questionCount: number;
-  /** The one course this activity is linked to (activity_type_course), or null if unlinked — see
-   *  that table's own header comment in supabase/schema.sql. An unlinked activity is not visible
-   *  to any student yet, which this lets the browse/detail pages surface honestly instead of
-   *  silently omitting the column. */
-  courseId: string | null;
-  courseName: string | null;
+  /** How many assembled_quiz rows (GitHub #360) currently reference this catalog — a catalog has
+   *  no course of its own, so this is the closest honest answer to "where is this used" the
+   *  browse page can show. Zero just means nobody has composed it into a quiz yet, not an error. */
+  quizCount: number;
 };
 
 type QuizRow = {
@@ -38,13 +36,8 @@ type QuizRow = {
   creator: { first_name: string | null; last_name: string | null; username: string | null } | null;
   question: { count: number }[] | null;
   user_story: { count: number }[] | null;
-  activity_type_course: { course_id: string; course: { course_name: string } | null }[] | null;
+  assembled_quiz_catalog: { count: number }[] | null;
 };
-
-function courseFields(row: QuizRow): { courseId: string | null; courseName: string | null } {
-  const link = row.activity_type_course?.[0] ?? null;
-  return { courseId: link?.course_id ?? null, courseName: link?.course?.course_name ?? null };
-}
 
 /**
  * Falls back to 'mcq' for the same reason the column defaults to it in the schema: every
@@ -67,16 +60,15 @@ function authorNameOf(row: QuizRow): string {
 
 /**
  * Every quiz in the system — built-in or instructor-created — with its author, question count,
- * and linked course, for the instructor-facing browse page. Quizzes are globally shared (not
- * scoped to the calling instructor): anyone can see and reuse anyone else's, which is the entire
- * point of GitHub #347 — course linkage doesn't change that, it only says which course a student
- * would need to be enrolled in to actually see it.
+ * and how many assembled quizzes currently reference it, for the instructor-facing browse page.
+ * Quizzes are globally shared (not scoped to the calling instructor): anyone can see and reuse
+ * anyone else's, which is the entire point of GitHub #347.
  *
  * One query, using the same creator:creator_id(...) + related-table (count) embed pattern
  * lib/courseQueries.ts's listJoinableCourses uses for professor_name/student_count, extended with
- * a reverse embed onto activity_type_course (the same direction question(count) already embeds
- * in) for the linked course — author name, question count, and course come back on the same row
- * as the quiz itself rather than three round trips merged in JS.
+ * a second count embed onto assembled_quiz_catalog (the m:n link table from GitHub #360) — author
+ * name, question count, and usage count come back on the same row as the quiz itself rather than
+ * three round trips merged in JS.
  *
  * GitHub #379: user_story(count) rides along the same way question(count) does — that embed is
  * what fk_user_story_activity_type was added for — and grading_kind decides which of the two
@@ -87,7 +79,7 @@ export async function listQuizzesWithAuthorAndCount(supabase: SupabaseClient) {
   const { data, error } = await supabase
     .from('activity_type')
     .select(
-      'activity_type, quiz_name, description, grading_kind, creator_id, creator:creator_id(first_name, last_name, username), question(count), user_story(count), activity_type_course(course_id, course:course_id(course_name))',
+      'activity_type, quiz_name, description, grading_kind, creator_id, creator:creator_id(first_name, last_name, username), question(count), user_story(count), assembled_quiz_catalog(count)',
     )
     .order('quiz_name', { ascending: true });
 
@@ -103,26 +95,25 @@ export async function listQuizzesWithAuthorAndCount(supabase: SupabaseClient) {
       authorName: authorNameOf(row),
       gradingKind,
       questionCount: itemCountOf(row, gradingKind),
-      ...courseFields(row),
+      quizCount: row.assembled_quiz_catalog?.[0]?.count ?? 0,
     };
   });
 
   return { quizzes, error: null };
 }
 
-export type QuizMeta = Omit<QuizSummary, 'questionCount'>;
+export type QuizMeta = Omit<QuizSummary, 'questionCount' | 'quizCount'>;
 
 /**
- * GitHub #359: one catalog's own metadata (name/description/author/course), for the catalog
- * detail page — the single-row counterpart to listQuizzesWithAuthorAndCount's list. Returns
- * { quiz: null } (not an error) when activityType matches no row, so the route can turn that
- * into a 404.
+ * GitHub #359: one catalog's own metadata (name/description/author), for the catalog detail page
+ * — the single-row counterpart to listQuizzesWithAuthorAndCount's list. Returns { quiz: null }
+ * (not an error) when activityType matches no row, so the route can turn that into a 404.
  */
 export async function getQuizByActivityType(supabase: SupabaseClient, activityType: string) {
   const { data, error } = await supabase
     .from('activity_type')
     .select(
-      'activity_type, quiz_name, description, grading_kind, creator_id, creator:creator_id(first_name, last_name, username), activity_type_course(course_id, course:course_id(course_name))',
+      'activity_type, quiz_name, description, grading_kind, creator_id, creator:creator_id(first_name, last_name, username)',
     )
     .eq('activity_type', activityType)
     .maybeSingle();
@@ -138,7 +129,6 @@ export async function getQuizByActivityType(supabase: SupabaseClient, activityTy
     description: row.description,
     authorName: authorNameOf(row),
     gradingKind: gradingKindOf(row),
-    ...courseFields(row),
   };
 
   return { quiz, error: null };
