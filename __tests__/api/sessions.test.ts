@@ -78,7 +78,6 @@ const sessionRow = {
   cumulative_score: 0,
   max_score: 100,
   passed: false,
-  badge_id: null,
 };
 
 const pool = Array.from({ length: 6 }, (_, i) => ({ question_id: `q-${i + 1}`, max_score: 25 }));
@@ -480,7 +479,7 @@ describe('POST /api/sessions', () => {
     expect((await response.json()).error).toMatch(/profile/i);
   });
 
-  // GitHub #124: session_log's other foreign keys (activity_type from #123, badge) must not be
+  // GitHub #124: session_log's other foreign key (activity_type from #123) must not be
   // misreported as the profile case just because they share the 23503 code.
   it('returns 500, not the profile message, for an unrelated foreign key violation', async () => {
     queueFreshSessionStart();

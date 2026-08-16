@@ -21,7 +21,6 @@ export type SessionRecord = {
   cumulative_score: number;
   max_score: number;
   passed: boolean;
-  badge_id: string | null;
 };
 
 /** A session as the list endpoints return it: the record plus how far it got. */

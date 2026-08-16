@@ -79,7 +79,6 @@ const sessionRow = {
   cumulative_score: 0,
   max_score: 40,
   passed: false,
-  badge_id: null,
 };
 
 const drawnStories = Array.from({ length: 4 }, (_, i) => ({

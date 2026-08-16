@@ -87,7 +87,6 @@ function sessionRow(overrides: Partial<Record<string, unknown>> = {}) {
     cumulative_score: 75,
     max_score: 100,
     passed: false,
-    badge_id: null,
     student: { first_name: 'Alex', last_name: 'Chen', username: 'achen', role: 'student' },
     ...overrides,
   };

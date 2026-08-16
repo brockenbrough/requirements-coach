@@ -40,10 +40,17 @@
 -- GitHub #347: quiz_name backfilled from lib/activityContent.ts's ACTIVITIES[].name — the exact
 -- names the app already shows for these three activities everywhere else. description and
 -- creator_id are left at their defaults (NULL) — these three are the "Built-in" quizzes.
+--
+-- grading_kind: the first two draw from question/answer, same as every quiz catalog — the
+-- 'mcq' default (schema.sql) applies and is left implicit. WRITE_ACCEPTANCE_CRITERIA draws from
+-- user_story and is graded via instructor_llm_config instead, so it needs the explicit
+-- 'llm-graded' value — see activity_type's own header comment in schema.sql.
 INSERT INTO activity_type (activity_type, quiz_name) VALUES
 ('IDENTIFY_WEAK_USER_STORIES', 'Identify Weak User Stories'),
-('IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 'Identify Weak Acceptance Criteria'),
-('WRITE_ACCEPTANCE_CRITERIA', 'Write Acceptance Criteria');
+('IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', 'Identify Weak Acceptance Criteria');
+
+INSERT INTO activity_type (activity_type, quiz_name, grading_kind) VALUES
+('WRITE_ACCEPTANCE_CRITERIA', 'Write Acceptance Criteria', 'llm-graded');
 
 
 -- #####################################################################

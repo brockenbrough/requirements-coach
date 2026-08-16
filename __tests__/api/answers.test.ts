@@ -72,7 +72,6 @@ function sessionRow(overrides: Record<string, unknown> = {}) {
     cumulative_score: 0,
     max_score: 100,
     passed: false,
-    badge_id: null,
     ...overrides,
   };
 }

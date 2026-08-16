@@ -64,11 +64,26 @@ CREATE TABLE "user" (
 -- below: a deleted instructor account should not silently orphan or
 -- cascade-delete the quiz (and everything built on it — questions,
 -- sessions, titles) they created.
+--
+-- grading_kind: which question pool and grading path this activity_type uses. Before this
+-- column existed, that distinction was purely which route was called and which table
+-- (question vs. user_story) happened to have rows for the key — nothing on the row itself said
+-- so, and WRITE_ACCEPTANCE_CRITERIA was the one hardcoded exception in the session-start route.
+-- 'mcq' means the activity draws from question/answer, same as every quiz catalog today;
+-- 'llm-graded' means it draws from user_story and is graded via instructor_llm_config, the same
+-- shape WRITE_ACCEPTANCE_CRITERIA already has. This column only records the *kind* — it does not
+-- itself enforce that question rows only target 'mcq' activity_types and user_story rows only
+-- target 'llm-graded' ones; Postgres CHECK constraints can't reference another table, so that
+-- pairing remains an application invariant, same as SESSION_QUESTION_COLUMNS' column-visibility
+-- split is (see CLAUDE.md). DEFAULT 'mcq' matches every activity_type created before this column
+-- existed (see the migration note near the bottom of this file for the WRITE_ACCEPTANCE_CRITERIA
+-- backfill).
 -- ---------------------------------------------------------------------
 CREATE TABLE activity_type (
     activity_type varchar(50) NOT NULL,
     quiz_name     text        NOT NULL,
     description   text,
+    grading_kind  text        NOT NULL DEFAULT 'mcq',
     creator_id    uuid,
     PRIMARY KEY (activity_type));
 
@@ -104,12 +119,6 @@ CREATE TABLE question_to_answer (
     question_id uuid NOT NULL,
     answer_id uuid NOT NULL,
     PRIMARY KEY (question_to_answer_id));
-
-CREATE TABLE badge (
-    badge_id uuid NOT NULL,
-    badge_name text NOT NULL,
-    badge_image_uri text,
-    PRIMARY KEY (badge_id));
 
 -- ---------------------------------------------------------------------
 -- User Story Bank
@@ -196,13 +205,6 @@ CREATE TABLE title_definition (
     difficulty_level      int2        NOT NULL,
     title_name            text        NOT NULL,
     PRIMARY KEY (title_definition_id));
-
-CREATE TABLE user_badge (
-    user_badge_id uuid NOT NULL,
-    created_at timestamp NOT NULL,
-    user_id uuid NOT NULL,
-    badge_id uuid NOT NULL,
-    PRIMARY KEY (user_badge_id));
 
 -- ---------------------------------------------------------------------
 -- REQ-DL-5: Course Enrollment Storage
@@ -327,6 +329,35 @@ CREATE TABLE quiz_excluded_question (
     question_id                uuid   NOT NULL,
     PRIMARY KEY (quiz_excluded_question_id));
 
+-- ---------------------------------------------------------------------
+-- Assembled Quiz Extra Question
+--
+-- The inverse of quiz_excluded_question above: a hand-picked question added directly to an
+-- assembled quiz, independent of whether its catalog (question.activity_type) is one of the
+-- quiz's linked catalogs (assembled_quiz_catalog) at all. Before this table, a quiz's question
+-- pool could only ever be "every question in a linked catalog, minus exclusions" — there was no
+-- way to add a single question without linking (and pulling in every other question from) its
+-- whole catalog. The active pool for a draw becomes the union of the catalog-derived set and
+-- this table's rows for the quiz, computed live the same way the catalog/exclusion side already
+-- is (lib/assembledQuizQueries.ts) — not materialized, so a later edit to the question itself is
+-- reflected immediately, same reasoning as the catalog side.
+--
+-- Deliberately a separate table from quiz_excluded_question rather than one signed/flagged table
+-- ("include" vs "exclude" rows together) — the two answer different questions (which catalog
+-- questions to drop vs. which non-catalog questions to add) and a hand-picked question here can
+-- never be meaningfully "excluded" by the other table, since exclusion only ever subtracts from
+-- the catalog-derived set. Removing a row here is how a hand-picked question is dropped instead.
+--
+-- Both FKs cascade, same reasoning as quiz_excluded_question's: a row here means nothing once
+-- either the quiz or the question it names is gone, and there is no student attempt history
+-- tied to an assembled_quiz (see that table's own header comment) for a cascade to endanger.
+-- ---------------------------------------------------------------------
+CREATE TABLE assembled_quiz_extra_question (
+    assembled_quiz_extra_question_id SERIAL NOT NULL,
+    assembled_quiz_id                uuid   NOT NULL,
+    question_id                       uuid   NOT NULL,
+    PRIMARY KEY (assembled_quiz_extra_question_id));
+
 
 -- =====================================================================
 -- REQ-DL-3 / REQ-PL-2.1: Session Log
@@ -352,7 +383,6 @@ CREATE TABLE session_log (
     cumulative_score int4        NOT NULL DEFAULT 0,
     max_score        int4        NOT NULL DEFAULT 100,
     passed           bool        NOT NULL DEFAULT false,
-    badge_id         uuid,
     PRIMARY KEY (session_id));
 
 -- The 4 drawn questions, analogous to question_to_answer.
@@ -453,9 +483,6 @@ ALTER TABLE activity_type ADD CONSTRAINT fk_activity_type_user FOREIGN KEY (crea
 ALTER TABLE question_to_answer ADD CONSTRAINT fk_question_to_answer_question FOREIGN KEY (question_id) REFERENCES question (question_id);
 ALTER TABLE question_to_answer ADD CONSTRAINT fk_question_to_answer_answer FOREIGN KEY (answer_id) REFERENCES answer (answer_id);
 
-ALTER TABLE user_badge ADD CONSTRAINT fk_user_badge_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
-ALTER TABLE user_badge ADD CONSTRAINT fk_user_badge_badge FOREIGN KEY (badge_id) REFERENCES badge (badge_id);
-
 -- REQ-DL-5: course belongs to one instructor. No ON DELETE clause, same reasoning as
 -- fk_question_user — a deleted instructor account should not silently cascade-delete courses.
 ALTER TABLE course ADD CONSTRAINT fk_course_user FOREIGN KEY (creator_id) REFERENCES "user" (user_id);
@@ -485,6 +512,11 @@ ALTER TABLE activity_type_course ADD CONSTRAINT fk_activity_type_course_course F
 ALTER TABLE quiz_excluded_question ADD CONSTRAINT fk_quiz_excluded_question_quiz FOREIGN KEY (assembled_quiz_id) REFERENCES assembled_quiz (assembled_quiz_id) ON DELETE CASCADE;
 ALTER TABLE quiz_excluded_question ADD CONSTRAINT fk_quiz_excluded_question_question FOREIGN KEY (question_id) REFERENCES question (question_id) ON DELETE CASCADE;
 
+-- Same cascade reasoning as fk_quiz_excluded_question_quiz/_question just above — see
+-- assembled_quiz_extra_question's own header comment.
+ALTER TABLE assembled_quiz_extra_question ADD CONSTRAINT fk_assembled_quiz_extra_question_quiz FOREIGN KEY (assembled_quiz_id) REFERENCES assembled_quiz (assembled_quiz_id) ON DELETE CASCADE;
+ALTER TABLE assembled_quiz_extra_question ADD CONSTRAINT fk_assembled_quiz_extra_question_question FOREIGN KEY (question_id) REFERENCES question (question_id) ON DELETE CASCADE;
+
 ALTER TABLE title_definition ADD CONSTRAINT fk_title_definition_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
 -- Who authored the story, for attribution/moderation.
 ALTER TABLE user_story ADD CONSTRAINT fk_user_story_user FOREIGN KEY (creator_id) REFERENCES "user" (user_id);
@@ -502,7 +534,6 @@ ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_answer
 ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_session FOREIGN KEY (session_id) REFERENCES session_log (session_id) ON DELETE CASCADE;
 
 ALTER TABLE session_log ADD CONSTRAINT fk_session_log_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
-ALTER TABLE session_log ADD CONSTRAINT fk_session_log_badge FOREIGN KEY (badge_id) REFERENCES badge (badge_id);
 ALTER TABLE session_log ADD CONSTRAINT fk_session_log_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
 
 ALTER TABLE session_to_question ADD CONSTRAINT fk_session_to_question_session FOREIGN KEY (session_id) REFERENCES session_log (session_id) ON DELETE CASCADE;
@@ -525,6 +556,10 @@ ALTER TABLE daily_challenge_attempt ADD CONSTRAINT fk_daily_challenge_attempt_an
 -- =====================================================================
 
 ALTER TABLE question ADD CONSTRAINT ck_question_difficulty_level CHECK (difficulty_level BETWEEN 1 AND 3);
+
+-- Only two grading kinds exist today (see activity_type's own header comment) — a typo here
+-- can't silently create a third one the app has no route/dispatch logic for.
+ALTER TABLE activity_type ADD CONSTRAINT ck_activity_type_grading_kind CHECK (grading_kind IN ('mcq', 'llm-graded'));
 
 -- REQ-GAM-DL-2.1: one title per (activity_type, difficulty_level) pair so the BL-1 lookup is
 -- unambiguous. activity_type itself is restricted to the known set via fk_title_definition_activity_type
@@ -597,6 +632,12 @@ CREATE INDEX ix_activity_type_course_course_id ON activity_type_course (course_i
 -- excluded" (subtracted from the draw pool) filters on assembled_quiz_id.
 ALTER TABLE quiz_excluded_question ADD CONSTRAINT uq_quiz_excluded_question UNIQUE (assembled_quiz_id, question_id);
 CREATE INDEX ix_quiz_excluded_question_quiz_id ON quiz_excluded_question (assembled_quiz_id);
+
+-- Same guarantee as uq_quiz_excluded_question, mirrored for the inclusion side: a quiz cannot
+-- hand-pick the same question twice, and "every question this quiz has hand-picked" (added to
+-- the draw pool) filters on assembled_quiz_id.
+ALTER TABLE assembled_quiz_extra_question ADD CONSTRAINT uq_assembled_quiz_extra_question UNIQUE (assembled_quiz_id, question_id);
+CREATE INDEX ix_assembled_quiz_extra_question_quiz_id ON assembled_quiz_extra_question (assembled_quiz_id);
 
 -- At most one running session per student and activity type. This is what
 -- makes POST /api/sessions idempotent: "start" and "resume" are the same
@@ -716,6 +757,7 @@ ALTER TABLE assembled_quiz ENABLE ROW LEVEL SECURITY;
 ALTER TABLE assembled_quiz_catalog ENABLE ROW LEVEL SECURITY;
 ALTER TABLE activity_type_course ENABLE ROW LEVEL SECURITY;
 ALTER TABLE quiz_excluded_question ENABLE ROW LEVEL SECURITY;
+ALTER TABLE assembled_quiz_extra_question ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE session_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE answered_question_log ENABLE ROW LEVEL SECURITY;
@@ -731,7 +773,7 @@ ALTER TABLE daily_challenge_attempt ENABLE ROW LEVEL SECURITY;
 -- SELECT is the only policy needed here.
 --
 -- Still open, same class of problem, out of scope for this change:
--- badge, user_badge and title_definition have no RLS either.
+-- title_definition has no RLS either.
 ALTER TABLE "user" ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY own_user_select ON "user"
@@ -790,8 +832,8 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 --
 --   DROP TABLE IF EXISTS session_to_question, session_to_user_story,
 --                        answered_question_log, session_log,
---                        question_to_answer, answer, question, user_badge,
---                        badge, title_definition, activity_type CASCADE;
+--                        question_to_answer, answer, question,
+--                        title_definition, activity_type CASCADE;
 --                        user_story, submission, instructor_llm_config,
 --                        student_course, course CASCADE;
 --   DROP FUNCTION IF EXISTS bump_session_score() CASCADE;
@@ -936,8 +978,8 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 -- you need are the missing activity_type lookup row (session_log.activity_type is FK-constrained
 -- against it, so starting a session 500s without this) and the score roll-up trigger:
 --
---   INSERT INTO activity_type (activity_type, quiz_name) VALUES
---     ('WRITE_ACCEPTANCE_CRITERIA', 'Write Acceptance Criteria')
+--   INSERT INTO activity_type (activity_type, quiz_name, grading_kind) VALUES
+--     ('WRITE_ACCEPTANCE_CRITERIA', 'Write Acceptance Criteria', 'llm-graded')
 --     ON CONFLICT DO NOTHING;
 --
 --   -- then the bump_session_score_from_submission() function and trg_submission_score trigger
@@ -1017,3 +1059,28 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 -- index, and ALTER TABLE quiz_excluded_question ENABLE ROW LEVEL SECURITY. No existing table's
 -- shape changes; a database that already has assembled_quiz/assembled_quiz_catalog from #360
 -- needs nothing else.
+
+-- activity_type.grading_kind (data-driven MCQ vs. LLM-graded activity types): if your
+-- activity_type table predates this column, add it nullable, backfill, then tighten — the same
+-- three-statement shape #347's quiz_name migration above uses, for the same reason (ADD COLUMN
+-- ... NOT NULL is rejected outright on a table that already has rows and no default). Unlike
+-- quiz_name, grading_kind actually can go straight to NOT NULL DEFAULT 'mcq' in one statement,
+-- since 'mcq' is a true default (every activity_type before this column existed drew from
+-- question/answer) — the only follow-up is correcting the one row that's the exception:
+--
+--   ALTER TABLE activity_type ADD COLUMN IF NOT EXISTS grading_kind text NOT NULL DEFAULT 'mcq';
+--   ALTER TABLE activity_type ADD CONSTRAINT ck_activity_type_grading_kind
+--     CHECK (grading_kind IN ('mcq', 'llm-graded'));
+--   UPDATE activity_type SET grading_kind = 'llm-graded' WHERE activity_type = 'WRITE_ACCEPTANCE_CRITERIA';
+--
+-- This column only records which pool/grading path an activity_type uses — it does not migrate
+-- any data between question and user_story, and no existing row's FK relationships change.
+
+-- Assembled Quiz Extra Question (hand-picked questions added directly to a quiz, independent of
+-- its linked catalogs): also a brand new table, same no-rename/no-backfill path as #360/#361 —
+-- run the CREATE TABLE assembled_quiz_extra_question statement, its two FKs
+-- (fk_assembled_quiz_extra_question_quiz, fk_assembled_quiz_extra_question_question), its unique
+-- constraint and index, and ALTER TABLE assembled_quiz_extra_question ENABLE ROW LEVEL SECURITY.
+-- No existing table's shape changes, and every quiz created before this migration keeps drawing
+-- exactly the pool it already had — this table starts empty, which is the correct "no hand-picked
+-- questions yet" state, not a gap to backfill.
