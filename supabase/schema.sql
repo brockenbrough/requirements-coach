@@ -521,6 +521,16 @@ ALTER TABLE title_definition ADD CONSTRAINT fk_title_definition_activity_type FO
 -- Who authored the story, for attribution/moderation.
 ALTER TABLE user_story ADD CONSTRAINT fk_user_story_user FOREIGN KEY (creator_id) REFERENCES "user" (user_id);
 
+-- GitHub #379: user_story.activity_type was still free text where question.activity_type has been
+-- FK-constrained since #123 — an instructor could add a prompt against a typo'd key and it would
+-- insert silently. Beyond that symmetry the constraint is load-bearing rather than tidy: PostgREST
+-- only resolves a reverse embed (activity_type -> user_story(count), submission -> user_story ->
+-- activity_type) through a real foreign key, and the catalog detail read and the per-activity
+-- statistics scoping both depend on one. No ON DELETE clause, same reasoning as
+-- fk_question_activity_type. ix_user_story_activity_type_difficulty already exists, so this costs
+-- nothing at query time.
+ALTER TABLE user_story ADD CONSTRAINT fk_user_story_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
+
 ALTER TABLE submission ADD CONSTRAINT fk_submission_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
 ALTER TABLE submission ADD CONSTRAINT fk_submission_user_story FOREIGN KEY (user_story_id) REFERENCES user_story (user_story_id);
 -- ON DELETE CASCADE matches fk_answered_question_log_session — a submission has no meaning
@@ -1084,3 +1094,19 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 -- No existing table's shape changes, and every quiz created before this migration keeps drawing
 -- exactly the pool it already had — this table starts empty, which is the correct "no hand-picked
 -- questions yet" state, not a gap to backfill.
+
+-- GitHub #379 (fk_user_story_activity_type): user_story.activity_type was free text where
+-- question.activity_type has been FK-constrained since #122/#123. Adding the constraint is what
+-- lets PostgREST embed user_story off activity_type, which the catalog detail read and the
+-- per-activity statistics scoping both need. Every existing row must already point at a real
+-- activity_type key — the seeded set all target WRITE_ACCEPTANCE_CRITERIA, which exists — so
+-- verify first, then add:
+--
+--   SELECT DISTINCT activity_type FROM user_story
+--     WHERE activity_type NOT IN (SELECT activity_type FROM activity_type);
+--
+--   ALTER TABLE user_story ADD CONSTRAINT fk_user_story_activity_type
+--     FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
+--
+-- If that SELECT returns anything, those rows were written against a key that no longer exists;
+-- fix or delete them before adding the constraint. No data moves and no column changes type.
