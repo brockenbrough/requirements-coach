@@ -60,6 +60,7 @@ function quizRow(overrides: Partial<Record<string, unknown>> = {}) {
     activity_type: 'MY_CUSTOM_QUIZ',
     quiz_name: 'My Custom Quiz',
     description: 'A quiz about things',
+    grading_kind: 'mcq',
     creator_id: 'instructor-1',
     creator: { first_name: 'Ada', last_name: 'Brockenbrough', username: 'abrock' },
     ...overrides,
@@ -135,6 +136,7 @@ describe('GET /api/activities/:activityType', () => {
       activityType: 'MY_CUSTOM_QUIZ',
       name: 'My Custom Quiz',
       description: 'A quiz about things',
+      gradingKind: 'mcq',
       courseId: 'course-1',
       courseName: 'Software Requirements',
     });

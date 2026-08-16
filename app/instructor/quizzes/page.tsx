@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../../../components/AppShell';
 import { CreateCatalogModal } from '../../../components/CreateCatalogModal';
-import { loadQuizzes, type QuizSummary } from '../../../lib/quizClient';
+import { loadQuizzes, type CreatedQuiz, type QuizSummary } from '../../../lib/quizClient';
 import { useRequireRole } from '../../../lib/useRequireRole';
 
 const ALL_AUTHORS = 'all';
@@ -69,7 +69,7 @@ export default function InstructorQuizzesPage() {
   if (loading || !authorized) return null;
   if (!token || !profile) return null;
 
-  function handleCreated(quiz: { activityType: string; name: string; description: string | null }) {
+  function handleCreated(quiz: CreatedQuiz) {
     // Optimistic insert: the caller is the quiz's creator_id, and its display name follows the
     // same first/last-name-else-username fallback GET /api/instructor/quizzes uses server-side —
     // no need to re-fetch the whole list just to show the one row that just changed.
@@ -82,6 +82,7 @@ export default function InstructorQuizzesPage() {
         name: quiz.name,
         description: quiz.description,
         authorName,
+        gradingKind: quiz.gradingKind,
         questionCount: 0,
         quizCount: 0,
       },
@@ -174,6 +175,7 @@ export default function InstructorQuizzesPage() {
                     <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Name</th>
                     <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Description</th>
                     <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Author</th>
+                    <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Type</th>
                     <th className="whitespace-nowrap px-4 py-3 text-right text-xs font-bold uppercase tracking-wide">Used in</th>
                     <th className="whitespace-nowrap px-4 py-3 text-right text-xs font-bold uppercase tracking-wide">Questions</th>
                   </tr>
@@ -181,7 +183,7 @@ export default function InstructorQuizzesPage() {
                 <tbody>
                   {visibleQuizzes.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="bg-brand-navy-2 px-4 py-10 text-center text-sm font-semibold text-brand-ink-muted">
+                      <td colSpan={6} className="bg-brand-navy-2 px-4 py-10 text-center text-sm font-semibold text-brand-ink-muted">
                         No catalogs match this filter.
                       </td>
                     </tr>
@@ -195,6 +197,20 @@ export default function InstructorQuizzesPage() {
                         </td>
                         <td className="px-4 py-3 text-gray-500">{quiz.description || '—'}</td>
                         <td className="whitespace-nowrap px-4 py-3 text-gray-500">{quiz.authorName}</td>
+                        <td className="whitespace-nowrap px-4 py-3">
+                          {/* GitHub #379: questionCount counts questions for one kind and prompts
+                              for the other, so the column header alone can't say what the number
+                              means — this badge is what disambiguates it. */}
+                          <span
+                            className={`rounded-full px-2.5 py-1 text-xs font-extrabold ${
+                              quiz.gradingKind === 'llm-graded'
+                                ? 'bg-brand-teal/15 text-brand-teal-dark'
+                                : 'bg-brand-purple/10 text-brand-purple-dark'
+                            }`}
+                          >
+                            {quiz.gradingKind === 'llm-graded' ? 'LLM-graded' : 'Multiple choice'}
+                          </span>
+                        </td>
                         <td className="whitespace-nowrap px-4 py-3 text-right text-gray-500">
                           {quiz.quizCount} quiz{quiz.quizCount === 1 ? '' : 'zes'}
                         </td>

@@ -1390,9 +1390,16 @@ INSERT INTO title_definition (title_definition_id, activity_type, difficulty_lev
 -- #####################################################################
 -- GitHub #133: User Story starter set (REQ-FU-1 / REQ-FU-2)
 --
--- 15 stories for the Write Acceptance Criteria activity, 5 domains x
--- 3 difficulty levels, so GET .../user-story has real content to draw
--- from on day one instead of an empty table.
+-- 24 stories for the Write Acceptance Criteria activity, 8 domains x
+-- 3 difficulty levels, so the activity has real content to draw from on
+-- day one instead of an empty table.
+--
+-- GitHub #379 raised this from 5 domains to 8. Until then the session
+-- draw ignored difficulty_level entirely and picked 4 stories out of all
+-- 15; now that LLM-graded activities are level-scoped like the MCQ ones,
+-- the pool that matters is the per-level one, and 5 per level meant every
+-- level-N session drew 4 of the same 5 stories — one deleted row away
+-- from dropping under STORIES_PER_SESSION and failing the start outright.
 --
 -- creator_id is NULL for all of these — there is no real "user" row to
 -- attribute them to when this script runs on a fresh schema (same
@@ -1427,4 +1434,16 @@ INSERT INTO user_story (user_story_id, story_text, difficulty_level, activity_ty
 -- Online learning
 ('00000000-0000-0000-0003-000000000013', 'As a student, I want to enroll in a course, so that I can access its lessons.', 1, 'WRITE_ACCEPTANCE_CRITERIA', NULL),
 ('00000000-0000-0000-0003-000000000014', 'As a student, I want to track my progress through a course''s lessons, so that I know how much I have left to complete.', 2, 'WRITE_ACCEPTANCE_CRITERIA', NULL),
-('00000000-0000-0000-0003-000000000015', 'As a student, I want to submit an assignment before its deadline, so that it is graded and counts toward my final score.', 3, 'WRITE_ACCEPTANCE_CRITERIA', NULL);
+('00000000-0000-0000-0003-000000000015', 'As a student, I want to submit an assignment before its deadline, so that it is graded and counts toward my final score.', 3, 'WRITE_ACCEPTANCE_CRITERIA', NULL),
+-- Travel booking
+('00000000-0000-0000-0003-000000000016', 'As a traveller, I want to search for flights between two cities on a given date, so that I can see which options are available.', 1, 'WRITE_ACCEPTANCE_CRITERIA', NULL),
+('00000000-0000-0000-0003-000000000017', 'As a traveller, I want to add a checked bag to an existing booking, so that I do not have to pay a higher fee at the airport.', 2, 'WRITE_ACCEPTANCE_CRITERIA', NULL),
+('00000000-0000-0000-0003-000000000018', 'As a traveller, I want to change the date of a booked flight and pay only the fare difference, so that I can adapt my trip without rebooking from scratch.', 3, 'WRITE_ACCEPTANCE_CRITERIA', NULL),
+-- Food delivery
+('00000000-0000-0000-0003-000000000019', 'As a customer, I want to browse the menu of a nearby restaurant, so that I can decide what to order.', 1, 'WRITE_ACCEPTANCE_CRITERIA', NULL),
+('00000000-0000-0000-0003-000000000020', 'As a customer, I want to track my order from the kitchen to my door, so that I know when to expect it.', 2, 'WRITE_ACCEPTANCE_CRITERIA', NULL),
+('00000000-0000-0000-0003-000000000021', 'As a customer, I want to report a missing item and receive a partial refund, so that I only pay for what actually arrived.', 3, 'WRITE_ACCEPTANCE_CRITERIA', NULL),
+-- Workplace / HR
+('00000000-0000-0000-0003-000000000022', 'As an employee, I want to request a day of annual leave, so that my absence is recorded and approved.', 1, 'WRITE_ACCEPTANCE_CRITERIA', NULL),
+('00000000-0000-0000-0003-000000000023', 'As a manager, I want to see my team''s upcoming absences in one calendar, so that I can spot understaffed weeks in advance.', 2, 'WRITE_ACCEPTANCE_CRITERIA', NULL),
+('00000000-0000-0000-0003-000000000024', 'As an employee, I want my remaining leave balance to update automatically when a request is approved or withdrawn, so that the number I see is always the one payroll uses.', 3, 'WRITE_ACCEPTANCE_CRITERIA', NULL);

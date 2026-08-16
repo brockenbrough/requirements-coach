@@ -1,13 +1,14 @@
-import { getSupabaseClient } from "../../../../../lib/supabase";
-import { getLLMProvider, isLLMProviderName } from "../../../../../lib/llm/factory";
-import { SESSION_COLUMNS, isPassing } from "../../../../../lib/sessionRules";
+import { getSupabaseClient } from "../../../../../../lib/supabase";
+import { getGradingKind } from "../../../../../../lib/activityTypes";
+import { getLLMProvider, isLLMProviderName } from "../../../../../../lib/llm/factory";
+import { SESSION_COLUMNS, isPassing } from "../../../../../../lib/sessionRules";
 import {
   loadSessionStories,
   loadSessionSubmissions,
   nextUnansweredStoryPosition,
   type SessionStorySlot,
-} from "../../../../../lib/llmActivityQueries";
-import type { SupabaseClient } from "../../../../../lib/sessionQueries";
+} from "../../../../../../lib/llmActivityQueries";
+import type { SupabaseClient } from "../../../../../../lib/sessionQueries";
 
 type UserStoryRow = { user_story_id: string; story_text: string; creator_id: string };
 type LLMConfigRow = { provider: string; api_key: string; model: string };
@@ -28,8 +29,9 @@ function getToken(request: Request): string | null {
 }
 
 /**
- * POST /api/activities/write-acceptance-criteria/submissions — grades one free-text
- * acceptance-criteria submission against a given user story (REQ-FU-2).
+ * POST /api/activities/:activityType/llm/submissions — grades one free-text submission against a
+ * given prompt (REQ-FU-2, generalized in GitHub #379). The generic replacement for the hardcoded
+ * write-acceptance-criteria route: WRITE_ACCEPTANCE_CRITERIA is one activityType this serves.
  *
  * Write-before-disclose: the submission row is committed with grading columns null, then the
  * LLM call runs, then the row is updated — a crash between insert and update leaves an ungraded
@@ -47,7 +49,7 @@ function getToken(request: Request): string | null {
  *   - After grading, checks whether every story is now answered. If so, marks the session
  *     completed and returns sessionCompleted: true with the totals.
  */
-export async function POST(request: Request) {
+export async function POST(request: Request, { params }: { params: { activityType: string } }) {
   const token = getToken(request);
   if (!token) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -87,19 +89,33 @@ export async function POST(request: Request) {
   if (!supabase)
     return Response.json({ error: "Supabase credentials are not configured." }, { status: 500 });
 
+  const { activityType } = params;
+
+  const { gradingKind, error: kindError } = await getGradingKind(supabase, activityType);
+  if (kindError) return Response.json({ error: kindError.message }, { status: 500 });
+  if (gradingKind === null) return Response.json({ error: "Unknown activity type." }, { status: 400 });
+  if (gradingKind !== "llm-graded") {
+    return Response.json(
+      { error: "This activity is a multiple-choice quiz — answer it with POST /api/sessions/{id}/answers." },
+      { status: 400 },
+    );
+  }
+
   const { data: { user }, error: authError } = await supabase.auth.getUser(token);
   if (authError || !user)
     return Response.json({ error: "Invalid or expired token." }, { status: 401 });
 
   // Scoping by user_id + activity_type is what keeps one student out of another's session (and
-  // out of a Type A session id entirely) — a foreign or wrong-activity session id is
-  // indistinguishable from a non-existent one.
+  // out of an MCQ session id, or another LLM-graded activity's, entirely) — a foreign or
+  // wrong-activity session id is indistinguishable from a non-existent one. Now that more than
+  // one activity can be LLM-graded, matching params.activityType rather than a fixed literal is
+  // what keeps one activity's session id from being usable against another's endpoint.
   const { data: session, error: sessionError } = await supabase
     .from("session_log")
     .select(SESSION_COLUMNS)
     .eq("session_id", sessionId)
     .eq("user_id", user.id)
-    .eq("activity_type", "WRITE_ACCEPTANCE_CRITERIA")
+    .eq("activity_type", activityType)
     .maybeSingle();
 
   if (sessionError) return Response.json({ error: sessionError.message }, { status: 500 });
@@ -228,7 +244,7 @@ export async function POST(request: Request) {
   if (progress.error) return Response.json({ error: progress.error }, { status: 500 });
 
   const finished = progress.nextPosition === null
-    ? await completeAcSession(supabase, sessionId, progress.session as SessionRow)
+    ? await completeLlmSession(supabase, sessionId, progress.session as SessionRow)
     : progress.session;
 
   return Response.json(
@@ -250,7 +266,7 @@ export async function POST(request: Request) {
   );
 }
 
-/** Current session state plus the next unsubmitted position — the AC equivalent of the Type A answers route's loadProgress. */
+/** Current session state plus the next unsubmitted position — the LLM-graded equivalent of the MCQ answers route's loadProgress. */
 async function loadProgress(supabase: SupabaseClient, sessionId: string, stories: SessionStorySlot[]) {
   const [{ data: session, error: sessionError }, { submissions, error: submissionsError }] = await Promise.all([
     supabase.from("session_log").select(SESSION_COLUMNS).eq("session_id", sessionId).maybeSingle(),
@@ -272,7 +288,7 @@ async function loadProgress(supabase: SupabaseClient, sessionId: string, stories
  * Closes out the session after the last story is graded. status and passed are decided here,
  * never by the client. The status guard keeps a parallel request from completing it twice.
  */
-async function completeAcSession(supabase: SupabaseClient, sessionId: string, session: SessionRow) {
+async function completeLlmSession(supabase: SupabaseClient, sessionId: string, session: SessionRow) {
   const { data, error } = await supabase
     .from("session_log")
     .update({

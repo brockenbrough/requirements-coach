@@ -2,7 +2,7 @@
  * GitHub #262: derives a short title from a user story's text and formats a story (plus, once
  * written, the student's own acceptance criteria) as clean, copyable markdown.
  *
- * user_story has only one text column, story_text (see lib/acceptanceCriteriaTypes.ts's own
+ * user_story has only one text column, story_text (see lib/llmActivityTypes.ts's own
  * comment on UserStoryPrompt.description) — there is no title column. Rather than inventing
  * content, the title is extracted from the story's own "I want to <goal>" clause, which every
  * seeded story already follows (the standard "As a <role>, I want to <goal>, so that <benefit>"

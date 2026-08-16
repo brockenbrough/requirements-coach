@@ -9,11 +9,11 @@ import { CompletedAttemptsTable } from '../../../components/CompletedAttemptsTab
 import { LevelReplaySelector } from '../../../components/LevelReplaySelector';
 import { ResumeOrAbandonPrompt } from '../../../components/ResumeOrAbandonPrompt';
 import {
-  type CurrentAcSessionResult,
+  type CurrentLlmSessionResult,
   loadCurrentAcceptanceCriteriaSession,
   startOrResumeAcceptanceCriteriaSession,
-} from '../../../lib/acceptanceCriteriaClient';
-import { STORIES_PER_SESSION } from '../../../lib/acceptanceCriteriaRules';
+} from '../../../lib/llmActivityClient';
+import { STORIES_PER_SESSION } from '../../../lib/llmActivityRules';
 import { getActivity } from '../../../lib/activityContent';
 import { abandonSession, loadActivityLog, loadCompletedAttempts, type CompletedAttempt } from '../../../lib/sessionClient';
 import { useRequireRole } from '../../../lib/useRequireRole';
@@ -34,7 +34,7 @@ export default function WriteAcceptanceCriteriaLandingPage() {
 
   // The server is the only source of "does this activity have a run in progress" — there is no
   // local/mock notion of progress any more. null means "not checked yet or nothing running".
-  const [current, setCurrent] = useState<CurrentAcSessionResult | null>(null);
+  const [current, setCurrent] = useState<CurrentLlmSessionResult | null>(null);
   const [attempts, setAttempts] = useState<CompletedAttempt[] | null>(null);
   // True until the current-session and completed-attempts fetches below have both resolved —
   // the hero card renders nothing real before then, only ActivityDetailSkeleton (same as

@@ -1,7 +1,7 @@
 'use client';
 
 // REQ-DL-5: real client for the instructor course routes — same role as
-// lib/acceptanceCriteriaClient.ts. The student-facing "browse/join a course" UI (GitHub #242/
+// lib/llmActivityClient.ts. The student-facing "browse/join a course" UI (GitHub #242/
 // UI-2) is real too now, via lib/studentCourseClient.ts — a separate file since these two are
 // genuinely different audiences/routes, not a style variant of each other.
 

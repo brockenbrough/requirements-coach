@@ -42,6 +42,54 @@ export async function isActivityType(
 }
 
 /**
+ * The two grading paths an activity_type can take, mirroring ck_activity_type_grading_kind in
+ * supabase/schema.sql. 'mcq' draws from question/answer and scores in the database;
+ * 'llm-graded' draws from user_story and scores through instructor_llm_config's provider.
+ */
+export const GRADING_KINDS = ['mcq', 'llm-graded'] as const;
+export type GradingKind = (typeof GRADING_KINDS)[number];
+
+export function isGradingKind(value: unknown): value is GradingKind {
+  return typeof value === 'string' && (GRADING_KINDS as readonly string[]).includes(value);
+}
+
+/**
+ * The activity_type row's grading_kind, or null when the key matches no row — so this answers
+ * both "does this activity type exist" and "which grading path does it take" in one round trip,
+ * and subsumes isActivityType for any caller that needs the second answer anyway.
+ *
+ * isActivityType is deliberately left alone rather than reimplemented on top of this: every
+ * existing route test mocks its exact .select('activity_type') chain, and the MCQ paths have no
+ * use for the kind. New LLM-graded routes call this instead.
+ *
+ * Same error split as isActivityType — error is only set on a real database failure, so a caller
+ * can tell "400: unknown activity type" (gradingKind null, error null) apart from "500: could not
+ * check". A row whose grading_kind somehow isn't one of GRADING_KINDS is reported as null too:
+ * the CHECK constraint makes that unreachable through Postgres, and treating an unrecognised
+ * value as "unknown activity" is the safe direction — it refuses the request rather than guessing
+ * a grading path.
+ */
+export async function getGradingKind(
+  supabase: SupabaseClient,
+  activityType: unknown,
+): Promise<{ gradingKind: GradingKind | null; error: { message: string } | null }> {
+  if (typeof activityType !== 'string' || activityType.trim() === '') {
+    return { gradingKind: null, error: null };
+  }
+
+  const { data, error } = await supabase
+    .from('activity_type')
+    .select('grading_kind')
+    .eq('activity_type', activityType)
+    .maybeSingle();
+
+  if (error) return { gradingKind: null, error };
+
+  const kind = (data as { grading_kind?: unknown } | null)?.grading_kind;
+  return { gradingKind: isGradingKind(kind) ? kind : null, error: null };
+}
+
+/**
  * Derives the activity_type key POST /api/activities/types stores from the quiz's display name:
  * upper-cased, every run of non-alphanumeric characters collapsed to a single underscore, no
  * leading/trailing underscore. Matches the format of the three built-in keys exactly —

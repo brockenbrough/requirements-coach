@@ -10,19 +10,19 @@ import { AcceptanceCriteriaWritingScreenSkeleton } from '../../../../components/
 import { SessionProgressDots, type ProgressDotStatus } from '../../../../components/SessionProgressDots';
 import { SessionSummaryScreen, type SessionSummaryItem } from '../../../../components/SessionSummaryScreen';
 import {
-  type AcSessionStory,
-  type CurrentAcSessionResult,
+  type LlmSessionStory,
+  type CurrentLlmSessionResult,
   loadCurrentAcceptanceCriteriaSession,
   submitAcceptanceCriteria,
-} from '../../../../lib/acceptanceCriteriaClient';
-import { AC_PASS_SCORE, STORIES_PER_SESSION } from '../../../../lib/acceptanceCriteriaRules';
-import type { AcceptanceCriteriaResult } from '../../../../lib/acceptanceCriteriaTypes';
+} from '../../../../lib/llmActivityClient';
+import { PROMPT_PASS_SCORE, STORIES_PER_SESSION } from '../../../../lib/llmActivityRules';
+import type { LlmGradingResult } from '../../../../lib/llmActivityTypes';
 import { loadActivityLog, loadCompletedAttempts } from '../../../../lib/sessionClient';
 import { deriveStoryTitle } from '../../../../lib/storyMarkdown';
 import { useRequireRole } from '../../../../lib/useRequireRole';
 
 /** What the last submitted story earned, alongside the feedback for it. */
-type Outcome = { userStory: AcSessionStory; result: AcceptanceCriteriaResult; completed: boolean };
+type Outcome = { userStory: LlmSessionStory; result: LlmGradingResult; completed: boolean };
 
 export default function WriteAcceptanceCriteriaPlayPage() {
   const router = useRouter();
@@ -30,7 +30,7 @@ export default function WriteAcceptanceCriteriaPlayPage() {
   // durchführen" flow itself, exactly what an instructor must not be able to reach.
   const { token, profile, loading, authorized } = useRequireRole('student');
 
-  const [session, setSession] = useState<CurrentAcSessionResult | null>(null);
+  const [session, setSession] = useState<CurrentLlmSessionResult | null>(null);
   const [nextPosition, setNextPosition] = useState<number | null>(null);
   const [answeredCount, setAnsweredCount] = useState(0);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
@@ -238,7 +238,7 @@ export default function WriteAcceptanceCriteriaPlayPage() {
   // PlayActivityPage does for the Type A quiz's points-and-correctness session.
   const summaryScore = session.session.cumulative_score;
   const summaryMax = session.session.max_score;
-  const passedCount = session.submissions.filter((submission) => (submission.score ?? 0) >= AC_PASS_SCORE).length;
+  const passedCount = session.submissions.filter((submission) => (submission.score ?? 0) >= PROMPT_PASS_SCORE).length;
   const storyCount = session.submissions.length;
   const summaryMessage =
     storyCount === 0
@@ -254,7 +254,7 @@ export default function WriteAcceptanceCriteriaPlayPage() {
       key: story.userStoryId,
       label: deriveStoryTitle(story.description),
       scoreLabel: submission ? `${submission.score} / 10` : '—',
-      passed: (submission?.score ?? 0) >= AC_PASS_SCORE,
+      passed: (submission?.score ?? 0) >= PROMPT_PASS_SCORE,
     };
   });
 

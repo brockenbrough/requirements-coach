@@ -1,7 +1,8 @@
 import { getSupabaseClient } from '../../../../../lib/supabase';
 import { SESSION_COLUMNS, START_DIFFICULTY_LEVEL } from '../../../../../lib/sessionRules';
-import { SESSION_MAX_SCORE, STORIES_PER_SESSION } from '../../../../../lib/acceptanceCriteriaRules';
-import { findInProgressAcSession, loadSessionStories } from '../../../../../lib/acceptanceCriteriaQueries';
+import { SESSION_MAX_SCORE, STORIES_PER_SESSION } from '../../../../../lib/llmActivityRules';
+import { loadSessionStories } from '../../../../../lib/llmActivityQueries';
+import { findInProgressSession } from '../../../../../lib/sessionQueries';
 import { shuffleArray } from '../../../../../lib/shuffleArray';
 import type { SupabaseClient } from '../../../../../lib/sessionQueries';
 
@@ -31,7 +32,7 @@ export async function POST(request: Request) {
   const { data: { user }, error: authError } = await supabase.auth.getUser(token);
   if (authError || !user) return Response.json({ error: 'Invalid or expired token.' }, { status: 401 });
 
-  const existing = await findInProgressAcSession(supabase, user.id);
+  const existing = await findInProgressSession(supabase, user.id, 'WRITE_ACCEPTANCE_CRITERIA');
   if (existing.error) return Response.json({ error: existing.error.message }, { status: 500 });
   if (existing.session) return respondWithSession(supabase, existing.session, { created: false });
 
@@ -71,7 +72,7 @@ export async function POST(request: Request) {
   if (insertError || !session) {
     // A parallel request won uq_session_log_one_active — return that session instead of failing.
     if (insertError?.code === UNIQUE_VIOLATION) {
-      const raced = await findInProgressAcSession(supabase, user.id);
+      const raced = await findInProgressSession(supabase, user.id, 'WRITE_ACCEPTANCE_CRITERIA');
       if (raced.session) return respondWithSession(supabase, raced.session, { created: false });
     }
     // session_log.user_id references "user"(user_id): authenticated but no profile row yet.

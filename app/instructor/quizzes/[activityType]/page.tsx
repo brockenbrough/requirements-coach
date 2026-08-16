@@ -3,14 +3,25 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../../../components/AppShell';
+import { CatalogPromptCard } from '../../../../components/CatalogPromptCard';
+import { ConfirmModal } from '../../../../components/ConfirmModal';
 import { DeleteQuestionModal } from '../../../../components/DeleteQuestionModal';
+import { PromptFormModal } from '../../../../components/PromptFormModal';
 import { QuestionFormModal } from '../../../../components/QuestionFormModal';
 import { loadQuizDetail, type QuizMeta } from '../../../../lib/quizClient';
 import { createQuestion, updateQuestion } from '../../../../lib/sessionClient';
+import {
+  createUserStory,
+  deleteUserStory,
+  updateUserStory,
+  type UserStoryDraft,
+} from '../../../../lib/llmActivityClient';
+import type { CatalogUserStory } from '../../../../lib/llmActivityTypes';
+import { STORIES_PER_SESSION } from '../../../../lib/llmActivityRules';
+import { DIFFICULTY_LABEL as LEVEL_LABEL } from '../../../../lib/difficultyLevels';
 import type { CatalogQuestion, QuizQuestion } from '../../../../lib/quizQuestionTypes';
 import { useRequireRole } from '../../../../lib/useRequireRole';
 
-const LEVEL_LABEL: Record<1 | 2 | 3, string> = { 1: 'Easy', 2: 'Medium', 3: 'Hard' };
 const LEVEL_OPTIONS = ['all', 1, 2, 3] as const;
 const HIGHLIGHT_MS = 4000;
 const TOAST_MS = 3200;
@@ -36,6 +47,23 @@ function TrashIcon() {
 }
 
 type ModalState = { mode: 'add' } | { mode: 'edit'; question: CatalogQuestion };
+type PromptModalState = { mode: 'add' } | { mode: 'edit'; prompt: CatalogUserStory };
+
+/**
+ * GitHub #379: the levels whose prompt pool is too small to draw a round from. The LLM session
+ * draw filters user_story by difficulty_level and needs STORIES_PER_SESSION of them, so a level
+ * below that fails at Start with a 400 — and nothing else in the app would tell the instructor
+ * before a student hits it. Same early-warning role as the per-level coverage banner on
+ * app/instructor/assembled-quizzes/[quizId]/page.tsx.
+ *
+ * A level with zero prompts counts as short too: an instructor who has only filled level 1 should
+ * see that levels 2 and 3 are unplayable, not just unmentioned.
+ */
+function shortLevels(prompts: CatalogUserStory[]): (1 | 2 | 3)[] {
+  return ([1, 2, 3] as const).filter(
+    (level) => prompts.filter((prompt) => prompt.level === level).length < STORIES_PER_SESSION,
+  );
+}
 
 /**
  * GitHub #359: one question catalog's detail view — read-only by default (every question in the
@@ -51,6 +79,7 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
 
   const [quiz, setQuiz] = useState<QuizMeta | null>(null);
   const [questions, setQuestions] = useState<CatalogQuestion[] | null>(null);
+  const [prompts, setPrompts] = useState<CatalogUserStory[] | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
@@ -59,6 +88,8 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
   const [editMode, setEditMode] = useState(false);
   const [modalState, setModalState] = useState<ModalState | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CatalogQuestion | null>(null);
+  const [promptModalState, setPromptModalState] = useState<PromptModalState | null>(null);
+  const [promptDeleteTarget, setPromptDeleteTarget] = useState<CatalogUserStory | null>(null);
   const [highlight, setHighlight] = useState<{ id: string; label: string } | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -74,6 +105,7 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
       if (result.ok) {
         setQuiz(result.data.quiz);
         setQuestions(result.data.questions);
+        setPrompts(result.data.userStories);
       } else if (result.status === 404) {
         setNotFound(true);
       } else {
@@ -89,8 +121,12 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
   if (loading || !authorized) return null;
   if (!token || !profile) return null;
 
+  const llmGraded = quiz?.gradingKind === 'llm-graded';
+  const items = llmGraded ? prompts ?? [] : questions ?? [];
   const visibleQuestions = (questions ?? []).filter((question) => level === 'all' || question.level === level);
+  const visiblePrompts = (prompts ?? []).filter((prompt) => level === 'all' || prompt.level === level);
   const quizOptions = quiz ? [{ value: params.activityType, label: quiz.name }] : [];
+  const coverageGaps = llmGraded ? shortLevels(prompts ?? []) : [];
 
   async function handleSaveQuestion(question: QuizQuestion): Promise<{ ok: true } | { ok: false; error: string }> {
     if (!token || !profile?.user_id) return { ok: false, error: 'Your session has expired. Please sign in again.' };
@@ -131,6 +167,62 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
     return { ok: true };
   }
 
+  async function handleSavePrompt(draft: UserStoryDraft): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (!token || !profile?.user_id) return { ok: false, error: 'Your session has expired. Please sign in again.' };
+
+    const isEdit = promptModalState?.mode === 'edit';
+    const editingId = promptModalState?.mode === 'edit' ? promptModalState.prompt.id : null;
+
+    const result = isEdit
+      ? await updateUserStory(token, editingId!, draft)
+      : await createUserStory(token, draft);
+
+    if (!result.ok) return { ok: false, error: result.error };
+
+    // Same shape as handleSaveQuestion above: POST assigns the real id server-side, PATCH echoes
+    // the one we already had, and ownerId can only ever be the caller (the icons that open this
+    // form are hidden on anyone else's rows).
+    const saved: CatalogUserStory = {
+      id: isEdit ? editingId! : result.data.userStoryId,
+      activityType: draft.activityType,
+      level: draft.difficultyLevel,
+      storyText: draft.storyText,
+      ownerId: profile.user_id,
+    };
+
+    setPrompts((current) =>
+      isEdit
+        ? (current ?? []).map((existing) => (existing.id === saved.id ? saved : existing))
+        : [saved, ...(current ?? [])],
+    );
+
+    setLevel('all');
+    setHighlight({ id: saved.id, label: isEdit ? '✓ Updated' : '✓ Just added' });
+    setToastMessage(isEdit ? 'Changes saved.' : 'Prompt added to this catalog.');
+
+    window.setTimeout(() => setToastMessage(null), TOAST_MS);
+    window.setTimeout(() => setHighlight(null), HIGHLIGHT_MS);
+
+    return { ok: true };
+  }
+
+  async function handleDeletePrompt(): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (!token || !promptDeleteTarget) return { ok: false, error: 'Your session has expired. Please sign in again.' };
+
+    // A 409 ("already used in a student session") arrives here with the route's own wording and
+    // keeps the dialog open, which is what ConfirmModal's onConfirm contract is for.
+    const result = await deleteUserStory(token, promptDeleteTarget.id);
+    if (!result.ok) return { ok: false, error: result.error };
+
+    const deletedId = promptDeleteTarget.id;
+    setPrompts((current) => (current ?? []).filter((prompt) => prompt.id !== deletedId));
+    setPromptDeleteTarget(null);
+    setToastMessage('Prompt deleted.');
+    window.setTimeout(() => setToastMessage(null), TOAST_MS);
+
+    return { ok: true };
+  }
+
   function handleDeleted(questionId: string) {
     setQuestions((current) => (current ?? []).filter((question) => question.id !== questionId));
     setDeleteTarget(null);
@@ -160,7 +252,7 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
               Retry
             </button>
           </div>
-        ) : !quiz || questions === null ? (
+        ) : !quiz || questions === null || prompts === null ? (
           <p className="mt-6 text-sm font-semibold text-gray-500">Loading…</p>
         ) : (
           <>
@@ -169,20 +261,21 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
                 <h1 className="mb-1.5 text-2xl font-extrabold text-brand-navy">{quiz.name}</h1>
                 <p className="max-w-2xl text-sm font-semibold text-gray-500">
                   {quiz.description ? `${quiz.description} · ` : ''}
-                  {questions.length} question{questions.length === 1 ? '' : 's'} · by {quiz.authorName}
+                  {items.length} {llmGraded ? 'prompt' : 'question'}
+                  {items.length === 1 ? '' : 's'} · by {quiz.authorName}
                 </p>
               </div>
               <div className="flex flex-none items-center gap-2">
                 {editMode ? (
                   <button
                     type="button"
-                    onClick={() => setModalState({ mode: 'add' })}
+                    onClick={() => (llmGraded ? setPromptModalState({ mode: 'add' }) : setModalState({ mode: 'add' }))}
                     className="flex items-center gap-2 rounded-full bg-brand-purple px-5 py-2.5 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark"
                   >
                     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round">
                       <path d="M12 5v14M5 12h14" />
                     </svg>
-                    New Question
+                    {llmGraded ? 'New Prompt' : 'New Question'}
                   </button>
                 ) : null}
                 <button
@@ -213,6 +306,20 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
               </div>
             ) : null}
 
+            {coverageGaps.length > 0 ? (
+              <div className="mb-5 mt-5 rounded-brand-md border border-brand-gold/40 bg-brand-gold/10 px-4 py-3">
+                <p className="text-sm font-bold text-brand-navy">
+                  {coverageGaps.length === 3 ? 'No level' : `Level ${coverageGaps.join(' and ')}`}{' '}
+                  {coverageGaps.length === 1 ? 'has' : 'have'} fewer than {STORIES_PER_SESSION} prompts.
+                </p>
+                <p className="mt-1 text-xs font-semibold text-gray-600">
+                  A round draws {STORIES_PER_SESSION} prompts from a single level, so students can&apos;t start this
+                  activity at {coverageGaps.length === 1 ? 'that level' : 'those levels'} until each has at least{' '}
+                  {STORIES_PER_SESSION}.
+                </p>
+              </div>
+            ) : null}
+
             <div className="mb-6 mt-6 flex flex-wrap gap-1.5">
               {LEVEL_OPTIONS.map((lvl) => (
                 <button
@@ -231,7 +338,24 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
             </div>
 
             <div className="space-y-4">
-              {visibleQuestions.length === 0 ? (
+              {llmGraded ? (
+                visiblePrompts.length === 0 ? (
+                  <p className="rounded-brand-lg border border-gray-100 bg-gray-50 p-6 text-center text-sm font-semibold text-gray-500">
+                    No prompts yet at this level.
+                  </p>
+                ) : (
+                  visiblePrompts.map((prompt) => (
+                    <CatalogPromptCard
+                      key={prompt.id}
+                      prompt={prompt}
+                      highlightLabel={prompt.id === highlight?.id ? highlight.label : null}
+                      editable={editMode && prompt.ownerId === profile.user_id}
+                      onEdit={() => setPromptModalState({ mode: 'edit', prompt })}
+                      onDelete={() => setPromptDeleteTarget(prompt)}
+                    />
+                  ))
+                )
+              ) : visibleQuestions.length === 0 ? (
                 <p className="rounded-brand-lg border border-gray-100 bg-gray-50 p-6 text-center text-sm font-semibold text-gray-500">
                   No questions yet at this level.
                 </p>
@@ -331,6 +455,39 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
           token={token}
           onClose={() => setDeleteTarget(null)}
           onDeleted={handleDeleted}
+        />
+      ) : null}
+
+      {promptModalState ? (
+        <PromptFormModal
+          mode={promptModalState.mode}
+          initialData={promptModalState.mode === 'edit' ? promptModalState.prompt : undefined}
+          defaultActivityType={params.activityType}
+          catalogOptions={quizOptions}
+          onClose={() => setPromptModalState(null)}
+          onSave={handleSavePrompt}
+        />
+      ) : null}
+
+      {/* ConfirmModal rather than a third hand-copy of DeleteQuestionModal — CLAUDE.md's shared
+          confirmation dialog, which is what a new destructive flow should use. */}
+      {promptDeleteTarget ? (
+        <ConfirmModal
+          kicker="LLM-Graded Task"
+          title="Delete this prompt?"
+          message={
+            <>
+              <span className="block font-bold text-brand-ink">{promptDeleteTarget.storyText}</span>
+              <span className="mt-2 block">
+                This removes the prompt from the catalog. Students who already answered it keep their
+                submissions and scores.
+              </span>
+            </>
+          }
+          confirmLabel="Delete prompt"
+          confirmingLabel="Deleting…"
+          onClose={() => setPromptDeleteTarget(null)}
+          onConfirm={handleDeletePrompt}
         />
       ) : null}
     </AppShell>

@@ -4,7 +4,9 @@
 
 import type { SupabaseClient } from './sessionQueries';
 import type { CatalogQuestion } from './quizQuestionTypes';
-import type { ActivityType } from './activityTypes';
+import type { CatalogUserStory } from './llmActivityTypes';
+import type { ActivityType, GradingKind } from './activityTypes';
+import { isGradingKind } from './activityTypes';
 
 export type QuizSummary = {
   activityType: string;
@@ -12,6 +14,12 @@ export type QuizSummary = {
   description: string | null;
   /** The instructor's display name, or 'Built-in' for the three seeded quizzes (creator_id is NULL). */
   authorName: string;
+  /** GitHub #379: which pool this catalog holds — question/answer rows ('mcq') or free-text
+   *  user_story prompts ('llm-graded'). Chosen once at creation and never edited afterwards. */
+  gradingKind: GradingKind;
+  /** How many items are in the catalog: questions for 'mcq', prompts for 'llm-graded'. Kept as one
+   *  field rather than two so the browse page's existing column needs only a label change — a
+   *  catalog only ever has one of the two pools, so a combined count is never ambiguous. */
   questionCount: number;
   /** How many assembled_quiz rows (GitHub #360) currently reference this catalog — a catalog has
    *  no course of its own, so this is the closest honest answer to "where is this used" the
@@ -23,11 +31,32 @@ type QuizRow = {
   activity_type: string;
   quiz_name: string;
   description: string | null;
+  grading_kind: string;
   creator_id: string | null;
   creator: { first_name: string | null; last_name: string | null; username: string | null } | null;
   question: { count: number }[] | null;
+  user_story: { count: number }[] | null;
   assembled_quiz_catalog: { count: number }[] | null;
 };
+
+/**
+ * Falls back to 'mcq' for the same reason the column defaults to it in the schema: every
+ * activity_type that predates GitHub #379's column drew from question/answer. An unreadable value
+ * here is a display concern, not an authorization one — the routes that actually branch on the
+ * kind call getGradingKind (lib/activityTypes.ts), which refuses instead of guessing.
+ */
+function gradingKindOf(row: QuizRow): GradingKind {
+  return isGradingKind(row.grading_kind) ? row.grading_kind : 'mcq';
+}
+
+function itemCountOf(row: QuizRow, kind: GradingKind): number {
+  return kind === 'llm-graded' ? row.user_story?.[0]?.count ?? 0 : row.question?.[0]?.count ?? 0;
+}
+
+function authorNameOf(row: QuizRow): string {
+  const fullName = [row.creator?.first_name, row.creator?.last_name].filter(Boolean).join(' ').trim();
+  return row.creator_id === null ? 'Built-in' : fullName || row.creator?.username || 'Unknown instructor';
+}
 
 /**
  * Every quiz in the system — built-in or instructor-created — with its author, question count,
@@ -40,27 +69,32 @@ type QuizRow = {
  * a second count embed onto assembled_quiz_catalog (the m:n link table from GitHub #360) — author
  * name, question count, and usage count come back on the same row as the quiz itself rather than
  * three round trips merged in JS.
+ *
+ * GitHub #379: user_story(count) rides along the same way question(count) does — that embed is
+ * what fk_user_story_activity_type was added for — and grading_kind decides which of the two
+ * counts becomes questionCount. Both are fetched unconditionally because it is one query either
+ * way; the unused one is always 0, since a catalog only ever fills one pool.
  */
 export async function listQuizzesWithAuthorAndCount(supabase: SupabaseClient) {
   const { data, error } = await supabase
     .from('activity_type')
     .select(
-      'activity_type, quiz_name, description, creator_id, creator:creator_id(first_name, last_name, username), question(count), assembled_quiz_catalog(count)',
+      'activity_type, quiz_name, description, grading_kind, creator_id, creator:creator_id(first_name, last_name, username), question(count), user_story(count), assembled_quiz_catalog(count)',
     )
     .order('quiz_name', { ascending: true });
 
   if (error) return { quizzes: null, error };
 
   const quizzes: QuizSummary[] = ((data ?? []) as unknown as QuizRow[]).map((row) => {
-    const fullName = [row.creator?.first_name, row.creator?.last_name].filter(Boolean).join(' ').trim();
-    const authorName = row.creator_id === null ? 'Built-in' : fullName || row.creator?.username || 'Unknown instructor';
+    const gradingKind = gradingKindOf(row);
 
     return {
       activityType: row.activity_type,
       name: row.quiz_name,
       description: row.description,
-      authorName,
-      questionCount: row.question?.[0]?.count ?? 0,
+      authorName: authorNameOf(row),
+      gradingKind,
+      questionCount: itemCountOf(row, gradingKind),
       quizCount: row.assembled_quiz_catalog?.[0]?.count ?? 0,
     };
   });
@@ -78,7 +112,9 @@ export type QuizMeta = Omit<QuizSummary, 'questionCount' | 'quizCount'>;
 export async function getQuizByActivityType(supabase: SupabaseClient, activityType: string) {
   const { data, error } = await supabase
     .from('activity_type')
-    .select('activity_type, quiz_name, description, creator_id, creator:creator_id(first_name, last_name, username)')
+    .select(
+      'activity_type, quiz_name, description, grading_kind, creator_id, creator:creator_id(first_name, last_name, username)',
+    )
     .eq('activity_type', activityType)
     .maybeSingle();
 
@@ -86,14 +122,13 @@ export async function getQuizByActivityType(supabase: SupabaseClient, activityTy
   if (!data) return { quiz: null, error: null };
 
   const row = data as unknown as QuizRow;
-  const fullName = [row.creator?.first_name, row.creator?.last_name].filter(Boolean).join(' ').trim();
-  const authorName = row.creator_id === null ? 'Built-in' : fullName || row.creator?.username || 'Unknown instructor';
 
   const quiz: QuizMeta = {
     activityType: row.activity_type,
     name: row.quiz_name,
     description: row.description,
-    authorName,
+    authorName: authorNameOf(row),
+    gradingKind: gradingKindOf(row),
   };
 
   return { quiz, error: null };
@@ -143,4 +178,45 @@ export async function listCatalogQuestions(supabase: SupabaseClient, activityTyp
   });
 
   return { questions, error: null };
+}
+
+type CatalogUserStoryRow = {
+  user_story_id: string;
+  story_text: string;
+  difficulty_level: number;
+  creator_id: string | null;
+};
+
+/**
+ * GitHub #379: every prompt in one LLM-graded catalog, any author — the free-text counterpart to
+ * listCatalogQuestions above, and read by the same catalog detail page.
+ *
+ * Same "catalogs are shared" scoping decision as that function: this returns the whole catalog
+ * rather than only the caller's own rows (which is what GET /api/instructor/user-stories does),
+ * and ownerId travels along so the page can decide whose rows get Edit/Delete icons without a
+ * second round trip.
+ *
+ * Ordered by level, then by text. There is no order_number on user_story the way there is on
+ * question, so text is the tiebreaker — it is stable and it makes the list read alphabetically
+ * within a level rather than in whatever order Postgres happens to return.
+ */
+export async function listCatalogUserStories(supabase: SupabaseClient, activityType: string) {
+  const { data, error } = await supabase
+    .from('user_story')
+    .select('user_story_id, story_text, difficulty_level, creator_id')
+    .eq('activity_type', activityType)
+    .order('difficulty_level', { ascending: true })
+    .order('story_text', { ascending: true });
+
+  if (error) return { userStories: null, error };
+
+  const userStories: CatalogUserStory[] = ((data ?? []) as unknown as CatalogUserStoryRow[]).map((row) => ({
+    id: row.user_story_id,
+    activityType: activityType as ActivityType,
+    level: row.difficulty_level as 1 | 2 | 3,
+    storyText: row.story_text,
+    ownerId: row.creator_id,
+  }));
+
+  return { userStories, error: null };
 }

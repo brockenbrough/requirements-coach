@@ -1,5 +1,5 @@
-import { AC_PASS_SCORE } from '../lib/acceptanceCriteriaRules';
-import type { AcceptanceCriteriaResult, UserStoryPrompt } from '../lib/acceptanceCriteriaTypes';
+import { PROMPT_PASS_SCORE } from '../lib/llmActivityRules';
+import type { LlmGradingResult, UserStoryPrompt } from '../lib/llmActivityTypes';
 import { StoryDisplayCard } from './StoryDisplayCard';
 
 /**
@@ -17,12 +17,12 @@ export function AcceptanceCriteriaFeedbackScreen({
   result,
 }: {
   userStory: UserStoryPrompt;
-  result: AcceptanceCriteriaResult;
+  result: LlmGradingResult;
 }) {
-  // AC_PASS_SCORE (8/10) is this activity's own pass bar, independent of the Type A quiz's
+  // PROMPT_PASS_SCORE (8/10) is this activity's own pass bar, independent of the Type A quiz's
   // PASS_RATIO (lib/sessionRules.ts) — the two are scored on different scales and are not
   // coupled. Shared with SessionSummaryScreen so the two screens can't drift apart.
-  const passed = result.score >= AC_PASS_SCORE;
+  const passed = result.score >= PROMPT_PASS_SCORE;
 
   return (
     <>

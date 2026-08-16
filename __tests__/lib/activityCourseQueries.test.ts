@@ -156,7 +156,7 @@ describe('listActivityTypesForCourses', () => {
       data: [
         {
           activity_type: 'CUSTOM_QUIZ',
-          catalog: { quiz_name: 'Sprint 1 Check', description: 'Covers sprint basics' },
+          catalog: { quiz_name: 'Sprint 1 Check', description: 'Covers sprint basics', grading_kind: 'mcq' },
           assembled_quiz: { course_id: 'course-1', course: { course_name: 'Intro to SE' } },
         },
       ],
@@ -171,6 +171,7 @@ describe('listActivityTypesForCourses', () => {
           activityType: 'CUSTOM_QUIZ',
           name: 'Sprint 1 Check',
           description: 'Covers sprint basics',
+          gradingKind: 'mcq',
           courseId: 'course-1',
           courseName: 'Intro to SE',
         },
@@ -209,5 +210,47 @@ describe('listActivityTypesForCourses', () => {
     const result = await listActivityTypesForCourses(makeSupabase(), ['course-1']);
 
     expect(result).toEqual({ activities: null, error: { message: 'db down' } });
+  });
+
+  // The field the student play flow branches on, so it has to survive this mapping intact.
+  it('carries an llm-graded catalog kind through', async () => {
+    queue('assembled_quiz_catalog', {
+      data: [
+        {
+          activity_type: 'WRITE_ACCEPTANCE_CRITERIA',
+          catalog: { quiz_name: 'Write Acceptance Criteria', description: null, grading_kind: 'llm-graded' },
+          assembled_quiz: { course_id: 'course-1', course: { course_name: 'Intro to SE' } },
+        },
+      ],
+      error: null,
+    });
+
+    const result = await listActivityTypesForCourses(makeSupabase(), ['course-1']);
+
+    expect(result.activities?.[0].gradingKind).toBe('llm-graded');
+  });
+
+  // The column defaults to 'mcq' in the schema because every activity_type predating it drew from
+  // question/answer; a row whose embed didn't resolve should land on the same side.
+  it('falls back to mcq when the catalog embed is missing or unrecognised', async () => {
+    queue('assembled_quiz_catalog', {
+      data: [
+        {
+          activity_type: 'ORPHANED',
+          catalog: null,
+          assembled_quiz: { course_id: 'course-1', course: { course_name: 'Intro to SE' } },
+        },
+        {
+          activity_type: 'WEIRD',
+          catalog: { quiz_name: 'Weird', description: null, grading_kind: 'peer-reviewed' },
+          assembled_quiz: { course_id: 'course-1', course: { course_name: 'Intro to SE' } },
+        },
+      ],
+      error: null,
+    });
+
+    const result = await listActivityTypesForCourses(makeSupabase(), ['course-1']);
+
+    expect(result.activities?.map((a) => a.gradingKind)).toEqual(['mcq', 'mcq']);
   });
 });
