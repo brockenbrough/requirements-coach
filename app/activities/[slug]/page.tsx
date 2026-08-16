@@ -8,8 +8,8 @@ import { AppShell } from "../../../components/AppShell";
 import { CompletedAttemptsTable } from "../../../components/CompletedAttemptsTable";
 import { LevelReplaySelector } from "../../../components/LevelReplaySelector";
 import { ResumeOrAbandonPrompt } from "../../../components/ResumeOrAbandonPrompt";
-import { getActivity } from "../../../lib/activityContent";
 import { MAX_DIFFICULTY_LEVEL, nextDifficultyLevel } from "../../../lib/sessionRules";
+import { useResolvedActivity } from "../../../lib/useResolvedActivity";
 import {
   type CompletedAttempt,
   type CurrentSessionResult,
@@ -63,7 +63,7 @@ function ActivityDetailContent({
   // Also redirects an instructor account away (GitHub #82) — starting/resuming/abandoning a
   // quiz is exactly the "quiz durchführen" capability instructors must not have.
   const { token, profile, loading, authorized } = useRequireRole('student');
-  const activity = getActivity(params.slug);
+  const { activity, status: activityStatus } = useResolvedActivity(token, params.slug);
 
   // The level ActivityCard was already showing for this activity on the activities list page
   // (components/ActivityCard.tsx's ?level= link) — used only to seed the first paint below so
@@ -178,19 +178,32 @@ function ActivityDetailContent({
     };
   }, [token, activity, profile?.user_id]);
 
-  // Type B activities (e.g. write-acceptance-criteria) have their own dedicated page under
-  // the same path. The static Next.js route normally wins, but guard here in case the dynamic
-  // segment is somehow matched — redirect rather than showing "Unknown activity."
-  useEffect(() => {
-    if (!loading && authorized && !activity) {
-      router.replace(`/activities/${params.slug}`);
-    }
-  }, [loading, authorized, activity, params.slug, router]);
-
   if (loading || !authorized) return null;
 
+  // 'loading' here means useResolvedActivity is still checking the server for a slug that isn't
+  // one of the three built-ins — same "nothing real yet" reasoning as the isLoading skeleton
+  // below, just for a fetch that has to resolve before it's even known whether this activity
+  // exists at all.
+  if (activityStatus === 'loading') return null;
+
   if (!activity) {
-    return null;
+    return (
+      <AppShell active="activities">
+        <div className="mx-auto max-w-lg">
+          <Link
+            href="/activities"
+            className="mb-5 inline-flex items-center gap-1 text-sm font-bold text-gray-500 hover:text-[#1B1642]"
+          >
+            ← Back to Activities
+          </Link>
+          <p className="rounded-2xl border border-brand-danger/40 bg-brand-danger/10 p-6 text-sm font-semibold text-brand-danger-light">
+            {activityStatus === 'forbidden'
+              ? "You're not enrolled in a course that offers this activity."
+              : "This activity doesn't exist."}
+          </p>
+        </div>
+      </AppShell>
+    );
   }
 
   // Starts at selectedLevel when one has been picked via LevelReplaySelector, otherwise the
