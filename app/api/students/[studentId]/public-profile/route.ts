@@ -1,7 +1,7 @@
 import { getSupabaseClient } from '../../../../../lib/supabase';
 import { getEnrolledCourseIds, isEnrolledInAnyCourse } from '../../../../../lib/courseQueries';
 import { computeStudentScore } from '../../../../../lib/scoreQueries';
-import { computeStudentTitles } from '../../../../../lib/titleQueries';
+import { computeStudentTitles, loadAvailableTitleLadders } from '../../../../../lib/titleQueries';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -18,12 +18,16 @@ function getToken(request: Request): string | null {
  * data, under a different authorization rule (see below), so copying that preamble would defeat
  * the route's entire purpose.
  *
- * PRIVACY CONTRACT — returns exactly { username, avatarUrl, biography, score, titles } and
- * nothing else. No first_name/last_name/age/semester (on "user" but never selected here) and no
- * role (selected, but only to decide the 403 below — never put in the response body). score and
- * titles are computeStudentScore/computeStudentTitles's own numbers (lib/scoreQueries.ts,
- * lib/titleQueries.ts), not re-derived here, so this can never disagree with the sidebar score
- * pill or GET /api/students/{id}/titles about what either means.
+ * PRIVACY CONTRACT — returns exactly { username, avatarUrl, biography, score, titles,
+ * availableTitles } and nothing else. No first_name/last_name/age/semester (on "user" but never
+ * selected here) and no role (selected, but only to decide the 403 below — never put in the
+ * response body). score and titles are computeStudentScore/computeStudentTitles's own numbers
+ * (lib/scoreQueries.ts, lib/titleQueries.ts), not re-derived here, so this can never disagree
+ * with the sidebar score pill or GET /api/students/{id}/titles about what either means.
+ * availableTitles (the full earnable ladder for each of the target's enrolled-course activities,
+ * loadAvailableTitleLadders) reuses targetCourseIds already fetched below for the shared-course
+ * check, rather than querying student_course a second time — this route is the only place a peer
+ * can see another student's ladder, since GET /api/students/{id}/available-titles is self-only.
  *
  * Authorization is "do the caller and the target share a course", not role or ownership: a
  * profile discloses another student's score and titles, and being classmates somewhere is what
@@ -73,13 +77,18 @@ export async function GET(request: Request, { params }: { params: { studentId: s
   if (sharedCourseError) return Response.json({ error: sharedCourseError.message }, { status: 500 });
   if (!enrolled) return Response.json({ error: 'Forbidden.' }, { status: 403 });
 
-  const [{ score, error: scoreError }, { titles, error: titlesError }] = await Promise.all([
+  const [
+    { score, error: scoreError },
+    { titles, error: titlesError },
+    { activities: availableTitles, error: availableTitlesError },
+  ] = await Promise.all([
     computeStudentScore(supabase, params.studentId),
     computeStudentTitles(supabase, params.studentId),
+    loadAvailableTitleLadders(supabase, targetCourseIds),
   ]);
 
-  const computeError = scoreError ?? titlesError;
-  if (computeError || score === null || !titles) {
+  const computeError = scoreError ?? titlesError ?? availableTitlesError;
+  if (computeError || score === null || !titles || !availableTitles) {
     return Response.json({ error: computeError?.message ?? 'Could not load profile.' }, { status: 500 });
   }
 
@@ -92,6 +101,7 @@ export async function GET(request: Request, { params }: { params: { studentId: s
       biography: profile.biography,
       score,
       titles,
+      availableTitles,
     },
     { status: 200 },
   );
