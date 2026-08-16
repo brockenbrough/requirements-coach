@@ -53,7 +53,7 @@ function queueRole(role: string) {
   queue('user', { data: { role }, error: null });
 }
 
-/** An activity_type row as GET's creator + question(count) + activity_type_course embed actually returns it. */
+/** An activity_type row as GET's creator + question(count) + assembled_quiz_catalog(count) embed actually returns it. */
 function quizRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     activity_type: 'IDENTIFY_WEAK_USER_STORIES',
@@ -62,7 +62,7 @@ function quizRow(overrides: Partial<Record<string, unknown>> = {}) {
     creator_id: null,
     creator: null,
     question: [{ count: 36 }],
-    activity_type_course: null,
+    assembled_quiz_catalog: [{ count: 0 }],
     ...overrides,
   };
 }
@@ -118,27 +118,22 @@ describe('GET /api/instructor/quizzes', () => {
         description: null,
         authorName: 'Built-in',
         questionCount: 36,
-        courseId: null,
-        courseName: null,
+        quizCount: 0,
       },
     ]);
   });
 
-  it('reports the linked course when the activity has one (activity_type_course)', async () => {
+  it('reports how many assembled quizzes (GitHub #360) reference the catalog', async () => {
     queueRole('instructor');
     queue('activity_type', {
-      data: [
-        quizRow({
-          activity_type_course: [{ course_id: 'course-1', course: { course_name: 'Software Requirements' } }],
-        }),
-      ],
+      data: [quizRow({ assembled_quiz_catalog: [{ count: 3 }] })],
       error: null,
     });
 
     const res = await GET(req());
     const body = await res.json();
 
-    expect(body.quizzes[0]).toMatchObject({ courseId: 'course-1', courseName: 'Software Requirements' });
+    expect(body.quizzes[0]).toMatchObject({ quizCount: 3 });
   });
 
   it("reports the instructor's full name for a quiz they created", async () => {
@@ -167,8 +162,7 @@ describe('GET /api/instructor/quizzes', () => {
         description: 'A quiz about things',
         authorName: 'Ada Brockenbrough',
         questionCount: 0,
-        courseId: null,
-        courseName: null,
+        quizCount: 0,
       },
     ]);
   });

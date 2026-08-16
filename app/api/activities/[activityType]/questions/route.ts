@@ -51,7 +51,8 @@ export async function GET(
   }
 
   // Same course-enrollment gate as POST /api/sessions — this activity's question pool is only
-  // visible to a caller enrolled in the course it's linked to (activity_type_course).
+  // visible to a caller enrolled in a course whose assembled quizzes reference it
+  // (lib/activityCourseQueries.ts's checkActivityAccess).
   const access = await checkActivityAccess(supabase, activityType, user.id);
   if (access.status === 'error') return Response.json({ error: access.error.message }, { status: 500 });
   if (access.status === 'forbidden') {

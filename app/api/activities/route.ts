@@ -8,11 +8,11 @@ function getToken(request: Request): string | null {
 }
 
 /**
- * GET /api/activities — "what activities can I see", the student-facing discovery route every
- * activity_type now needs (activity_type_course): built-in or instructor-created, an activity
- * only shows up here if it's linked to a course the caller is enrolled in
- * (getEnrolledCourseIds + listActivityTypesForCourses, the same enrolled-course-ids building
- * block GET /api/daily-challenge's own pool draw uses).
+ * GET /api/activities — "what activities can I see": built-in or instructor-created, a catalog
+ * only shows up here if it's reachable through an assembled_quiz belonging to a course the caller
+ * is enrolled in (getEnrolledCourseIds + listActivityTypesForCourses, the same enrolled-course-ids
+ * building block GET /api/daily-challenge's own pool draw uses) — a catalog has no course of its
+ * own.
  *
  * Unlike GET /api/instructor/quizzes (every catalog in the system, unfiltered — quizzes are
  * globally *browsable* by any instructor), this route is scoped per caller: two students in

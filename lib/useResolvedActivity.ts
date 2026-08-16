@@ -1,12 +1,12 @@
 'use client';
 
 // Resolves an app/activities/[slug] route segment to an ActivityDefinition, whether it's one of
-// the three built-ins lib/activityContent.ts knows statically or a course-scoped custom catalog
-// reached directly by its activity_type key. Shared by app/activities/[slug]/page.tsx and its
-// play page — both used to call getActivity(params.slug) directly and treat a miss as "doesn't
-// exist"; now a miss means "check the server" before giving up, since every activity_type is
-// reachable by a student enrolled in its course (activity_type_course), not just the three
-// hardcoded ones.
+// the three built-ins lib/activityContent.ts knows statically or a custom catalog reached
+// directly by its activity_type key. Shared by app/activities/[slug]/page.tsx and its play page —
+// both used to call getActivity(params.slug) directly and treat a miss as "doesn't exist"; now a
+// miss means "check the server" before giving up, since a catalog is reachable by a student
+// enrolled in a course whose assembled quizzes reference it (lib/activityCourseQueries.ts), not
+// just the three hardcoded ones.
 
 import { useEffect, useState } from 'react';
 import { type ActivityDefinition, buildCustomActivityDefinition, getActivity } from './activityContent';

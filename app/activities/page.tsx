@@ -77,10 +77,11 @@ export default function ActivitiesPage() {
   // to that mock since the play flow moved to the API, so its level was frozen at 1 and its title
   // at "Not yet started" forever — the actual bug behind #272, not just its wording.
   //
-  // The activity list itself is no longer the hardcoded ACTIVITIES array: every activity_type is
-  // now linked to a course (activity_type_course), so GET /api/activities (loadAvailableActivities)
-  // is asked first for exactly the ones this student's enrolled courses actually offer — built-in
-  // or instructor-created alike. Each entry resolves to its rich static ActivityDefinition when
+  // The activity list itself is no longer the hardcoded ACTIVITIES array: a catalog is reachable
+  // only through an assembled quiz belonging to a course (lib/activityCourseQueries.ts), so
+  // GET /api/activities (loadAvailableActivities) is asked first for exactly the ones this
+  // student's enrolled courses actually offer — built-in or instructor-created alike. Each entry
+  // resolves to its rich static ActivityDefinition when
   // one exists (getActivityByType — the two Type A activities and Write Acceptance Criteria),
   // else a generic one built from the catalog's own name/description (buildCustomActivityDefinition).
   useEffect(() => {

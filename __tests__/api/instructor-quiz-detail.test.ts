@@ -141,8 +141,6 @@ describe('GET /api/instructor/quizzes/[activityType]', () => {
       name: 'Identify Weak User Stories',
       description: null,
       authorName: 'Built-in',
-      courseId: null,
-      courseName: null,
     });
 
     expect(body.questions).toHaveLength(2);
