@@ -12,7 +12,7 @@ function getToken(request: Request): string | null {
  * authenticated user can browse, same as POST /api/courses/join.
  *
  * The code itself is never in this response — it's a secret the instructor hands out directly
- * (see CreateCourseForm.tsx / the instructor course detail page, where it IS shown, to its
+ * (see CreateCourseModal.tsx / the instructor course detail page, where it IS shown, to its
  * owner). A student who wants to join has to already have it from their instructor and type it
  * into POST /api/courses/join; this route only helps them confirm which course to ask about.
  *
