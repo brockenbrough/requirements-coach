@@ -17,8 +17,8 @@ import { toInstant } from "./dateTime";
 // Already the shape the route returns (camelCase, pre-aggregated) — re-exported here so this
 // file stays the one import components need, the same role sessionClient.ts's re-export of
 // SessionRecord plays for lib/sessionTypes.ts.
-import type { AcceptanceCriteriaStatistics } from "./llmActivityStatisticsQueries";
-export type { AcceptanceCriteriaStatistics } from "./llmActivityStatisticsQueries";
+import type { LlmActivityStatistics } from "./llmActivityStatisticsQueries";
+export type { LlmActivityStatistics } from "./llmActivityStatisticsQueries";
 
 export type ApiResult<T> =
   | { ok: true; data: T }
@@ -137,6 +137,9 @@ export type InstructorACSubmission = {
   studentId: string;
   studentName: string;
   userStoryDescription: string;
+  /** GitHub #379: which llm-graded activity this submission belongs to, so the dashboard can
+   *  label it instead of assuming the one seeded activity. */
+  activityType: string;
   /** GitHub #276: user_story.difficulty_level, so the combined dashboard's Level filter applies here too. */
   difficultyLevel: 1 | 2 | 3;
   submittedText: string;
@@ -178,11 +181,14 @@ export function loadInstructorACSubmissions(
  * same "always fresh" treatment loadInstructorACSubmissions above gets, since a newly graded
  * submission should move the average right away.
  */
-export function loadAcceptanceCriteriaStatistics(
+export function loadLlmActivityStatistics(
   token: string,
-): Promise<ApiResult<{ statistics: AcceptanceCriteriaStatistics }>> {
-  return request<{ statistics: AcceptanceCriteriaStatistics }>(
-    "/api/instructor/acceptance-criteria/statistics",
+  options: { activityType?: string } = {},
+): Promise<ApiResult<{ statistics: LlmActivityStatistics }>> {
+  const query = options.activityType ? `?activityType=${encodeURIComponent(options.activityType)}` : '';
+
+  return request<{ statistics: LlmActivityStatistics }>(
+    `/api/instructor/acceptance-criteria/statistics${query}`,
     { method: "GET" },
     token,
   );

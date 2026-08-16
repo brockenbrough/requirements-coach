@@ -49,6 +49,17 @@ export default function ActivityLogPage() {
 
   // Filtering/sorting stays client-side over the full fetched list — the same shape GitHub #48
   // was originally built against, just sourced from the API now.
+  // GitHub #379: the activity pills come from the log itself, so a custom or LLM-graded activity
+  // is filterable the moment it appears — the old hardcoded three could never list one. Sorted by
+  // label so the row's order doesn't shuffle as new attempts arrive.
+  const activityOptions = useMemo(() => {
+    const byType = new Map<string, string>();
+    for (const entry of entries ?? []) byType.set(entry.activityType, entry.activityName);
+    return [...byType]
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [entries]);
+
   const filteredSorted = useMemo(() => {
     const rows = (entries ?? []).filter((entry) => {
       if (activity !== 'all' && entry.activityType !== activity) return false;
@@ -102,6 +113,7 @@ export default function ActivityLogPage() {
 
             <ActivityFilters
               activity={activity}
+              activityOptions={activityOptions}
               status={status}
               sort={sort}
               onActivityChange={handleActivityChange}

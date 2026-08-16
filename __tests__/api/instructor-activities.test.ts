@@ -9,6 +9,7 @@ type Result = { data?: unknown; error?: unknown };
 // __tests__/lib/instructorAuth.test.ts records its filters).
 const h = vi.hoisted(() => {
   const state = {
+    selects: [] as { table: string; columns: string }[],
     queues: {} as Record<string, Result[]>,
     tables: [] as string[],
     filters: [] as { table: string; column: string; value: unknown }[],
@@ -17,7 +18,10 @@ const h = vi.hoisted(() => {
 
   function makeBuilder(table: string, result: Result) {
     const builder: Record<string, unknown> = {
-      select: () => builder,
+      select: (columns: string) => {
+        state.selects.push({ table, columns });
+        return builder;
+      },
       eq: (column: string, value: unknown) => {
         state.filters.push({ table, column, value });
         return builder;
@@ -102,6 +106,7 @@ beforeEach(() => {
   h.state.queues = {};
   h.state.tables = [];
   h.state.filters = [];
+  h.state.selects = [];
   h.state.orders = [];
 });
 
@@ -205,17 +210,35 @@ describe('GET /api/instructor/activities', () => {
   // GET /api/instructor/acceptance-criteria/submissions client-side. Now that
   // WRITE_ACCEPTANCE_CRITERIA sessions have real session_log rows too, this query must keep
   // excluding them — otherwise every AC attempt would render twice on the combined dashboard.
-  it('excludes Write Acceptance Criteria sessions, which the combined dashboard already gets from the submissions route', async () => {
+  // GitHub #379: this used to be a .neq on the WRITE_ACCEPTANCE_CRITERIA literal. Instructors can
+  // create llm-graded activities now, so a hardcoded exclusion list would silently start
+  // double-counting the first time one was used — the dashboard merges these session rows with
+  // the submissions route's own rows.
+  //
+  // The !inner assertion is the important half and also the limit of what a unit test can do
+  // here: the fake builder no-ops .eq, so a *wrong* filter path would still pass. A non-inner
+  // embed nulls the field instead of dropping the row, which would make the eq below match
+  // nothing and silently empty the dashboard — that failure mode has to be checked against a real
+  // database, not here.
+  it('excludes llm-graded sessions, which the combined dashboard already gets from the submissions route', async () => {
     queueRole('instructor');
     queue('session_log', { data: [], error: null });
 
     await GET(request('valid-token'));
 
+    const select = h.state.selects.find((entry) => entry.table === 'session_log');
+    expect(select?.columns).toContain('catalog:activity_type!inner');
+    expect(select?.columns).toContain('grading_kind');
+
     expect(h.state.filters).toContainEqual({
       table: 'session_log',
-      column: 'activity_type (neq)',
-      value: 'WRITE_ACCEPTANCE_CRITERIA',
+      column: 'catalog.grading_kind',
+      value: 'mcq',
     });
+
+    expect(h.state.filters).not.toContainEqual(
+      expect.objectContaining({ column: 'activity_type (neq)' }),
+    );
   });
 
   it('sorts in the query: ended_at desc, then started_at desc', async () => {

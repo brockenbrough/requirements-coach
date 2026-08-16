@@ -1,4 +1,4 @@
-import { PROMPT_PASS_SCORE } from './llmActivityRules';
+import { PROMPT_PASS_SCORE, STORY_MAX_SCORE } from './llmActivityRules';
 import type { InstructorACSubmission } from './llmActivityClient';
 import { getActivityByType } from './activityContent';
 import type { ActivityType } from './activityTypes';
@@ -196,18 +196,24 @@ export function toAcSubmissionRow(submission: InstructorACSubmission): AcSubmiss
   const graded = submission.llmScore !== null;
 
   return {
+    // Deliberately still 'ac-submission': it is an internal discriminant read by
+    // ActivityLogRow's expand-panel switch, and renaming it would be pure churn with a real
+    // chance of missing a branch.
     kind: 'ac-submission',
     id: submission.submissionId,
     studentId: submission.studentId,
     studentName: submission.studentName,
-    activityType: 'WRITE_ACCEPTANCE_CRITERIA',
-    activityName: getActivityByType('WRITE_ACCEPTANCE_CRITERIA')?.name ?? 'Write Acceptance Criteria',
+    // GitHub #379: read off the submission rather than hardcoded — more than one activity can be
+    // llm-graded now, so a fixed key would mislabel every instructor-created one. Same
+    // getActivityByType-else-key fallback toActivityLogEntry already uses for a custom catalog.
+    activityType: submission.activityType,
+    activityName: getActivityByType(submission.activityType)?.name ?? submission.activityType,
     level: submission.difficultyLevel,
     dateTime: submission.submittedAt,
     status: graded ? 'completed' : 'in-progress',
     passed: graded && submission.llmScore! >= PROMPT_PASS_SCORE,
     score: submission.llmScore ?? 0,
-    maxScore: 10,
+    maxScore: STORY_MAX_SCORE,
     totalQuestions: 1,
     answeredQuestions: graded ? 1 : 0,
     userStoryDescription: submission.userStoryDescription,
