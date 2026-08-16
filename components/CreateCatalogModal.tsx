@@ -1,16 +1,15 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { createQuiz } from '../lib/quizClient';
-
-const FOCUSABLE_SELECTOR = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+import { useModalDismiss } from './useModalDismiss';
 
 /**
  * The popup that creates a question catalog (GitHub #359 follow-up), replacing the permanently
- * visible inline form app/instructor/quizzes/page.tsx used to render below the list. Structurally
- * copied from components/EditCourseModal.tsx (itself copied from QuestionFormModal) — same
- * mount-is-open, focus-trap, Escape-to-close, backdrop-click-to-close, focus-return pattern every
- * popup in this project follows independently rather than through a shared base component.
+ * visible inline form app/instructor/quizzes/page.tsx used to render below the list. The
+ * overlay/panel/header/footer markup is still composed independently, per this project's modal
+ * convention (CLAUDE.md's Styling Guidelines) — only the focus-trap/Escape/focus-return wiring is
+ * shared, via useModalDismiss, with the structurally identical components/CreateQuizModal.tsx.
  *
  * "Catalog" here and "quiz" in the code (createQuiz, activity_type.quiz_name) are the same
  * concept — see CLAUDE.md's Question Catalogs section.
@@ -29,55 +28,10 @@ export function CreateCatalogModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  const panelRef = useRef<HTMLDivElement>(null);
-  const firstFieldRef = useRef<HTMLInputElement>(null);
-  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    previouslyFocusedRef.current = document.activeElement as HTMLElement | null;
-    firstFieldRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        requestClose();
-        return;
-      }
-
-      if (event.key !== 'Tab' || !panelRef.current) return;
-
-      const focusable = panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
-      if (focusable.length === 0) return;
-
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  function close() {
-    onClose();
-    previouslyFocusedRef.current?.focus();
-  }
-
-  /** Cancel/×/backdrop/Escape all route through here so an in-flight create can't be abandoned. */
-  function requestClose() {
-    if (submitting) return;
-    close();
-  }
+  const { panelRef, firstFieldRef, requestClose } = useModalDismiss<HTMLDivElement, HTMLInputElement>({
+    onClose,
+    isBlocked: submitting,
+  });
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -102,7 +56,7 @@ export function CreateCatalogModal({
     }
 
     onCreated(result.data.quiz);
-    close();
+    requestClose();
   }
 
   return (
