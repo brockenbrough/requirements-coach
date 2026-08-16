@@ -5,12 +5,17 @@
 // catalog" in that issue are the same activity_type-backed concept — see CLAUDE.md.
 
 import type { CatalogQuestion } from './quizQuestionTypes';
+import type { GradingKind } from './activityTypes';
 
 export type QuizSummary = {
   activityType: string;
   name: string;
   description: string | null;
   authorName: string;
+  /** GitHub #379: 'mcq' (question/answer rows) or 'llm-graded' (free-text user_story prompts). */
+  gradingKind: GradingKind;
+  /** Questions for an 'mcq' catalog, prompts for an 'llm-graded' one — a catalog only ever fills
+   *  one pool, so one field covers both. */
   questionCount: number;
   /** The course this activity is linked to (activity_type_course), or null if unlinked — an
    *  unlinked activity isn't visible to any student yet. */

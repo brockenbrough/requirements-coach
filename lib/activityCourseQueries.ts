@@ -6,6 +6,7 @@
 
 import type { SupabaseClient } from './sessionQueries';
 import { isEnrolledInAnyCourse } from './courseQueries';
+import { isGradingKind, type GradingKind } from './activityTypes';
 
 export type ActivityCourseLink = { courseId: string; courseName: string };
 
@@ -85,6 +86,12 @@ export type CourseActivitySummary = {
   activityType: string;
   name: string;
   description: string | null;
+  /** GitHub #379: which play flow this activity uses — 'mcq' goes through POST /api/sessions,
+   *  'llm-graded' through the free-text session routes. This is the field the student pages
+   *  branch on, so it has to survive the trip from activity_type all the way to
+   *  buildCustomActivityDefinition; without it a custom LLM catalog would resolve into the MCQ
+   *  flow and fail at the draw. */
+  gradingKind: GradingKind;
   courseId: string;
   courseName: string;
 };
@@ -103,7 +110,7 @@ export async function listActivityTypesForCourses(
 
   const { data, error } = await supabase
     .from('activity_type_course')
-    .select('activity_type, course_id, course:course_id(course_name), catalog:activity_type(quiz_name, description)')
+    .select('activity_type, course_id, course:course_id(course_name), catalog:activity_type(quiz_name, description, grading_kind)')
     .in('course_id', courseIds);
 
   if (error) return { activities: null, error };
@@ -112,13 +119,16 @@ export async function listActivityTypesForCourses(
     activity_type: string;
     course_id: string;
     course: { course_name: string } | null;
-    catalog: { quiz_name: string; description: string | null } | null;
+    catalog: { quiz_name: string; description: string | null; grading_kind: string } | null;
   };
 
   const activities: CourseActivitySummary[] = ((data ?? []) as unknown as Row[]).map((row) => ({
     activityType: row.activity_type,
     name: row.catalog?.quiz_name ?? row.activity_type,
     description: row.catalog?.description ?? null,
+    // Same 'mcq' fallback as lib/activityTypeQueries.ts's gradingKindOf, for the same reason: the
+    // column defaults to 'mcq' because every activity_type predating it drew from question/answer.
+    gradingKind: isGradingKind(row.catalog?.grading_kind) ? row.catalog.grading_kind : 'mcq',
     courseId: row.course_id,
     courseName: row.course?.course_name ?? 'Unknown course',
   }));

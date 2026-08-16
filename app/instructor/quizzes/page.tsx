@@ -87,6 +87,9 @@ export default function InstructorQuizzesPage() {
         name: quiz.name,
         description: quiz.description,
         authorName,
+        // POST /api/activities/types can only produce an MCQ catalog today; when it learns to
+        // take a grading kind, this reads the created quiz's own value instead of assuming.
+        gradingKind: 'mcq',
         questionCount: 0,
         courseId: quiz.courseId,
         courseName: quiz.courseName,

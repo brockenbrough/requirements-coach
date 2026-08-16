@@ -62,6 +62,7 @@ function quizRow(overrides: Partial<Record<string, unknown>> = {}) {
     activity_type: 'IDENTIFY_WEAK_USER_STORIES',
     quiz_name: 'Identify Weak User Stories',
     description: null,
+    grading_kind: 'mcq',
     creator_id: null,
     creator: null,
     ...overrides,
@@ -141,6 +142,7 @@ describe('GET /api/instructor/quizzes/[activityType]', () => {
       name: 'Identify Weak User Stories',
       description: null,
       authorName: 'Built-in',
+      gradingKind: 'mcq',
       courseId: null,
       courseName: null,
     });

@@ -26,7 +26,7 @@ function getToken(request: Request): string | null {
  * - 401 missing/invalid bearer token
  * - 404 activityType matches no catalog
  * - 403 caller isn't enrolled in the course this activity is linked to
- * - 200 { activity: { activityType, name, description, courseId, courseName } }
+ * - 200 { activity: { activityType, name, description, gradingKind, courseId, courseName } }
  * - 500 Supabase not configured, or a query fails
  */
 export async function GET(request: Request, { params }: { params: { activityType: string } }) {
@@ -59,6 +59,10 @@ export async function GET(request: Request, { params }: { params: { activityType
         activityType: quiz.activityType,
         name: quiz.name,
         description: quiz.description,
+        // GitHub #379: which play flow the client should enter. buildCustomActivityDefinition
+        // reads this straight off the response, so a custom LLM-graded catalog reached by its raw
+        // key lands in the free-text flow instead of the MCQ one.
+        gradingKind: quiz.gradingKind,
         courseId: link.courseId,
         courseName: link.courseName,
       },
