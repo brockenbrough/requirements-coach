@@ -75,12 +75,22 @@ function req(token: string | null = 'valid-token') {
 
 const ctx = { params: { studentId: STUDENT_ID } };
 
-/** Queues session_log rows followed by the two progress tables (Promise.all order). */
-function queueLookup(sessionRows: unknown[], progressRows: { toQuestion?: unknown[]; answered?: unknown[] } = {}) {
+/** Queues session_log rows followed by the four progress tables (Promise.all order). */
+function queueLookup(
+  sessionRows: unknown[],
+  progressRows: {
+    toQuestion?: unknown[];
+    answered?: unknown[];
+    toStory?: unknown[];
+    submissions?: unknown[];
+  } = {},
+) {
   queue('session_log', { data: sessionRows, error: null });
   if (sessionRows.length > 0) {
     queue('session_to_question', { data: progressRows.toQuestion ?? [], error: null });
     queue('answered_question_log', { data: progressRows.answered ?? [], error: null });
+    queue('session_to_user_story', { data: progressRows.toStory ?? [], error: null });
+    queue('submission', { data: progressRows.submissions ?? [], error: null });
   }
 }
 
@@ -157,6 +167,73 @@ describe('GET /api/students/{studentId}/activities', () => {
       questionCount: 2,
       answeredCount: 1,
       nextPosition: 1,
+    });
+  });
+
+  // GitHub #259: an acceptance-criteria session's progress lives in session_to_user_story /
+  // submission, not session_to_question / answered_question_log — the route must merge those in
+  // too, not just for MCQ sessions.
+  it('includes progress for an in-progress acceptance-criteria session', async () => {
+    queueLookup(
+      [
+        sessionRow({
+          session_id: 'ac-session-1',
+          activity_type: 'WRITE_ACCEPTANCE_CRITERIA',
+          status: 'in-progress',
+        }),
+      ],
+      {
+        toStory: [
+          { session_id: 'ac-session-1', position: 0, user_story_id: 'story-1' },
+          { session_id: 'ac-session-1', position: 1, user_story_id: 'story-2' },
+        ],
+        submissions: [{ session_id: 'ac-session-1', user_story_id: 'story-1' }],
+      },
+    );
+
+    const response = await GET(req(), ctx);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.activities[0]).toMatchObject({
+      session_id: 'ac-session-1',
+      activity_type: 'WRITE_ACCEPTANCE_CRITERIA',
+      status: 'in-progress',
+      questionCount: 2,
+      answeredCount: 1,
+      nextPosition: 1,
+    });
+  });
+
+  // A student who gives up on an acceptance-criteria session must see it as 'abandoned' in their
+  // history rather than have it silently disappear — the submissions already made still count
+  // toward its progress.
+  it('includes an abandoned acceptance-criteria session with its progress preserved', async () => {
+    queueLookup(
+      [
+        sessionRow({
+          session_id: 'ac-session-2',
+          activity_type: 'WRITE_ACCEPTANCE_CRITERIA',
+          status: 'abandoned',
+          ended_at: '2026-08-01T10:00:00.000Z',
+        }),
+      ],
+      {
+        toStory: [
+          { session_id: 'ac-session-2', position: 0, user_story_id: 'story-1' },
+          { session_id: 'ac-session-2', position: 1, user_story_id: 'story-2' },
+        ],
+        submissions: [{ session_id: 'ac-session-2', user_story_id: 'story-1' }],
+      },
+    );
+
+    const response = await GET(req(), ctx);
+    const body = await response.json();
+
+    expect(body.activities[0]).toMatchObject({
+      status: 'abandoned',
+      questionCount: 2,
+      answeredCount: 1,
     });
   });
 

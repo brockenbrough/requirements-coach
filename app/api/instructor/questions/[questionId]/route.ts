@@ -171,3 +171,85 @@ export async function PATCH(request: Request, { params }: { params: { questionId
 
   return Response.json({ questionId, answerIds: answerInputs.map((a) => a.id) }, { status: 200 });
 }
+
+/**
+ * DELETE /api/instructor/questions/{questionId} — removes a question and its answers from
+ * whichever catalog (activity_type) it belongs to (GitHub #359). A question has exactly one
+ * activity_type column, not a join table, so deleting it can never reach into a different
+ * catalog — the isolation the catalog detail page's edit mode needs falls straight out of the
+ * schema rather than needing route-level enforcement.
+ *
+ * A question that has already been served to a student (a session_to_question row exists for it
+ * — which answered_question_log rows imply too, since a question is always assigned before it can
+ * be answered) is refused with 409: question_to_answer/answered_question_log's FKs to answer and
+ * question carry no ON DELETE clause (see the PATCH docblock above), so deleting the row out from
+ * under a student's history would either fail at the database or, if attempted piecemeal, leave a
+ * partially-deleted, unplayable question behind. Checking first avoids both.
+ *
+ * Returns 200 with { questionId } on success.
+ */
+export async function DELETE(request: Request, { params }: { params: { questionId: string } }) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
+
+  const guard = await requireInstructor(supabase, getToken(request));
+  if (!guard.ok) {
+    return guard.status === 403
+      ? new Response(null, { status: 403 })
+      : Response.json(
+          { error: guard.status === 401 ? 'Unauthorized' : 'Supabase credentials are not configured.' },
+          { status: guard.status },
+        );
+  }
+
+  const { questionId } = params;
+
+  const { data: question, error: questionFetchError } = await supabase
+    .from('question')
+    .select('question_id, user_id')
+    .eq('question_id', questionId)
+    .maybeSingle();
+
+  if (questionFetchError) return Response.json({ error: questionFetchError.message }, { status: 500 });
+  if (!question) return Response.json({ error: 'Question not found.' }, { status: 404 });
+
+  if ((question as { user_id: string | null }).user_id !== guard.user_id) {
+    return Response.json({ error: 'You do not own this question.' }, { status: 403 });
+  }
+
+  const { data: usage, error: usageError } = await supabase
+    .from('session_to_question')
+    .select('session_to_question_id')
+    .eq('question_id', questionId)
+    .maybeSingle();
+
+  if (usageError) return Response.json({ error: usageError.message }, { status: 500 });
+  if (usage) {
+    return Response.json(
+      { error: 'This question has already been used in a student session and cannot be deleted.' },
+      { status: 409 },
+    );
+  }
+
+  const { data: links, error: linksError } = await supabase
+    .from('question_to_answer')
+    .select('answer_id')
+    .eq('question_id', questionId);
+
+  if (linksError) return Response.json({ error: linksError.message }, { status: 500 });
+
+  const answerIds = ((links ?? []) as { answer_id: string }[]).map((link) => link.answer_id);
+
+  const { error: unlinkError } = await supabase.from('question_to_answer').delete().eq('question_id', questionId);
+  if (unlinkError) return Response.json({ error: unlinkError.message }, { status: 500 });
+
+  if (answerIds.length > 0) {
+    const { error: answerDeleteError } = await supabase.from('answer').delete().in('answer_id', answerIds);
+    if (answerDeleteError) return Response.json({ error: answerDeleteError.message }, { status: 500 });
+  }
+
+  const { error: questionDeleteError } = await supabase.from('question').delete().eq('question_id', questionId);
+  if (questionDeleteError) return Response.json({ error: questionDeleteError.message }, { status: 500 });
+
+  return Response.json({ questionId }, { status: 200 });
+}

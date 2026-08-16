@@ -1,6 +1,10 @@
 'use client';
 
 // GitHub #347: real client for the quiz create/browse routes — same shape as lib/courseClient.ts.
+// GitHub #359 added the catalog detail read (loadQuizDetail): a "quiz" here and a "question
+// catalog" in that issue are the same activity_type-backed concept — see CLAUDE.md.
+
+import type { CatalogQuestion } from './quizQuestionTypes';
 
 export type QuizSummary = {
   activityType: string;
@@ -9,6 +13,8 @@ export type QuizSummary = {
   authorName: string;
   questionCount: number;
 };
+
+export type QuizMeta = Omit<QuizSummary, 'questionCount'>;
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number; error: string };
 
@@ -55,6 +61,23 @@ export function createQuiz(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
     },
+    token,
+  );
+}
+
+/**
+ * One catalog's metadata plus every question it contains (GET /api/instructor/quizzes/{activityType},
+ * GitHub #359) — not cached, same reasoning as loadPublicStudentProfile: the data is shared across
+ * authors, so a per-instructor client cache would only make it easier to show a colleague's stale
+ * edit.
+ */
+export function loadQuizDetail(
+  token: string,
+  activityType: string,
+): Promise<ApiResult<{ quiz: QuizMeta; questions: CatalogQuestion[] }>> {
+  return request<{ quiz: QuizMeta; questions: CatalogQuestion[] }>(
+    `/api/instructor/quizzes/${encodeURIComponent(activityType)}`,
+    { method: 'GET' },
     token,
   );
 }
