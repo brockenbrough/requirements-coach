@@ -4,8 +4,8 @@ import { useState } from 'react';
 import { useModalDismiss } from './useModalDismiss';
 import { DIFFICULTY_OPTIONS } from '../lib/difficultyLevels';
 import type { ActivityType } from '../lib/activityTypes';
-import type { CatalogUserStory } from '../lib/acceptanceCriteriaTypes';
-import type { UserStoryDraft } from '../lib/acceptanceCriteriaClient';
+import type { CatalogUserStory } from '../lib/llmActivityTypes';
+import type { UserStoryDraft } from '../lib/llmActivityClient';
 
 // user_story.story_text is `text`, so there is no database limit to enforce. This is a soft
 // authoring guide, not a validation rule — the counter turns amber past it, nothing is blocked.

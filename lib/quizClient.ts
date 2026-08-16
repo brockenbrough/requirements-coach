@@ -5,7 +5,7 @@
 // catalog" in that issue are the same activity_type-backed concept — see CLAUDE.md.
 
 import type { CatalogQuestion } from './quizQuestionTypes';
-import type { CatalogUserStory } from './acceptanceCriteriaTypes';
+import type { CatalogUserStory } from './llmActivityTypes';
 import type { GradingKind } from './activityTypes';
 
 export type QuizSummary = {

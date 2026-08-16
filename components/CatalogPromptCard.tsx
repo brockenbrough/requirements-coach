@@ -1,7 +1,7 @@
 'use client';
 
 import { DIFFICULTY_LABEL } from '../lib/difficultyLevels';
-import type { CatalogUserStory } from '../lib/acceptanceCriteriaTypes';
+import type { CatalogUserStory } from '../lib/llmActivityTypes';
 
 /**
  * GitHub #379: one prompt row on an LLM-graded catalog's detail page — the counterpart to the

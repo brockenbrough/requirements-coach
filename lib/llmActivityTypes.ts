@@ -1,13 +1,11 @@
 import type { ActivityType } from './activityTypes';
 
 /**
- * GitHub #149: types for the "Write Acceptance Criteria" activity (REQ-FU-2) — a free-text,
- * LLM-graded activity, structurally distinct from the Type A question-bank activities in
- * lib/activityContent.ts (no fixed answer options, no session_log/session_to_question).
+ * GitHub #149/#379: types for an LLM-graded activity — free-text prompts scored by a model, as
+ * opposed to the question-bank activities in lib/activityContent.ts (no fixed answer options, no
+ * session_to_question). WRITE_ACCEPTANCE_CRITERIA is the seeded example of one, not the only one.
  *
- * Field names match what the real routes return, not the user_story/submission column names:
- * GET .../user-story (app/api/activities/write-acceptance-criteria/user-story/route.ts) and
- * POST .../submissions (app/api/activities/write-acceptance-criteria/submissions/route.ts).
+ * Field names match what the routes return, not the user_story/submission column names.
  */
 export type UserStoryPrompt = {
   userStoryId: string;
@@ -16,7 +14,7 @@ export type UserStoryPrompt = {
 };
 
 /** What POST .../submissions returns once the LLM has graded the submission. */
-export type AcceptanceCriteriaResult = {
+export type LlmGradingResult = {
   submissionId: string;
   /** Not echoed back by the route — the client carries forward what the student typed. */
   submittedText: string;

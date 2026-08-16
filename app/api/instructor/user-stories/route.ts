@@ -1,7 +1,7 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { requireInstructor } from '../../../../lib/instructorAuth';
 import { validateUserStoryInput } from '../../../../lib/userStoryInput';
-import type { InstructorUserStoryEntry } from '../../../../lib/acceptanceCriteriaTypes';
+import type { InstructorUserStoryEntry } from '../../../../lib/llmActivityTypes';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');

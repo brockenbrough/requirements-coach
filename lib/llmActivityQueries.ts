@@ -1,7 +1,14 @@
-// Queries for the Write Acceptance Criteria activity's real backend session, mirroring
-// lib/sessionQueries.ts's role for Type A. Built on session_log + session_to_user_story +
-// submission.session_id (supabase/schema.sql's own documented direction for this activity) —
-// not the abandoned ac_session/ac_session_story tables, which never existed in the schema.
+// Queries for an LLM-graded activity's real backend session, mirroring lib/sessionQueries.ts's
+// role for the MCQ flow. Built on session_log + session_to_user_story + submission.session_id
+// (supabase/schema.sql's own documented direction for this activity) — not the abandoned
+// ac_session/ac_session_story tables, which never existed in the schema.
+//
+// GitHub #379 renamed this file from acceptanceCriteria* to llmActivity*: nothing here was ever
+// specific to acceptance criteria, and it is about to serve every instructor-created LLM-graded
+// activity, not just the one seeded example. lib/acceptanceCriteriaSubmissionsStore.ts and the
+// /api/instructor/acceptance-criteria/* route paths deliberately keep their old names — those are
+// instructor-dashboard surfaces this issue does not restructure, and renaming a route path is a
+// separate, riskier change.
 
 import {
   findInProgressSession,
@@ -9,7 +16,7 @@ import {
   type SessionPosition,
   type SupabaseClient,
 } from './sessionQueries';
-import type { UserStoryPrompt } from './acceptanceCriteriaTypes';
+import type { UserStoryPrompt } from './llmActivityTypes';
 
 export type SessionStorySlot = { position: number } & UserStoryPrompt;
 

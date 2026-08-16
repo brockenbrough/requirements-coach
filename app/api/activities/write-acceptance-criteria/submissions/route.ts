@@ -6,7 +6,7 @@ import {
   loadSessionSubmissions,
   nextUnansweredStoryPosition,
   type SessionStorySlot,
-} from "../../../../../lib/acceptanceCriteriaQueries";
+} from "../../../../../lib/llmActivityQueries";
 import type { SupabaseClient } from "../../../../../lib/sessionQueries";
 
 type UserStoryRow = { user_story_id: string; story_text: string; creator_id: string };
@@ -37,7 +37,7 @@ function getToken(request: Request): string | null {
  *
  * sessionId is required (GitHub #256, cost/abuse fix): every graded submission must belong to a
  * real, in-progress session_log row (the same table and abandon route Type A uses — see
- * lib/acceptanceCriteriaQueries.ts), so this route can never be reduced to "auth check +
+ * lib/llmActivityQueries.ts), so this route can never be reduced to "auth check +
  * unthrottled LLM call". A session only ever admits STORIES_PER_SESSION graded submissions (one
  * per story, ever), which is what actually bounds LLM spend per session:
  *   - Validates the session is in-progress and belongs to this student.

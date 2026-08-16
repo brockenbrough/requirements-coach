@@ -4,7 +4,7 @@ import {
   loadSessionStories,
   loadSessionSubmissions,
   nextUnansweredStoryPosition,
-} from '../../../../../../lib/acceptanceCriteriaQueries';
+} from '../../../../../../lib/llmActivityQueries';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');

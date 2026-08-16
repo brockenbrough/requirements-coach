@@ -1,7 +1,7 @@
 import { getSupabaseClient } from '../../../../../lib/supabase';
 import { SESSION_COLUMNS, START_DIFFICULTY_LEVEL } from '../../../../../lib/sessionRules';
-import { SESSION_MAX_SCORE, STORIES_PER_SESSION } from '../../../../../lib/acceptanceCriteriaRules';
-import { findInProgressAcSession, loadSessionStories } from '../../../../../lib/acceptanceCriteriaQueries';
+import { SESSION_MAX_SCORE, STORIES_PER_SESSION } from '../../../../../lib/llmActivityRules';
+import { findInProgressAcSession, loadSessionStories } from '../../../../../lib/llmActivityQueries';
 import { shuffleArray } from '../../../../../lib/shuffleArray';
 import type { SupabaseClient } from '../../../../../lib/sessionQueries';
 

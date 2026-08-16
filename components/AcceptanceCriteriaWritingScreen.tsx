@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { UserStoryPrompt } from '../lib/acceptanceCriteriaTypes';
+import type { UserStoryPrompt } from '../lib/llmActivityTypes';
 import { StoryDisplayCard } from './StoryDisplayCard';
 
 /**

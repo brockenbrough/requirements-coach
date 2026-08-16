@@ -21,7 +21,7 @@ import {
   loadAcceptanceCriteriaStatistics,
   loadInstructorACSubmissions,
   type AcceptanceCriteriaStatistics,
-} from '../../lib/acceptanceCriteriaClient';
+} from '../../lib/llmActivityClient';
 import { summarizeStudents, toAcSubmissionRow, toQuizAttemptRow, type ActivityRow } from '../../lib/activityLogTypes';
 import { loadInstructorActivities, loadInstructorStudents, type StudentSummary } from '../../lib/sessionClient';
 import { useRequireRole } from '../../lib/useRequireRole';

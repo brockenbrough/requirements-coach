@@ -1,5 +1,5 @@
-import { AC_PASS_SCORE } from './acceptanceCriteriaRules';
-import type { InstructorACSubmission } from './acceptanceCriteriaClient';
+import { PROMPT_PASS_SCORE } from './llmActivityRules';
+import type { InstructorACSubmission } from './llmActivityClient';
 import { getActivityByType } from './activityContent';
 import type { ActivityType } from './activityTypes';
 import { toInstant } from './dateTime';
@@ -205,7 +205,7 @@ export function toAcSubmissionRow(submission: InstructorACSubmission): AcSubmiss
     level: submission.difficultyLevel,
     dateTime: submission.submittedAt,
     status: graded ? 'completed' : 'in-progress',
-    passed: graded && submission.llmScore! >= AC_PASS_SCORE,
+    passed: graded && submission.llmScore! >= PROMPT_PASS_SCORE,
     score: submission.llmScore ?? 0,
     maxScore: 10,
     totalQuestions: 1,

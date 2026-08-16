@@ -4,7 +4,7 @@
 
 import type { SupabaseClient } from './sessionQueries';
 import type { CatalogQuestion } from './quizQuestionTypes';
-import type { CatalogUserStory } from './acceptanceCriteriaTypes';
+import type { CatalogUserStory } from './llmActivityTypes';
 import type { ActivityType, GradingKind } from './activityTypes';
 import { isGradingKind } from './activityTypes';
 

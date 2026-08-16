@@ -1,6 +1,6 @@
 import { getSupabaseClient } from '../../../../../lib/supabase';
 import { requireInstructor } from '../../../../../lib/instructorAuth';
-import { computeAcceptanceCriteriaStatistics } from '../../../../../lib/acceptanceCriteriaStatisticsQueries';
+import { computeAcceptanceCriteriaStatistics } from '../../../../../lib/llmActivityStatisticsQueries';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');

@@ -1,7 +1,7 @@
 'use client';
 
 // GitHub #150: client for the instructor LLM provider settings page. Same role as
-// lib/acceptanceCriteriaClient.ts for the write-acceptance-criteria flow: the one place the UI
+// lib/llmActivityClient.ts for the write-acceptance-criteria flow: the one place the UI
 // talks to GET/POST /api/instructor/llm-config, so no component hand-rolls the Authorization
 // header or picks apart an error body.
 

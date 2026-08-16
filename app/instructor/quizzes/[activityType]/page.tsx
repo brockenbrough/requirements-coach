@@ -15,9 +15,9 @@ import {
   deleteUserStory,
   updateUserStory,
   type UserStoryDraft,
-} from '../../../../lib/acceptanceCriteriaClient';
-import type { CatalogUserStory } from '../../../../lib/acceptanceCriteriaTypes';
-import { STORIES_PER_SESSION } from '../../../../lib/acceptanceCriteriaRules';
+} from '../../../../lib/llmActivityClient';
+import type { CatalogUserStory } from '../../../../lib/llmActivityTypes';
+import { STORIES_PER_SESSION } from '../../../../lib/llmActivityRules';
 import { DIFFICULTY_LABEL as LEVEL_LABEL } from '../../../../lib/difficultyLevels';
 import type { CatalogQuestion, QuizQuestion } from '../../../../lib/quizQuestionTypes';
 import { useRequireRole } from '../../../../lib/useRequireRole';
