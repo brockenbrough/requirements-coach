@@ -174,6 +174,40 @@ export function loadCourseStats(token: string, courseId: string): Promise<ApiRes
   );
 }
 
+/**
+ * Per-course class engagement: total enrolled, and count+percent of enrolled students who've
+ * started/passed at least one of this course's quizzes (GitHub #315). A different, complementary
+ * metric from CourseActivityStats above (which is per-quiz, not per-student-coverage).
+ */
+export type CourseClassStats = {
+  courseId: string;
+  courseName: string;
+  totalStudents: number;
+  hasQuizzes: boolean;
+  startedCount: number;
+  startedPercent: number | null;
+  passedCount: number;
+  passedPercent: number | null;
+};
+
+/** One course's class engagement (GET /api/instructor/courses/{id}/engagement). Uncached — always fresh. */
+export function loadCourseClassStats(token: string, courseId: string): Promise<ApiResult<CourseClassStats>> {
+  return request<CourseClassStats>(
+    `/api/instructor/courses/${encodeURIComponent(courseId)}/engagement`,
+    { method: 'GET' },
+    token,
+  );
+}
+
+/**
+ * Class engagement for every course the instructor owns, in one request (GET
+ * /api/instructor/courses/class-stats) — backs the dashboard and course-browse-list grids so they
+ * don't issue one request per course card. Uncached — always fresh.
+ */
+export function loadAllCourseClassStats(token: string): Promise<ApiResult<{ stats: CourseClassStats[] }>> {
+  return request<{ stats: CourseClassStats[] }>('/api/instructor/courses/class-stats', { method: 'GET' }, token);
+}
+
 /** Enrolls a student in a course (POST /api/instructor/courses/{id}/students). */
 export function addStudentToCourse(token: string, courseId: string, studentId: string): Promise<ApiResult<{ student: CourseStudent }>> {
   return request<{ student: CourseStudent }>(
