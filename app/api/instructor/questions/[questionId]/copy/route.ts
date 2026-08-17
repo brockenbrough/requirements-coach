@@ -1,6 +1,6 @@
 import { getSupabaseClient } from "../../../../../../lib/supabase";
 import { requireInstructor } from "../../../../../../lib/instructorAuth";
-import { DEFAULT_QUESTION_MAX_SCORE } from "../../../../../../lib/sessionRules";
+import { mcqPointsForDifficulty } from "../../../../../../lib/sessionRules";
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get("Authorization");
@@ -112,7 +112,7 @@ export async function POST(
     activity_type: sourceRow.activity_type,
     difficulty_level: sourceRow.difficulty_level,
     order_number: orderNumber,
-    max_score: sourceRow.max_score ?? DEFAULT_QUESTION_MAX_SCORE,
+    max_score: mcqPointsForDifficulty(sourceRow.difficulty_level as 1 | 2 | 3),
     user_id: guard.user_id,
   });
 

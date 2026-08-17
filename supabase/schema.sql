@@ -168,6 +168,14 @@ CREATE TABLE submission (
     llm_score      int4,
     llm_feedback   text,
     llm_provider   text,
+    -- Task-type-and-difficulty gamification points (lib/llmActivityRules.ts's
+    -- awardedScoreForRating), scaled from llm_score's raw 1-10 rating onto this prompt's
+    -- difficulty-based point scale. Deliberately a separate column rather than repurposing
+    -- llm_score itself: llm_score stays the raw 1-10 rating so per-prompt feedback, the
+    -- PROMPT_PASS_SCORE bar, and lib/llmActivityStatisticsQueries.ts's 1-10 histogram keep
+    -- reading an unscaled number. Nullable for the same write-before-disclose reason as
+    -- llm_score — filled in by the same grading UPDATE.
+    awarded_score  int4,
     submitted_at   timestamp   NOT NULL DEFAULT now(),
     graded_at      timestamp,
     PRIMARY KEY (submission_id));
@@ -736,16 +744,18 @@ CREATE TRIGGER trg_answered_question_log_score
   AFTER INSERT ON answered_question_log
   FOR EACH ROW EXECUTE FUNCTION bump_session_score();
 
--- submission is write-before-disclose (llm_score starts NULL, a later UPDATE fills it in once
+-- submission is write-before-disclose (awarded_score starts NULL, a later UPDATE fills it in once
 -- grading finishes — see submission's own header comment), so the roll-up fires on that UPDATE
--- instead of on INSERT the way answered_question_log's does. The OLD.llm_score IS NULL guard
+-- instead of on INSERT the way answered_question_log's does. The OLD.awarded_score IS NULL guard
 -- keeps a later, unrelated UPDATE of an already-graded row (there isn't one today, but nothing
--- stops a future one) from double-counting the score.
+-- stops a future one) from double-counting the score. Reads awarded_score, not llm_score: the
+-- points that roll up into cumulative_score are the difficulty-scaled award, not the raw 1-10
+-- rating (see the column's own comment above).
 CREATE FUNCTION bump_session_score_from_submission() RETURNS trigger AS $$
 BEGIN
-  IF NEW.session_id IS NOT NULL AND NEW.llm_score IS NOT NULL AND OLD.llm_score IS NULL THEN
+  IF NEW.session_id IS NOT NULL AND NEW.awarded_score IS NOT NULL AND OLD.awarded_score IS NULL THEN
     UPDATE session_log
-       SET cumulative_score = cumulative_score + NEW.llm_score
+       SET cumulative_score = cumulative_score + NEW.awarded_score
      WHERE session_id = NEW.session_id;
   END IF;
   RETURN NEW;
@@ -753,7 +763,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trg_submission_score
-  AFTER UPDATE OF llm_score ON submission
+  AFTER UPDATE OF awarded_score ON submission
   FOR EACH ROW EXECUTE FUNCTION bump_session_score_from_submission();
 
 
@@ -1179,3 +1189,20 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 -- SQL) for POST /api/instructor/course-covers to upload into. No RLS policy is added for it: like
 -- `avatars`, every write goes through a service-role route (lib/supabase.ts's
 -- getSupabaseClient()), never a client-side Supabase call.
+
+-- Task-type-and-difficulty gamification points: MCQ questions already had a max_score column
+-- (nothing to migrate there — createQuestionWithAnswers just writes a different value now), but
+-- LLM-graded submissions had no column to hold a difficulty-scaled award separately from the raw
+-- 1-10 rating. submission.awarded_score is a brand new nullable int4 column, and
+-- bump_session_score_from_submission()/trg_submission_score are redefined to read it instead of
+-- llm_score. If your database predates this:
+--
+--   ALTER TABLE submission ADD COLUMN IF NOT EXISTS awarded_score int4;
+--   DROP TRIGGER IF EXISTS trg_submission_score ON submission;
+--   -- then re-run the bump_session_score_from_submission() CREATE FUNCTION and
+--   -- trg_submission_score CREATE TRIGGER statements above, which now reference awarded_score.
+--
+-- No backfill: every submission graded before this migration keeps its llm_score (still shown in
+-- feedback/statistics) but has awarded_score NULL, so it never contributed to cumulative_score —
+-- same as it never did before this column existed. Only submissions graded after the migration
+-- earn points toward the total.

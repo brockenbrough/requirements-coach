@@ -1,6 +1,6 @@
 import type { SupabaseClient } from './sessionQueries';
 import { isActivityType } from './activityTypes';
-import { DEFAULT_QUESTION_MAX_SCORE } from './sessionRules';
+import { mcqPointsForDifficulty } from './sessionRules';
 
 /**
  * Shared question-creation logic behind POST /api/instructor/questions (GitHub #121) and, since
@@ -109,7 +109,7 @@ export async function createQuestionWithAnswers(
     activity_type: activityType,
     difficulty_level: difficultyLevel,
     order_number: orderNumber,
-    max_score: DEFAULT_QUESTION_MAX_SCORE,
+    max_score: mcqPointsForDifficulty(difficultyLevel),
     user_id: userId,
   });
 
