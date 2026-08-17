@@ -18,7 +18,7 @@ import { getCachedCompletedAttempts, setCachedCompletedAttempts } from './comple
 import { getCachedActivityLog, setCachedActivityLog } from './activityLogStore';
 import { getCachedCompletedSessions, setCachedCompletedSessions } from './completedSessionsStore';
 import { getCachedScore, setCachedScore } from './scoreStore';
-import { getCachedInstructorStudents, setCachedInstructorStudents } from './instructorStudentsStore';
+import { getCachedInstructorStudents, setCachedInstructorStudents, type InstructorStudentsScope } from './instructorStudentsStore';
 import { getCachedInstructorActivities, setCachedInstructorActivities } from './instructorActivityStore';
 import {
   getCachedAcceptanceCriteriaSubmissions,
@@ -550,19 +550,27 @@ export type StudentSummary = {
 };
 
 /**
- * Every student in the system (GET /api/instructor/students, GitHub #146).
+ * Students enrolled in a course this instructor created (GET /api/instructor/students, GitHub
+ * #146 follow-up).
+ *
+ * Default scope ('owned', the route's own default): only students enrolled in one of the
+ * instructor's own courses. scope: 'all' opts into the route's ?scope=all — the unscoped, every-
+ * student list — which is what components/AddStudentModal.tsx's enrollment search needs, since it
+ * must be able to find a student who isn't in any of the instructor's courses yet.
  *
  * Cache-first: returns the stored list on a hit, calls the network only on a miss or when
- * forceRefresh is true — same pattern as loadActivityLog. Keyed by instructorId so switching
- * accounts on the same device doesn't serve one instructor's cache to another.
+ * forceRefresh is true — same pattern as loadActivityLog. Keyed by instructorId *and* scope (see
+ * lib/instructorStudentsStore.ts) so the two shapes never overwrite each other's cache entry.
  */
 export function loadInstructorStudents(
   token: string,
   instructorId: string,
-  options: { forceRefresh?: boolean } = {},
+  options: { forceRefresh?: boolean; scope?: InstructorStudentsScope } = {},
 ) {
+  const scope = options.scope ?? 'owned';
+
   if (!options.forceRefresh) {
-    const cached = getCachedInstructorStudents(instructorId);
+    const cached = getCachedInstructorStudents(instructorId, scope);
     if (cached !== null) {
       return Promise.resolve<ApiResult<{ students: StudentSummary[] }>>({
         ok: true,
@@ -572,12 +580,12 @@ export function loadInstructorStudents(
   }
 
   return request<{ students: StudentSummary[] }>(
-    '/api/instructor/students',
+    scope === 'all' ? '/api/instructor/students?scope=all' : '/api/instructor/students',
     { method: 'GET' },
     token,
   ).then((result) => {
     if (result.ok) {
-      setCachedInstructorStudents(instructorId, result.data.students);
+      setCachedInstructorStudents(instructorId, scope, result.data.students);
     }
     return result;
   });

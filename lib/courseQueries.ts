@@ -336,6 +336,37 @@ export async function isEnrolledInAnyCourse(supabase: SupabaseClient, userId: st
 }
 
 /**
+ * Every course an instructor created, as bare ids — the lean sibling of listCoursesForInstructor
+ * for callers that only need ids to feed into a subsequent .in(...) (e.g. resolveInstructorStudentIds
+ * in lib/courseScope.ts), not the per-course student_count embed listCoursesForInstructor also
+ * fetches for the Courses page.
+ */
+export async function listOwnedCourseIds(supabase: SupabaseClient, instructorId: string) {
+  const { data, error } = await supabase.from('course').select('course_id').eq('creator_id', instructorId);
+
+  if (error) return { courseIds: null, error };
+
+  return { courseIds: ((data ?? []) as { course_id: string }[]).map((row) => row.course_id), error: null };
+}
+
+/**
+ * Every distinct student enrolled in any of the given courses, as bare ids — the multi-course
+ * sibling of loadEnrolledStudents (one course at a time). Deduped via Set so a student enrolled in
+ * more than one of the given courses is only counted once. courseIds: [] short-circuits to []
+ * without a query, same convention as isEnrolledInAnyCourse.
+ */
+export async function loadEnrolledStudentIdsForCourses(supabase: SupabaseClient, courseIds: string[]) {
+  if (courseIds.length === 0) return { studentIds: [] as string[], error: null };
+
+  const { data, error } = await supabase.from('student_course').select('user_id').in('course_id', courseIds);
+
+  if (error) return { studentIds: null, error };
+
+  const studentIds = [...new Set(((data ?? []) as { user_id: string }[]).map((row) => row.user_id))];
+  return { studentIds, error: null };
+}
+
+/**
  * Deletes a course (GitHub #327). One statement, not two: student_course is the only table in
  * the schema with a foreign key to course, and fk_student_course_course carries ON DELETE
  * CASCADE, so every enrollment goes with it inside the same transaction — there is no way to

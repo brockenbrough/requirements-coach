@@ -8,6 +8,7 @@ import { Pagination } from '../../../../../components/Pagination';
 import { StudentFilterControls } from '../../../../../components/StudentFilterControls';
 import { filterAndSortCourseStudents, type CourseStudentFilter } from '../../../../../lib/courseStudentFilters';
 import { loadCourse, removeStudentFromCourse, type CourseDetail, type CourseStudent } from '../../../../../lib/courseClient';
+import { clearCachedInstructorStudents } from '../../../../../lib/instructorStudentsStore';
 import { useRequireRole } from '../../../../../lib/useRequireRole';
 
 const PAGE_SIZE = 12;
@@ -62,6 +63,9 @@ export default function CourseStudentsPage({ params }: { params: { id: string } 
     const result = await removeStudentFromCourse(token!, course.id, student.id);
     if (result.ok) {
       setCourse((current) => (current ? { ...current, students: current.students.filter((s) => s.id !== student.id) } : current));
+      // See app/instructor/courses/[id]/page.tsx's handleRemove for why this is needed now that
+      // GET /api/instructor/students' default scope depends on enrollment.
+      clearCachedInstructorStudents();
     } else {
       setError(result.error);
     }

@@ -585,6 +585,11 @@ ALTER TABLE student_course ADD CONSTRAINT uq_student_course_user_course UNIQUE (
 -- An instructor's "my courses" list filters on exactly this column.
 CREATE INDEX ix_course_creator_id ON course (creator_id);
 
+-- The instructor-students roster scope (resolveInstructorStudentIds, lib/courseScope.ts) filters
+-- student_course by a set of owned course ids; the (user_id, course_id) composite unique above has
+-- user_id as its leading column, so it doesn't serve an .in('course_id', [...]) scan well.
+CREATE INDEX ix_student_course_course_id ON student_course (course_id);
+
 -- GitHub #360: a quiz cannot reference the same catalog twice, and "every catalog this quiz
 -- draws from" (the random-selection pool) filters on assembled_quiz_id.
 ALTER TABLE assembled_quiz_catalog ADD CONSTRAINT uq_assembled_quiz_catalog UNIQUE (assembled_quiz_id, activity_type);
@@ -1067,3 +1072,9 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 --
 -- If that SELECT returns anything, those rows were written against a key that no longer exists;
 -- fix or delete them before adding the constraint. No data moves and no column changes type.
+
+-- ix_student_course_course_id: a plain new index backing the instructor-students roster scope
+-- (resolveInstructorStudentIds). Additive only — no data changes, safe to run on any existing
+-- database:
+--
+--   CREATE INDEX IF NOT EXISTS ix_student_course_course_id ON student_course (course_id);
