@@ -270,12 +270,19 @@ CREATE TABLE student_course (
 -- existing difficulty-level scheme (1-3) is reused as-is; no new level
 -- column or table.
 -- ---------------------------------------------------------------------
+-- grading_kind (added alongside the "type-safe hand-picking" fix, mirroring
+-- activity_type.grading_kind exactly): which single kind of catalog this quiz may ever
+-- compose/hand-pick from, chosen once at creation and never changed afterward, same
+-- "locked forever" convention activity_type.grading_kind already uses. Before this, a quiz
+-- could link catalogs of both kinds at once with nothing to say which one its "Create new
+-- question"/"Add prompt" composition actions should offer.
 CREATE TABLE assembled_quiz (
     assembled_quiz_id uuid      NOT NULL,
     quiz_name         text      NOT NULL,
     description       text,
     course_id         uuid      NOT NULL,
     creator_id        uuid      NOT NULL,
+    grading_kind      text      NOT NULL DEFAULT 'mcq',
     created_at        timestamp NOT NULL DEFAULT now(),
     PRIMARY KEY (assembled_quiz_id));
 
@@ -582,6 +589,10 @@ ALTER TABLE question ADD CONSTRAINT ck_question_difficulty_level CHECK (difficul
 -- Only two grading kinds exist today (see activity_type's own header comment) — a typo here
 -- can't silently create a third one the app has no route/dispatch logic for.
 ALTER TABLE activity_type ADD CONSTRAINT ck_activity_type_grading_kind CHECK (grading_kind IN ('mcq', 'llm-graded'));
+
+-- Same reasoning as ck_activity_type_grading_kind directly above, for assembled_quiz's own
+-- grading_kind column.
+ALTER TABLE assembled_quiz ADD CONSTRAINT ck_assembled_quiz_grading_kind CHECK (grading_kind IN ('mcq', 'llm-graded'));
 
 -- REQ-GAM-DL-2.1: one title per (activity_type, difficulty_level) pair so the BL-1 lookup is
 -- unambiguous. activity_type itself is restricted to the known set via fk_title_definition_activity_type
@@ -1179,3 +1190,35 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 -- SQL) for POST /api/instructor/course-covers to upload into. No RLS policy is added for it: like
 -- `avatars`, every write goes through a service-role route (lib/supabase.ts's
 -- getSupabaseClient()), never a client-side Supabase call.
+
+-- assembled_quiz.grading_kind (locks each quiz to one catalog kind, closing the gap where
+-- "Create new question"/"Add individual items" had no way to know which kind a quiz wanted):
+-- add the column, backfill each existing quiz from its first-linked catalog's own grading_kind
+-- (falling back to 'mcq' for a quiz with no catalogs linked yet), then add the CHECK constraint —
+-- same add-then-backfill-then-constrain order activity_type.grading_kind's own migration used.
+--
+--   ALTER TABLE assembled_quiz ADD COLUMN IF NOT EXISTS grading_kind text NOT NULL DEFAULT 'mcq';
+--
+--   UPDATE assembled_quiz aq SET grading_kind = COALESCE((
+--     SELECT at.grading_kind FROM assembled_quiz_catalog aqc
+--     JOIN activity_type at ON at.activity_type = aqc.activity_type
+--     WHERE aqc.assembled_quiz_id = aq.assembled_quiz_id
+--     ORDER BY aqc.assembled_quiz_catalog_id LIMIT 1
+--   ), 'mcq');
+--
+--   ALTER TABLE assembled_quiz ADD CONSTRAINT ck_assembled_quiz_grading_kind
+--     CHECK (grading_kind IN ('mcq', 'llm-graded'));
+--
+-- A quiz whose linked catalogs were already genuinely mixed-kind before this migration simply
+-- keeps whichever kind its first-linked catalog has (link insertion order, via the surrogate
+-- assembled_quiz_catalog_id) — the app refuses to link any *further* mismatched catalog to it
+-- going forward, but this backfill does not retroactively unlink any pre-existing mismatched
+-- link. If that matters for a given deployment, find such quizzes first with:
+--
+--   SELECT aq.assembled_quiz_id, aq.grading_kind, at.grading_kind AS catalog_grading_kind
+--     FROM assembled_quiz aq
+--     JOIN assembled_quiz_catalog aqc ON aqc.assembled_quiz_id = aq.assembled_quiz_id
+--     JOIN activity_type at ON at.activity_type = aqc.activity_type
+--     WHERE at.grading_kind <> aq.grading_kind;
+--
+-- and unlink (DELETE FROM assembled_quiz_catalog ...) the mismatched rows by hand.

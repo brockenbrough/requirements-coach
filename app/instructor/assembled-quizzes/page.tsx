@@ -62,7 +62,15 @@ export default function InstructorAssembledQuizzesPage() {
   if (loading || !authorized) return null;
   if (!token) return null;
 
-  function handleCreated(quiz: { id: string; name: string; description: string | null; courseId: string; catalogs: { activityType: string; name: string }[]; catalogNames: string[] }) {
+  function handleCreated(quiz: {
+    id: string;
+    name: string;
+    description: string | null;
+    courseId: string;
+    gradingKind: AssembledQuizSummary['gradingKind'];
+    catalogs: { activityType: string; name: string }[];
+    catalogNames: string[];
+  }) {
     const course = (courses ?? []).find((c) => c.id === quiz.courseId);
 
     setQuizzes((current) => [
@@ -72,6 +80,7 @@ export default function InstructorAssembledQuizzesPage() {
         description: quiz.description,
         courseId: quiz.courseId,
         courseName: course?.name ?? 'Unknown course',
+        gradingKind: quiz.gradingKind,
         catalogs: quiz.catalogs,
         catalogNames: quiz.catalogNames,
         createdAt: new Date().toISOString(),
@@ -145,6 +154,7 @@ export default function InstructorAssembledQuizzesPage() {
                   <thead>
                     <tr className="bg-brand-navy text-brand-ink-muted">
                       <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Name</th>
+                      <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Type</th>
                       <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Course</th>
                       <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Catalogs</th>
                     </tr>
@@ -152,7 +162,7 @@ export default function InstructorAssembledQuizzesPage() {
                   <tbody>
                     {quizzes.length === 0 ? (
                       <tr>
-                        <td colSpan={3} className="bg-brand-navy-2 px-4 py-10 text-center text-sm font-semibold text-brand-ink-muted">
+                        <td colSpan={4} className="bg-brand-navy-2 px-4 py-10 text-center text-sm font-semibold text-brand-ink-muted">
                           You haven&apos;t created a quiz yet.
                         </td>
                       </tr>
@@ -163,6 +173,18 @@ export default function InstructorAssembledQuizzesPage() {
                             <Link href={`/instructor/assembled-quizzes/${encodeURIComponent(quiz.id)}`} className="hover:text-brand-purple hover:underline">
                               {quiz.name}
                             </Link>
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3">
+                            {/* Same badge convention app/instructor/quizzes/page.tsx uses for a catalog's own gradingKind. */}
+                            <span
+                              className={`rounded-full px-2.5 py-1 text-xs font-extrabold ${
+                                quiz.gradingKind === 'llm-graded'
+                                  ? 'bg-brand-teal/15 text-brand-teal-dark'
+                                  : 'bg-brand-purple/10 text-brand-purple-dark'
+                              }`}
+                            >
+                              {quiz.gradingKind === 'llm-graded' ? 'LLM-graded' : 'Multiple choice'}
+                            </span>
                           </td>
                           <td className="whitespace-nowrap px-4 py-3 text-gray-500">{quiz.courseName}</td>
                           <td className="px-4 py-3 text-gray-500">{quiz.catalogNames.join(', ') || '—'}</td>

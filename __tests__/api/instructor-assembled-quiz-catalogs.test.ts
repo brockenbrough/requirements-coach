@@ -60,6 +60,7 @@ function quizRow(overrides: Partial<Record<string, unknown>> = {}) {
     description: null,
     course_id: 'course-1',
     creator_id: 'instructor-1',
+    grading_kind: 'mcq',
     created_at: '2026-08-14T10:00:00',
     ...overrides,
   };
@@ -132,10 +133,22 @@ describe('POST /api/instructor/assembled-quizzes/[quizId]/catalogs', () => {
     expect(h.state.tables).not.toContain('assembled_quiz_catalog');
   });
 
+  it("rejects a catalog whose grading_kind doesn't match the quiz's with 400", async () => {
+    queueRole('instructor');
+    queue('assembled_quiz', { data: quizRow({ grading_kind: 'mcq' }), error: null });
+    queue('activity_type', { data: { activity_type: 'CATALOG_A', grading_kind: 'llm-graded' }, error: null });
+
+    const res = await postRequest({ activityType: 'CATALOG_A' });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("This catalog's type doesn't match this quiz.");
+    expect(h.state.tables).not.toContain('assembled_quiz_catalog');
+  });
+
   it('links the catalog to the quiz', async () => {
     queueRole('instructor');
     queue('assembled_quiz', { data: quizRow(), error: null });
-    queue('activity_type', { data: { activity_type: 'CATALOG_A' }, error: null });
+    queue('activity_type', { data: { activity_type: 'CATALOG_A', grading_kind: 'mcq' }, error: null });
     queue('assembled_quiz_catalog', { data: null, error: null });
 
     const res = await postRequest({ activityType: 'CATALOG_A' });
@@ -152,7 +165,7 @@ describe('POST /api/instructor/assembled-quizzes/[quizId]/catalogs', () => {
   it('treats linking an already-linked catalog as success, not an error', async () => {
     queueRole('instructor');
     queue('assembled_quiz', { data: quizRow(), error: null });
-    queue('activity_type', { data: { activity_type: 'CATALOG_A' }, error: null });
+    queue('activity_type', { data: { activity_type: 'CATALOG_A', grading_kind: 'mcq' }, error: null });
     queue('assembled_quiz_catalog', { data: null, error: { message: 'duplicate key', code: '23505' } });
 
     const res = await postRequest({ activityType: 'CATALOG_A' });
@@ -162,7 +175,7 @@ describe('POST /api/instructor/assembled-quizzes/[quizId]/catalogs', () => {
   it('returns 500 when the link insert fails for a reason other than the unique index', async () => {
     queueRole('instructor');
     queue('assembled_quiz', { data: quizRow(), error: null });
-    queue('activity_type', { data: { activity_type: 'CATALOG_A' }, error: null });
+    queue('activity_type', { data: { activity_type: 'CATALOG_A', grading_kind: 'mcq' }, error: null });
     queue('assembled_quiz_catalog', { data: null, error: { message: 'DB down' } });
 
     const res = await postRequest({ activityType: 'CATALOG_A' });

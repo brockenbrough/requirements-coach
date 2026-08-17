@@ -10,6 +10,7 @@
 
 import type { CatalogQuestion, QuizQuestion } from './quizQuestionTypes';
 import type { CatalogUserStory } from './llmActivityTypes';
+import type { UserStoryDraft } from './llmActivityClient';
 import type { GradingKind } from './activityTypes';
 
 export type AssembledQuizSummary = {
@@ -18,6 +19,8 @@ export type AssembledQuizSummary = {
   description: string | null;
   courseId: string;
   courseName: string;
+  /** The single catalog kind this quiz may ever compose/hand-pick from — locked at creation. */
+  gradingKind: GradingKind;
   catalogs: { activityType: string; name: string }[];
   catalogNames: string[];
   createdAt: string;
@@ -29,6 +32,7 @@ export type AssembledQuizDetail = {
   description: string | null;
   courseId: string;
   courseName: string;
+  gradingKind: GradingKind;
 };
 
 export type QuizCatalogComposition = {
@@ -119,13 +123,16 @@ export function loadAssembledQuizzes(token: string): Promise<ApiResult<{ quizzes
 
 /**
  * Composes a quiz from one or more catalogs for one of the caller's own courses
- * (POST /api/instructor/assembled-quizzes).
+ * (POST /api/instructor/assembled-quizzes). gradingKind is required and locked forever once set —
+ * see assembled_quiz.grading_kind's own comment in supabase/schema.sql.
  */
 export function createAssembledQuiz(
   token: string,
-  input: { name: string; description?: string; courseId: string; catalogActivityTypes: string[] },
-): Promise<ApiResult<{ quiz: { id: string; name: string; description: string | null; courseId: string } }>> {
-  return request<{ quiz: { id: string; name: string; description: string | null; courseId: string } }>(
+  input: { name: string; description?: string; courseId: string; gradingKind: GradingKind; catalogActivityTypes: string[] },
+): Promise<
+  ApiResult<{ quiz: { id: string; name: string; description: string | null; courseId: string; gradingKind: GradingKind } }>
+> {
+  return request<{ quiz: { id: string; name: string; description: string | null; courseId: string; gradingKind: GradingKind } }>(
     '/api/instructor/assembled-quizzes',
     postJson(input),
     token,
@@ -357,6 +364,24 @@ export function createAndPickQuestionForQuiz(
         ...(option.isCorrect ? { explanation: question.explanation } : {}),
       })),
     }),
+    token,
+  );
+}
+
+/**
+ * Creates a brand-new prompt AND hand-picks it onto this quiz in one atomic request
+ * (POST /api/instructor/assembled-quizzes/{quizId}/user-stories) — the llm-graded twin of
+ * createAndPickQuestionForQuiz above. Returns extraUserStory so the composition page can append
+ * it to local state directly, without a full refetch.
+ */
+export function createAndPickUserStoryForQuiz(
+  token: string,
+  quizId: string,
+  prompt: UserStoryDraft,
+): Promise<ApiResult<{ userStoryId: string; extraUserStory: QuizExtraUserStorySummary }>> {
+  return request<{ userStoryId: string; extraUserStory: QuizExtraUserStorySummary }>(
+    quizPath(quizId, '/user-stories'),
+    postJson(prompt),
     token,
   );
 }

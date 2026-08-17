@@ -4,17 +4,40 @@ import { useState } from 'react';
 import { createAssembledQuiz } from '../lib/assembledQuizClient';
 import type { CourseSummary } from '../lib/courseClient';
 import type { QuizSummary } from '../lib/quizClient';
+import type { GradingKind } from '../lib/activityTypes';
 import { useModalDismiss } from './useModalDismiss';
+
+/**
+ * Same two-way choice as components/CreateCatalogModal.tsx's KIND_OPTIONS — a quiz is locked to
+ * one catalog kind forever, the same "decided at creation" rule a catalog's own grading_kind
+ * already follows (assembled_quiz.grading_kind, see supabase/schema.sql). Kept as its own copy
+ * rather than imported from CreateCatalogModal: the two modals compose their own markup
+ * independently per this project's modal convention, and the two option sets could reasonably
+ * diverge in wording later (a quiz's hint is about composition, a catalog's about content).
+ */
+const KIND_OPTIONS: { value: GradingKind; label: string; hint: string }[] = [
+  {
+    value: 'mcq',
+    label: 'Multiple-Choice Quiz',
+    hint: 'Composed from multiple-choice catalogs. Scored automatically.',
+  },
+  {
+    value: 'llm-graded',
+    label: 'LLM-Graded Task',
+    hint: 'Composed from LLM-graded catalogs. Scored 1-10 by your configured AI provider.',
+  },
+];
 
 /**
  * The popup that composes a quiz from one or more question catalogs for one of the instructor's
  * courses (GitHub #347/#360 follow-up), replacing the permanently visible inline form
  * app/instructor/assembled-quizzes/page.tsx used to render below the list. Structurally the same
  * shape as components/CreateCatalogModal.tsx (same overlay/panel/header/footer, same
- * useModalDismiss wiring) with two additional fields this quiz's composition needs and a catalog
- * has no use for: a course single-select and a catalog multi-select. `courses`/`catalogs` are
- * passed in rather than fetched here — the parent page already loads both for the list/table
- * view, and this modal only ever opens after that load has completed.
+ * useModalDismiss wiring) with three additional fields this quiz's composition needs and a
+ * catalog has no use for: a course single-select, a grading-kind choice, and a catalog
+ * multi-select filtered to that kind. `courses`/`catalogs` are passed in rather than fetched here
+ * — the parent page already loads both for the list/table view, and this modal only ever opens
+ * after that load has completed.
  */
 export function CreateQuizModal({
   token,
@@ -32,11 +55,23 @@ export function CreateQuizModal({
    * only echoes ids, not display names — the modal already has the mapping (via its own `catalogs`
    * prop) that the page's optimistic-insert row needs to render immediately.
    */
-  onCreated: (quiz: { id: string; name: string; description: string | null; courseId: string; catalogs: { activityType: string; name: string }[]; catalogNames: string[] }) => void;
+  onCreated: (quiz: {
+    id: string;
+    name: string;
+    description: string | null;
+    courseId: string;
+    gradingKind: GradingKind;
+    catalogs: { activityType: string; name: string }[];
+    catalogNames: string[];
+  }) => void;
 }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [courseId, setCourseId] = useState('');
+  // Starts null with no pre-selection, same reasoning as CreateCatalogModal's own gradingKind
+  // state: creation cannot proceed without this choice only if nothing is pre-picked for the
+  // instructor to accept without looking.
+  const [gradingKind, setGradingKind] = useState<GradingKind | null>(null);
   const [selectedCatalogs, setSelectedCatalogs] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -52,11 +87,15 @@ export function CreateQuizModal({
     );
   }
 
-  const canSubmit = Boolean(name.trim()) && Boolean(courseId) && selectedCatalogs.length > 0 && !submitting;
+  // Only catalogs matching the chosen kind are ever selectable — a quiz can't mix kinds
+  // (assembled_quiz.grading_kind is locked at creation, enforced again server-side).
+  const catalogsForKind = gradingKind === null ? [] : catalogs.filter((catalog) => catalog.gradingKind === gradingKind);
+
+  const canSubmit = Boolean(name.trim()) && Boolean(courseId) && gradingKind !== null && selectedCatalogs.length > 0 && !submitting;
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    if (!canSubmit) return;
+    if (!canSubmit || gradingKind === null) return;
 
     setSubmitting(true);
     setError('');
@@ -65,6 +104,7 @@ export function CreateQuizModal({
       name: name.trim(),
       description: description.trim() || undefined,
       courseId,
+      gradingKind,
       catalogActivityTypes: selectedCatalogs,
     });
 
@@ -168,12 +208,54 @@ export function CreateQuizModal({
             </p>
           ) : null}
 
+          <fieldset className="mt-4">
+            <legend className="mb-1.5 text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted">
+              Activity type
+            </legend>
+            <div className="grid gap-2">
+              {KIND_OPTIONS.map((option) => (
+                <label
+                  key={option.value}
+                  className={`flex cursor-pointer gap-3 rounded-brand-md border px-3.5 py-3 transition ${
+                    gradingKind === option.value
+                      ? 'border-brand-purple bg-brand-purple/10'
+                      : 'border-brand-navy-border bg-brand-navy-2 hover:border-brand-purple/50'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="gradingKind"
+                    value={option.value}
+                    checked={gradingKind === option.value}
+                    onChange={() => {
+                      setGradingKind(option.value);
+                      // Previously selected catalogs may no longer match the newly chosen kind —
+                      // a quiz can't mix kinds, so a stale selection would otherwise silently
+                      // submit alongside catalogs the instructor can no longer even see checked.
+                      setSelectedCatalogs([]);
+                    }}
+                    className="mt-0.5 h-4 w-4 flex-none accent-brand-purple"
+                  />
+                  <span className="block">
+                    <span className="block text-sm font-extrabold text-brand-ink">{option.label}</span>
+                    <span className="mt-0.5 block text-xs font-semibold text-brand-ink-muted">{option.hint}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            <p className="mt-1.5 text-xs font-semibold text-brand-ink-muted/70">
+              This cannot be changed after the quiz is created.
+            </p>
+          </fieldset>
+
           <span className="mb-1.5 mt-4 block text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted">Catalogs</span>
           <div className="max-h-40 space-y-2 overflow-y-auto rounded-brand-md border border-brand-navy-border bg-brand-navy-2 p-3">
-            {catalogs.length === 0 ? (
-              <p className="text-xs font-semibold text-brand-ink-muted">No catalogs exist yet.</p>
+            {gradingKind === null ? (
+              <p className="text-xs font-semibold text-brand-ink-muted">Choose an activity type above first.</p>
+            ) : catalogsForKind.length === 0 ? (
+              <p className="text-xs font-semibold text-brand-ink-muted">No catalogs of this type exist yet.</p>
             ) : (
-              catalogs.map((catalog) => (
+              catalogsForKind.map((catalog) => (
                 <label key={catalog.activityType} className="flex items-center gap-2.5 text-sm font-semibold text-brand-ink">
                   <input
                     type="checkbox"

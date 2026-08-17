@@ -7,8 +7,10 @@ import { AppShell } from '../../../../components/AppShell';
 import { AddQuizQuestionsModal } from '../../../../components/AddQuizQuestionsModal';
 import { ConfirmModal } from '../../../../components/ConfirmModal';
 import { QuestionFormModal } from '../../../../components/QuestionFormModal';
+import { PromptFormModal } from '../../../../components/PromptFormModal';
 import {
   createAndPickQuestionForQuiz,
+  createAndPickUserStoryForQuiz,
   deleteAssembledQuiz,
   linkCatalogToQuiz,
   loadQuizDetail,
@@ -24,6 +26,7 @@ import {
 import { loadQuizzes, type QuizSummary } from '../../../../lib/quizClient';
 import type { ActivityType } from '../../../../lib/activityTypes';
 import type { QuizQuestion } from '../../../../lib/quizQuestionTypes';
+import type { UserStoryDraft } from '../../../../lib/llmActivityClient';
 import { useRequireRole } from '../../../../lib/useRequireRole';
 
 function RemoveIcon() {
@@ -66,7 +69,7 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
   const [catalogToRemove, setCatalogToRemove] = useState<QuizCatalogComposition | null>(null);
   const [showDeleteQuiz, setShowDeleteQuiz] = useState(false);
   const [showAddQuestionsModal, setShowAddQuestionsModal] = useState(false);
-  const [showCreateQuestionModal, setShowCreateQuestionModal] = useState(false);
+  const [showCreateItemModal, setShowCreateItemModal] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Browser back/forward restores the previously-rendered component tree instead of remounting
@@ -126,7 +129,12 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
   }
 
   const linkedActivityTypes = new Set((catalogs ?? []).map((catalog) => catalog.activityType));
-  const availableToAdd = (allCatalogs ?? []).filter((catalog) => !linkedActivityTypes.has(catalog.activityType));
+  // A quiz can never link a catalog whose kind doesn't match its own locked grading_kind — see
+  // assembled_quiz.grading_kind's own comment in supabase/schema.sql. Filtered here too (not just
+  // server-side) so a mismatched-kind catalog never even appears as a selectable option.
+  const availableToAdd = (allCatalogs ?? []).filter(
+    (catalog) => !linkedActivityTypes.has(catalog.activityType) && catalog.gradingKind === quiz?.gradingKind,
+  );
 
   async function handleAddCatalog() {
     if (!selectedCatalogToAdd || !token) return;
@@ -192,21 +200,20 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
     setRetryCount((count) => count + 1); // re-fetch level coverage now that a hand-picked prompt is gone from the pool
   }
 
-  // GitHub #380 extension: catalog choices offered by the reused QuestionFormModal when creating
-  // a brand-new question from this page — the quiz's own linked catalogs when it has any (so the
-  // instructor's most likely target is already selected), falling back to every catalog the
-  // instructor owns when it has none (a question must always belong to a catalog, so this choice
-  // can never be skipped, only defaulted). Filtered to 'mcq' catalogs only — QuestionFormModal
-  // creates `question` rows, and an llm-graded catalog's pool is `user_story`; nothing validates
-  // that server-side (POST /api/instructor/questions only checks the activityType exists, not its
-  // grading_kind), so this filter is the only thing stopping an MCQ question from ending up
-  // permanently invisible under a prompt-only catalog.
-  const mcqCatalogs = (catalogs ?? []).filter((catalog) => catalog.gradingKind === 'mcq');
-  const catalogOptionsForCreate: { value: ActivityType; label: string }[] =
-    mcqCatalogs.length > 0
-      ? mcqCatalogs.map((catalog) => ({ value: catalog.activityType as ActivityType, label: catalog.name }))
+  // GitHub #380 extension, now kind-aware: catalog choices offered when creating a brand-new
+  // question/prompt from this page — the quiz's own linked catalogs when it has any of its own
+  // kind (so the instructor's most likely target is already selected), falling back to every
+  // catalog of that kind the instructor owns when it has none (an item must always belong to a
+  // catalog, so this choice can never be skipped, only defaulted). Filtered to quiz.gradingKind —
+  // a quiz can only ever hold one kind (assembled_quiz.grading_kind, locked at creation and
+  // re-validated server-side by both .../questions and .../user-stories), so there is exactly one
+  // matching pool to offer, never both.
+  const linkedCatalogsForKind = (catalogs ?? []).filter((catalog) => catalog.gradingKind === quiz?.gradingKind);
+  const catalogOptionsForNewItem: { value: ActivityType; label: string }[] =
+    linkedCatalogsForKind.length > 0
+      ? linkedCatalogsForKind.map((catalog) => ({ value: catalog.activityType as ActivityType, label: catalog.name }))
       : (allCatalogs ?? [])
-          .filter((catalog) => catalog.gradingKind === 'mcq')
+          .filter((catalog) => catalog.gradingKind === quiz?.gradingKind)
           .map((catalog) => ({ value: catalog.activityType as ActivityType, label: catalog.name }));
 
   async function handleCreateAndPickQuestion(question: QuizQuestion): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -218,6 +225,18 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
     setExtraQuestions((current) => [...(current ?? []), result.data.extraQuestion]);
     showToast(`"${result.data.extraQuestion.questionText}" created and added to this quiz.`);
     setRetryCount((count) => count + 1); // re-fetch level coverage now that a new question is in the pool
+    return { ok: true };
+  }
+
+  async function handleCreateAndPickUserStory(prompt: UserStoryDraft): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (!token) return { ok: false, error: 'Your session has expired. Please sign in again.' };
+
+    const result = await createAndPickUserStoryForQuiz(token, params.quizId, prompt);
+    if (!result.ok) return { ok: false, error: result.error };
+
+    setExtraUserStories((current) => [...(current ?? []), result.data.extraUserStory]);
+    showToast(`"${result.data.extraUserStory.storyText}" created and added to this quiz.`);
+    setRetryCount((count) => count + 1); // re-fetch level coverage now that a new prompt is in the pool
     return { ok: true };
   }
 
@@ -379,12 +398,16 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
               <div className="flex flex-none flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowCreateQuestionModal(true)}
-                  disabled={catalogOptionsForCreate.length === 0}
-                  title={catalogOptionsForCreate.length === 0 ? 'No catalogs exist yet to file a new question under.' : undefined}
+                  onClick={() => setShowCreateItemModal(true)}
+                  disabled={catalogOptionsForNewItem.length === 0}
+                  title={
+                    catalogOptionsForNewItem.length === 0
+                      ? `No catalogs exist yet to file a new ${quiz.gradingKind === 'llm-graded' ? 'prompt' : 'question'} under.`
+                      : undefined
+                  }
                   className="flex-none rounded-full border border-brand-purple/40 px-4 py-1.5 text-xs font-extrabold text-brand-purple transition hover:bg-brand-purple/10 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  Create new question
+                  {quiz.gradingKind === 'llm-graded' ? 'Add prompt' : 'Create new question'}
                 </button>
                 <button
                   type="button"
@@ -530,10 +553,11 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
         />
       ) : null}
 
-      {showAddQuestionsModal && token ? (
+      {showAddQuestionsModal && token && quiz ? (
         <AddQuizQuestionsModal
           token={token}
           quizId={params.quizId}
+          gradingKind={quiz.gradingKind}
           // Already-included regardless of source: every question/prompt currently active through
           // a linked catalog (not excluded) plus every question/prompt already hand-picked — see
           // getQuizComposition's own docblock for why activeCatalogQuestionIds/
@@ -554,24 +578,34 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
             setRetryCount((count) => count + 1); // re-fetch composition + level coverage with the new hand-picks included
           }}
           onCreateNew={
-            catalogOptionsForCreate.length > 0
+            catalogOptionsForNewItem.length > 0
               ? () => {
                   setShowAddQuestionsModal(false);
-                  setShowCreateQuestionModal(true);
+                  setShowCreateItemModal(true);
                 }
               : undefined
           }
         />
       ) : null}
 
-      {showCreateQuestionModal && catalogOptionsForCreate.length > 0 ? (
-        <QuestionFormModal
-          mode="add"
-          defaultQuizType={catalogOptionsForCreate[0].value}
-          quizOptions={catalogOptionsForCreate}
-          onClose={() => setShowCreateQuestionModal(false)}
-          onSave={handleCreateAndPickQuestion}
-        />
+      {showCreateItemModal && quiz && catalogOptionsForNewItem.length > 0 ? (
+        quiz.gradingKind === 'llm-graded' ? (
+          <PromptFormModal
+            mode="add"
+            defaultActivityType={catalogOptionsForNewItem[0].value}
+            catalogOptions={catalogOptionsForNewItem}
+            onClose={() => setShowCreateItemModal(false)}
+            onSave={handleCreateAndPickUserStory}
+          />
+        ) : (
+          <QuestionFormModal
+            mode="add"
+            defaultQuizType={catalogOptionsForNewItem[0].value}
+            quizOptions={catalogOptionsForNewItem}
+            onClose={() => setShowCreateItemModal(false)}
+            onSave={handleCreateAndPickQuestion}
+          />
+        )
       ) : null}
     </AppShell>
   );

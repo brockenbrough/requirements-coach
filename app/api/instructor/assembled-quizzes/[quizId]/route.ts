@@ -55,7 +55,7 @@ async function authorizeQuiz(request: Request, quizId: string) {
  * - 401 missing/invalid bearer token
  * - 403 caller isn't an instructor, or isn't this quiz's creator (no body either way)
  * - 404 quizId matches no quiz
- * - 200 { quiz: { id, name, description, courseId, courseName }, catalogs, levelCoverage, extraQuestions, extraUserStories, activeCatalogQuestionIds, activeCatalogUserStoryIds }
+ * - 200 { quiz: { id, name, description, courseId, courseName, gradingKind }, catalogs, levelCoverage, extraQuestions, extraUserStories, activeCatalogQuestionIds, activeCatalogUserStoryIds }
  * - 500 Supabase not configured, or any of the composition queries fail
  */
 export async function GET(request: Request, { params }: { params: { quizId: string } }) {
@@ -96,6 +96,7 @@ export async function GET(request: Request, { params }: { params: { quizId: stri
         description: quiz.description,
         courseId: quiz.course_id,
         courseName: courseName ?? 'Unknown course',
+        gradingKind: quiz.grading_kind === 'llm-graded' ? 'llm-graded' : 'mcq',
       },
       catalogs,
       levelCoverage,

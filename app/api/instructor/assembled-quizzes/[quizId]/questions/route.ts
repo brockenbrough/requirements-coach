@@ -36,6 +36,9 @@ function getToken(request: Request): string | null {
  * the same rollback-by-hand discipline createAssembledQuiz and POST /api/instructor/questions
  * itself already follow (no Supabase JS transaction exists to lean on instead).
  *
+ * 400s up front if this quiz's own grading_kind isn't 'mcq' — a quiz is locked to one kind at
+ * creation (assembled_quiz.grading_kind), and this route only ever creates `question` rows.
+ *
  * Returns 201 { questionId, answerIds, extraQuestion } — extraQuestion is the same
  * QuizExtraQuestionSummary shape getQuizComposition's `extraQuestions` array already uses, so the
  * composition page can append it straight to local state instead of refetching the whole quiz.
@@ -58,6 +61,10 @@ export async function POST(request: Request, { params }: { params: { quizId: str
   if (found.status === 'error') return Response.json({ error: found.error.message }, { status: 500 });
   if (found.status === 'not_found') return Response.json({ error: 'Quiz not found.' }, { status: 404 });
   if (found.status === 'forbidden') return new Response(null, { status: 403 });
+
+  if (found.quiz.grading_kind !== 'mcq') {
+    return Response.json({ error: 'This quiz can only include multiple-choice questions.' }, { status: 400 });
+  }
 
   let body: unknown;
   try {

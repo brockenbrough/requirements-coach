@@ -1,6 +1,7 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { requireInstructor } from '../../../../lib/instructorAuth';
 import { validateUserStoryInput } from '../../../../lib/userStoryInput';
+import { createUserStory } from '../../../../lib/userStoryAuthoringQueries';
 import type { InstructorUserStoryEntry } from '../../../../lib/llmActivityTypes';
 
 function getToken(request: Request): string | null {
@@ -117,17 +118,12 @@ export async function POST(request: Request) {
   const { data: { user }, error: authError } = await supabase.auth.getUser(token!);
   if (authError || !user) return Response.json({ error: 'Invalid or expired token.' }, { status: 401 });
 
-  const userStoryId = crypto.randomUUID();
+  const created = await createUserStory(
+    supabase,
+    { storyText: validation.storyText, activityType: validation.activityType, difficultyLevel: validation.difficultyLevel },
+    user.id,
+  );
+  if (!created.ok) return Response.json({ error: created.error }, { status: created.status });
 
-  const { error: insertError } = await supabase.from('user_story').insert({
-    user_story_id: userStoryId,
-    story_text: validation.storyText,
-    activity_type: validation.activityType,
-    difficulty_level: validation.difficultyLevel,
-    creator_id: user.id,
-  });
-
-  if (insertError) return Response.json({ error: insertError.message }, { status: 500 });
-
-  return Response.json({ userStoryId }, { status: 201 });
+  return Response.json({ userStoryId: created.userStoryId }, { status: 201 });
 }

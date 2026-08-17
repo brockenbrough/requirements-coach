@@ -92,8 +92,8 @@ function queueOwnedCourse(overrides: Partial<Record<string, unknown>> = {}) {
   queue('course', { data: courseRow(overrides), error: null });
 }
 
-function queueValidCatalogs(activityTypes: string[]) {
-  queue('activity_type', { data: activityTypes.map((activity_type) => ({ activity_type })), error: null });
+function queueValidCatalogs(activityTypes: string[], gradingKind: string = 'mcq') {
+  queue('activity_type', { data: activityTypes.map((activity_type) => ({ activity_type, grading_kind: gradingKind })), error: null });
 }
 
 function getRequest(token: string | null = 'valid-token') {
@@ -118,6 +118,7 @@ function validBody(overrides: Partial<Record<string, unknown>> = {}) {
     name: 'Sprint 1 Requirements Check',
     description: 'Covers weak stories and weak criteria.',
     courseId: 'course-1',
+    gradingKind: 'mcq',
     catalogActivityTypes: ['IDENTIFY_WEAK_USER_STORIES', 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA'],
     ...overrides,
   };
@@ -156,11 +157,12 @@ describe('GET /api/instructor/assembled-quizzes', () => {
           quiz_name: 'Sprint 1 Requirements Check',
           description: 'Covers weak stories and weak criteria.',
           course_id: 'course-1',
+          grading_kind: 'mcq',
           created_at: '2026-08-14T10:00:00',
           course: { course_name: 'Software Requirements' },
           assembled_quiz_catalog: [
-            { catalog: { quiz_name: 'Identify Weak User Stories' } },
-            { catalog: { quiz_name: 'Identify Weak Acceptance Criteria' } },
+            { activity_type: 'IDENTIFY_WEAK_USER_STORIES', catalog: { quiz_name: 'Identify Weak User Stories' } },
+            { activity_type: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', catalog: { quiz_name: 'Identify Weak Acceptance Criteria' } },
           ],
         },
       ],
@@ -178,6 +180,11 @@ describe('GET /api/instructor/assembled-quizzes', () => {
         description: 'Covers weak stories and weak criteria.',
         courseId: 'course-1',
         courseName: 'Software Requirements',
+        gradingKind: 'mcq',
+        catalogs: [
+          { activityType: 'IDENTIFY_WEAK_USER_STORIES', name: 'Identify Weak User Stories' },
+          { activityType: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', name: 'Identify Weak Acceptance Criteria' },
+        ],
         catalogNames: ['Identify Weak User Stories', 'Identify Weak Acceptance Criteria'],
         createdAt: '2026-08-14T10:00:00',
       },
@@ -263,6 +270,40 @@ describe('POST /api/instructor/assembled-quizzes', () => {
     queueRole('instructor');
     const res = await POST(postRequest(validBody({ catalogActivityTypes: ['IDENTIFY_WEAK_USER_STORIES', 42] })));
     expect(res.status).toBe(400);
+  });
+
+  it('rejects a missing gradingKind with 400', async () => {
+    queueRole('instructor');
+    const res = await POST(postRequest(validBody({ gradingKind: undefined })));
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error).toBe('gradingKind must be "mcq" or "llm-graded".');
+    expect(h.state.tables).not.toContain('course');
+  });
+
+  it('rejects an invalid gradingKind with 400', async () => {
+    queueRole('instructor');
+    const res = await POST(postRequest(validBody({ gradingKind: 'essay' })));
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when a selected catalog\'s grading_kind does not match the submitted gradingKind', async () => {
+    queueRole('instructor');
+    queueOwnedCourse();
+    // Both catalogs exist, but one is llm-graded while the quiz is being created as 'mcq'.
+    queue('activity_type', {
+      data: [
+        { activity_type: 'IDENTIFY_WEAK_USER_STORIES', grading_kind: 'mcq' },
+        { activity_type: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', grading_kind: 'llm-graded' },
+      ],
+      error: null,
+    });
+
+    const res = await POST(postRequest(validBody()));
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error).toBe("All selected catalogs must match the quiz's activity type.");
+    expect(h.state.tables).not.toContain('assembled_quiz');
   });
 
   it('returns 404 when the course does not exist', async () => {
