@@ -16,11 +16,12 @@ function getToken(request: Request): string | null {
  * contains (GitHub #359), for the catalog detail page's read-only view. Distinct from
  * GET /api/instructor/quizzes/:activityType/:difficultyLevel/questions (own-questions-only, one
  * level, 403s when the caller owns none of that level) — this route answers "what's in this
- * catalog" for anyone who can see it exists, since catalogs are shared the same way the browse
- * list already is.
+ * catalog", scoped the same "mine only" way the browse list is: a catalog is visible here only if
+ * creator_id matches the caller, so a built-in or colleague's catalog 403s even though it exists.
  *
  * - 401 missing/invalid bearer token
- * - 403 caller isn't an instructor (no body)
+ * - 403 caller isn't an instructor (no body), or is an instructor but doesn't own this catalog
+ *   (no body — same 404-then-403 ordering as e.g. lib/courseQueries.ts's findOwnedCourse)
  * - 404 activityType matches no catalog
  * - 200 { quiz, questions: CatalogQuestion[], userStories: CatalogUserStory[] }
  * - 500 Supabase not configured, or either query fails
@@ -47,9 +48,10 @@ export async function GET(request: Request, { params }: { params: { activityType
 
   const { activityType } = params;
 
-  const { quiz, error: quizError } = await getQuizByActivityType(supabase, activityType);
+  const { quiz, creatorId, error: quizError } = await getQuizByActivityType(supabase, activityType);
   if (quizError) return Response.json({ error: quizError.message }, { status: 500 });
   if (!quiz) return Response.json({ error: 'Catalog not found.' }, { status: 404 });
+  if (creatorId !== guard.user_id) return new Response(null, { status: 403 });
 
   if (quiz.gradingKind === 'llm-graded') {
     const { userStories, error: userStoriesError } = await listCatalogUserStories(supabase, activityType);

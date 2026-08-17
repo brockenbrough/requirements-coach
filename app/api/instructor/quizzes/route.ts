@@ -8,9 +8,9 @@ function getToken(request: Request): string | null {
 }
 
 /**
- * GET /api/instructor/quizzes — every quiz in the system (GitHub #347), not just the calling
- * instructor's own: quizzes are globally shared, so an instructor can browse a colleague's and
- * reuse it in their own course instead of rebuilding it from scratch.
+ * GET /api/instructor/quizzes — every quiz the calling instructor created (creator_id =
+ * guard.user_id): built-in catalogs and colleagues' catalogs are not included, the same "mine
+ * only" convention lib/activityTypeQueries.ts's listOwnedActivityTypes already uses elsewhere.
  *
  * Not the same thing as GET /api/instructor/quizzes/{activityType}/{difficultyLevel}/questions
  * (a narrower, currently-unused route that returns one instructor's own questions for one
@@ -21,10 +21,6 @@ function getToken(request: Request): string | null {
  * - 403 caller isn't an instructor (no body)
  * - 200 { quizzes: [{ activityType, name, description, authorName, questionCount }] }
  * - 500 Supabase not configured, or the query fails
- *
- * Filtering by professor is left to the client: the quiz count is small enough (built-in plus
- * however many instructors have created) that fetching the full list and filtering in the
- * browser is simpler than adding server-side query params for it.
  */
 export async function GET(request: Request) {
   const supabase = getSupabaseClient();
@@ -40,7 +36,7 @@ export async function GET(request: Request) {
         );
   }
 
-  const { quizzes, error } = await listQuizzesWithAuthorAndCount(supabase);
+  const { quizzes, error } = await listQuizzesWithAuthorAndCount(supabase, guard.user_id);
   if (error || !quizzes) {
     return Response.json({ error: error?.message ?? 'Could not load quizzes.' }, { status: 500 });
   }

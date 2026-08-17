@@ -7,12 +7,16 @@ const h = vi.hoisted(() => {
     queues: {} as Record<string, Result[]>,
     tables: [] as string[],
     orders: [] as { table: string; column: string; ascending: boolean }[],
+    filters: [] as { table: string; column: string; value: unknown }[],
   };
 
   function makeBuilder(table: string, result: Result) {
     const builder: Record<string, unknown> = {
       select: () => builder,
-      eq: () => builder,
+      eq: (column: string, value: unknown) => {
+        state.filters.push({ table, column, value });
+        return builder;
+      },
       order: (column: string, opts?: { ascending?: boolean }) => {
         state.orders.push({ table, column, ascending: opts?.ascending ?? true });
         return builder;
@@ -79,6 +83,7 @@ beforeEach(() => {
   h.state.queues = {};
   h.state.tables = [];
   h.state.orders = [];
+  h.state.filters = [];
 });
 
 describe('GET /api/instructor/quizzes', () => {
@@ -106,24 +111,13 @@ describe('GET /api/instructor/quizzes', () => {
     expect(body.quizzes).toEqual([]);
   });
 
-  it('reports "Built-in" for a quiz with no creator_id', async () => {
+  it('scopes the query to the caller — built-in catalogs are excluded by construction', async () => {
     queueRole('instructor');
-    queue('activity_type', { data: [quizRow()], error: null });
+    queue('activity_type', { data: [], error: null });
 
-    const res = await GET(req());
-    const body = await res.json();
+    await GET(req());
 
-    expect(body.quizzes).toEqual([
-      {
-        activityType: 'IDENTIFY_WEAK_USER_STORIES',
-        name: 'Identify Weak User Stories',
-        description: null,
-        authorName: 'Built-in',
-        gradingKind: 'mcq',
-        questionCount: 36,
-        quizCount: 0,
-      },
-    ]);
+    expect(h.state.filters).toContainEqual({ table: 'activity_type', column: 'creator_id', value: 'instructor-1' });
   });
 
   it('reports how many assembled quizzes (GitHub #360) reference the catalog', async () => {
@@ -147,7 +141,7 @@ describe('GET /api/instructor/quizzes', () => {
           activity_type: 'MY_CUSTOM_QUIZ',
           quiz_name: 'My Custom Quiz',
           description: 'A quiz about things',
-          creator_id: 'instructor-2',
+          creator_id: 'instructor-1',
           creator: { first_name: 'Ada', last_name: 'Brockenbrough', username: 'abrock' },
           question: [{ count: 0 }],
         }),
@@ -176,7 +170,7 @@ describe('GET /api/instructor/quizzes', () => {
     queue('activity_type', {
       data: [
         quizRow({
-          creator_id: 'instructor-2',
+          creator_id: 'instructor-1',
           creator: { first_name: null, last_name: null, username: 'abrock' },
         }),
       ],
@@ -191,7 +185,7 @@ describe('GET /api/instructor/quizzes', () => {
   it('falls back to "Unknown instructor" when neither a name nor a username is available', async () => {
     queueRole('instructor');
     queue('activity_type', {
-      data: [quizRow({ creator_id: 'instructor-2', creator: null })],
+      data: [quizRow({ creator_id: 'instructor-1', creator: null })],
       error: null,
     });
 

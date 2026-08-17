@@ -59,28 +59,30 @@ function authorNameOf(row: QuizRow): string {
 }
 
 /**
- * Every quiz in the system — built-in or instructor-created — with its author, question count,
- * and how many assembled quizzes currently reference it, for the instructor-facing browse page.
- * Quizzes are globally shared (not scoped to the calling instructor): anyone can see and reuse
- * anyone else's, which is the entire point of GitHub #347.
+ * Every quiz this instructor created — creator_id = instructorId, strictly — with its author,
+ * question count, and how many assembled quizzes currently reference it, for the instructor-facing
+ * browse page. Same "mine only" convention listOwnedActivityTypes documents below: a built-in
+ * catalog (creator_id IS NULL) never matches, and neither does a colleague's.
  *
  * One query, using the same creator:creator_id(...) + related-table (count) embed pattern
  * lib/courseQueries.ts's listJoinableCourses uses for professor_name/student_count, extended with
  * a second count embed onto assembled_quiz_catalog (the m:n link table from GitHub #360) — author
  * name, question count, and usage count come back on the same row as the quiz itself rather than
- * three round trips merged in JS.
+ * three round trips merged in JS. The creator embed is what it is (always the caller once scoped)
+ * but stays in the select so the response shape doesn't need to special-case authorName.
  *
  * GitHub #379: user_story(count) rides along the same way question(count) does — that embed is
  * what fk_user_story_activity_type was added for — and grading_kind decides which of the two
  * counts becomes questionCount. Both are fetched unconditionally because it is one query either
  * way; the unused one is always 0, since a catalog only ever fills one pool.
  */
-export async function listQuizzesWithAuthorAndCount(supabase: SupabaseClient) {
+export async function listQuizzesWithAuthorAndCount(supabase: SupabaseClient, instructorId: string) {
   const { data, error } = await supabase
     .from('activity_type')
     .select(
       'activity_type, quiz_name, description, grading_kind, creator_id, creator:creator_id(first_name, last_name, username), question(count), user_story(count), assembled_quiz_catalog(count)',
     )
+    .eq('creator_id', instructorId)
     .order('quiz_name', { ascending: true });
 
   if (error) return { quizzes: null, error };
@@ -108,6 +110,15 @@ export type QuizMeta = Omit<QuizSummary, 'questionCount' | 'quizCount'>;
  * GitHub #359: one catalog's own metadata (name/description/author), for the catalog detail page
  * — the single-row counterpart to listQuizzesWithAuthorAndCount's list. Returns { quiz: null }
  * (not an error) when activityType matches no row, so the route can turn that into a 404.
+ *
+ * Deliberately unscoped by creator, unlike listQuizzesWithAuthorAndCount above: this is shared by
+ * three routes with three different authorization rules — the direct catalog detail route (which
+ * enforces "mine only" itself, by comparing the returned creatorId against the caller), the
+ * assembled-quiz "catalog in the context of this quiz" view (authorized via quiz ownership, not
+ * catalog ownership — a linked built-in or another-instructor's catalog must stay viewable there),
+ * and the student-facing single-activity route (authorized via course enrollment). creatorId rides
+ * along as a sibling field, not folded into QuizMeta, precisely so the two callers that don't need
+ * it can keep destructuring only `quiz` without it ever reaching a JSON response by accident.
  */
 export async function getQuizByActivityType(supabase: SupabaseClient, activityType: string) {
   const { data, error } = await supabase
@@ -118,8 +129,8 @@ export async function getQuizByActivityType(supabase: SupabaseClient, activityTy
     .eq('activity_type', activityType)
     .maybeSingle();
 
-  if (error) return { quiz: null, error };
-  if (!data) return { quiz: null, error: null };
+  if (error) return { quiz: null, creatorId: null, error };
+  if (!data) return { quiz: null, creatorId: null, error: null };
 
   const row = data as unknown as QuizRow;
 
@@ -131,7 +142,7 @@ export async function getQuizByActivityType(supabase: SupabaseClient, activityTy
     gradingKind: gradingKindOf(row),
   };
 
-  return { quiz, error: null };
+  return { quiz, creatorId: row.creator_id, error: null };
 }
 
 /**

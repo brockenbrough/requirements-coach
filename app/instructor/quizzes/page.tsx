@@ -1,21 +1,20 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AppShell } from '../../../components/AppShell';
 import { CreateCatalogModal } from '../../../components/CreateCatalogModal';
 import { loadQuizzes, type CreatedQuiz, type QuizSummary } from '../../../lib/quizClient';
 import { useRequireRole } from '../../../lib/useRequireRole';
 
-const ALL_AUTHORS = 'all';
 const TOAST_MS = 3200;
 
 /**
- * GitHub #347/#359: every question catalog in the system (built-in or instructor-created),
- * filterable by author, plus the create-catalog flow (a button-triggered popup, GitHub #359
- * follow-up, replacing the permanently visible inline form this page used to render below the
- * list). Catalogs are globally shared — this list is not scoped to the calling instructor,
- * unlike the old Question Bank or the Courses pages.
+ * GitHub #347/#359: every question catalog the calling instructor created, plus the
+ * create-catalog flow (a button-triggered popup, GitHub #359 follow-up, replacing the permanently
+ * visible inline form this page used to render below the list). Scoped to creator_id = the caller
+ * — built-in catalogs and colleagues' catalogs are not shown, the same "mine only" convention the
+ * Courses pages already use.
  *
  * A catalog has no course of its own (activity_type_course, the table that used to link one
  * directly, is gone) — the "Used in" column instead shows how many assembled quizzes (GitHub
@@ -35,7 +34,6 @@ export default function InstructorQuizzesPage() {
   const [quizzes, setQuizzes] = useState<QuizSummary[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
-  const [authorFilter, setAuthorFilter] = useState(ALL_AUTHORS);
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -57,14 +55,7 @@ export default function InstructorQuizzesPage() {
     };
   }, [token, retryCount]);
 
-  const authors = useMemo(() => {
-    const names = new Set((quizzes ?? []).map((quiz) => quiz.authorName));
-    return Array.from(names).sort();
-  }, [quizzes]);
-
-  const visibleQuizzes = (quizzes ?? []).filter(
-    (quiz) => authorFilter === ALL_AUTHORS || quiz.authorName === authorFilter,
-  );
+  const visibleQuizzes = quizzes ?? [];
 
   if (loading || !authorized) return null;
   if (!token || !profile) return null;
@@ -100,8 +91,7 @@ export default function InstructorQuizzesPage() {
           <div>
             <h1 className="mb-1.5 text-2xl font-extrabold text-brand-navy">Question Catalogs</h1>
             <p className="max-w-2xl text-sm font-semibold text-gray-500">
-              Every question catalog in the system, built-in or created by an instructor. Catalogs are shared — reuse a
-              colleague's instead of rebuilding it. Click a catalog to view its questions and edit it.
+              Every question catalog you've created. Click a catalog to view its questions and edit it.
             </p>
           </div>
           <button
@@ -146,27 +136,9 @@ export default function InstructorQuizzesPage() {
           <p className="mb-6 text-sm font-semibold text-gray-500">Loading…</p>
         ) : (
           <>
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-              <p className="text-xs font-extrabold uppercase tracking-wide text-gray-400">
-                {visibleQuizzes.length} catalog{visibleQuizzes.length === 1 ? '' : 's'}
-              </p>
-
-              <label className="flex items-center gap-2 text-xs font-bold text-gray-500">
-                Author
-                <select
-                  value={authorFilter}
-                  onChange={(event) => setAuthorFilter(event.target.value)}
-                  className="rounded-brand-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-bold text-gray-600 outline-none transition focus:border-brand-purple"
-                >
-                  <option value={ALL_AUTHORS}>All authors</option>
-                  {authors.map((author) => (
-                    <option key={author} value={author}>
-                      {author}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
+            <p className="mb-3 text-xs font-extrabold uppercase tracking-wide text-gray-400">
+              {visibleQuizzes.length} catalog{visibleQuizzes.length === 1 ? '' : 's'}
+            </p>
 
             <div className="mb-8 overflow-x-auto rounded-brand-lg border border-brand-navy-border">
               <table className="w-full min-w-[640px] text-sm">
@@ -174,7 +146,6 @@ export default function InstructorQuizzesPage() {
                   <tr className="bg-brand-navy text-brand-ink-muted">
                     <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Name</th>
                     <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Description</th>
-                    <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Author</th>
                     <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Type</th>
                     <th className="whitespace-nowrap px-4 py-3 text-right text-xs font-bold uppercase tracking-wide">Used in</th>
                     <th className="whitespace-nowrap px-4 py-3 text-right text-xs font-bold uppercase tracking-wide">Questions</th>
@@ -183,8 +154,8 @@ export default function InstructorQuizzesPage() {
                 <tbody>
                   {visibleQuizzes.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="bg-brand-navy-2 px-4 py-10 text-center text-sm font-semibold text-brand-ink-muted">
-                        No catalogs match this filter.
+                      <td colSpan={5} className="bg-brand-navy-2 px-4 py-10 text-center text-sm font-semibold text-brand-ink-muted">
+                        You haven't created any catalogs yet.
                       </td>
                     </tr>
                   ) : (
@@ -196,7 +167,6 @@ export default function InstructorQuizzesPage() {
                           </Link>
                         </td>
                         <td className="px-4 py-3 text-gray-500">{quiz.description || '—'}</td>
-                        <td className="whitespace-nowrap px-4 py-3 text-gray-500">{quiz.authorName}</td>
                         <td className="whitespace-nowrap px-4 py-3">
                           {/* GitHub #379: questionCount counts questions for one kind and prompts
                               for the other, so the column header alone can't say what the number
