@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { createAssembledQuiz } from '../lib/assembledQuizClient';
 import type { CourseSummary } from '../lib/courseClient';
 import type { QuizSummary } from '../lib/quizClient';
+import type { GradingKind } from '../lib/activityTypes';
 import { useModalDismiss } from './useModalDismiss';
 
 /**
@@ -15,6 +16,17 @@ import { useModalDismiss } from './useModalDismiss';
  * has no use for: a course single-select and a catalog multi-select. `courses`/`catalogs` are
  * passed in rather than fetched here — the parent page already loads both for the list/table
  * view, and this modal only ever opens after that load has completed.
+ *
+ * The "Type" select (GitHub #410) filters which catalogs the checklist below shows, by each
+ * catalog's own `gradingKind` — it is display-only, not a new field on the quiz itself.
+ * assembled_quiz has no grading-kind column and deliberately never gets one: an assembled quiz
+ * already composes catalogs of either kind side by side (see
+ * app/instructor/assembled-quizzes/[quizId]/page.tsx splitting its own catalog list into MCQ and
+ * llm-graded sections), so "the quiz's type" isn't a real concept to persist — only "which
+ * catalogs are on it" is, and each of those already carries its own kind via
+ * activity_type.grading_kind. Filtering, not restricting: switching the dropdown only changes
+ * what's visible, never clears a selection already made under the other type, so composing a
+ * mixed quiz is still one flow (pick some catalogs as "Quiz", switch to "LLM-Graded", pick more).
  */
 export function CreateQuizModal({
   token,
@@ -37,9 +49,14 @@ export function CreateQuizModal({
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [courseId, setCourseId] = useState('');
+  // Default 'mcq' ("Quiz") so existing users see the same catalog list as before this field
+  // existed (GitHub #410's own acceptance criterion).
+  const [catalogTypeFilter, setCatalogTypeFilter] = useState<GradingKind>('mcq');
   const [selectedCatalogs, setSelectedCatalogs] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  const visibleCatalogs = catalogs.filter((catalog) => catalog.gradingKind === catalogTypeFilter);
 
   const { panelRef, firstFieldRef, requestClose } = useModalDismiss<HTMLDivElement, HTMLInputElement>({
     onClose,
@@ -168,12 +185,28 @@ export function CreateQuizModal({
             </p>
           ) : null}
 
+          <label className="mb-1.5 mt-4 block text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted">
+            Type
+            <select
+              value={catalogTypeFilter}
+              onChange={(event) => setCatalogTypeFilter(event.target.value as GradingKind)}
+              className="mt-1.5 block w-full rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none transition focus:border-brand-purple"
+            >
+              <option value="mcq">Quiz</option>
+              <option value="llm-graded">LLM-Graded</option>
+            </select>
+          </label>
+
           <span className="mb-1.5 mt-4 block text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted">Catalogs</span>
           <div className="max-h-40 space-y-2 overflow-y-auto rounded-brand-md border border-brand-navy-border bg-brand-navy-2 p-3">
             {catalogs.length === 0 ? (
               <p className="text-xs font-semibold text-brand-ink-muted">No catalogs exist yet.</p>
+            ) : visibleCatalogs.length === 0 ? (
+              <p className="text-xs font-semibold text-brand-ink-muted">
+                No {catalogTypeFilter === 'mcq' ? 'quiz' : 'LLM-graded'} catalogs yet.
+              </p>
             ) : (
-              catalogs.map((catalog) => (
+              visibleCatalogs.map((catalog) => (
                 <label key={catalog.activityType} className="flex items-center gap-2.5 text-sm font-semibold text-brand-ink">
                   <input
                     type="checkbox"
