@@ -12,6 +12,7 @@ import type { ActivityType } from './activityTypes';
 import { toInstant } from './dateTime';
 import type { AvailableActivityTitles, PublicStudentProfile, PublicStudentTitle } from './leaderboardTypes';
 import type { InstructorActivityEntry, SessionListEntry, SessionRecord } from './sessionTypes';
+import type { OwnedActivityTypeSummary } from './activityTypeQueries';
 import type { QuizQuestion } from './quizQuestionTypes';
 import { getCachedCompletedAttempts, setCachedCompletedAttempts } from './completedAttemptsStore';
 import { getCachedActivityLog, setCachedActivityLog } from './activityLogStore';
@@ -28,6 +29,7 @@ import {
 // can share them without importing this 'use client' module. Re-exported here so this file
 // stays the one import the UI needs for anything session-related.
 export type { InstructorActivityEntry, SessionListEntry, SessionRecord } from './sessionTypes';
+export type { OwnedActivityTypeSummary } from './activityTypeQueries';
 
 export type SessionQuestionOption = {
   answer_id: string;
@@ -402,20 +404,20 @@ export function loadInstructorActivities(
   if (!options.forceRefresh) {
     const cached = getCachedInstructorActivities(instructorId);
     if (cached !== null) {
-      return Promise.resolve<ApiResult<{ sessions: InstructorActivityEntry[] }>>({
+      return Promise.resolve<ApiResult<{ sessions: InstructorActivityEntry[]; ownedActivityTypes: OwnedActivityTypeSummary[] }>>({
         ok: true,
-        data: { sessions: cached },
+        data: cached,
       });
     }
   }
 
-  return request<{ sessions: InstructorActivityEntry[] }>(
+  return request<{ sessions: InstructorActivityEntry[]; ownedActivityTypes: OwnedActivityTypeSummary[] }>(
     '/api/instructor/activities',
     { method: 'GET' },
     token,
   ).then((result) => {
     if (result.ok) {
-      setCachedInstructorActivities(instructorId, result.data.sessions);
+      setCachedInstructorActivities(instructorId, result.data);
     }
     return result;
   });

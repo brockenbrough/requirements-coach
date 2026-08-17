@@ -134,6 +134,69 @@ export async function getQuizByActivityType(supabase: SupabaseClient, activityTy
   return { quiz, error: null };
 }
 
+/**
+ * Every activity_type key this instructor created (creator_id = instructorId), narrowed to one
+ * grading_kind. Strict ownership, not "mine or built-in" the way listQuizzesWithAuthorAndCount's
+ * shared browse view is — a built-in catalog (creator_id IS NULL) never matches
+ * .eq('creator_id', instructorId), for any instructor, on purpose. The scoping primitive behind
+ * the Instructor Dashboard's "activity on quizzes/catalogs you created" feed and the matching
+ * Acceptance-Criteria submissions/statistics scope.
+ *
+ * Returns bare activity_type keys, not full rows — every current caller feeds this straight into
+ * a subsequent .in('activity_type', …) (or a nested story.activity_type dot-filter).
+ */
+export async function listOwnedActivityTypes(
+  supabase: SupabaseClient,
+  instructorId: string,
+  gradingKind: GradingKind,
+): Promise<{ activityTypes: string[] | null; error: { message: string } | null }> {
+  const { data, error } = await supabase
+    .from('activity_type')
+    .select('activity_type')
+    .eq('creator_id', instructorId)
+    .eq('grading_kind', gradingKind);
+
+  if (error) return { activityTypes: null, error };
+
+  const activityTypes = (data ?? []).map((row) => (row as { activity_type: string }).activity_type);
+  return { activityTypes, error: null };
+}
+
+export type OwnedActivityTypeSummary = { activityType: string; name: string; gradingKind: GradingKind };
+
+/**
+ * Every activity_type this instructor created, both grading kinds at once, with its display name
+ * — the read behind the Instructor Dashboard's stat cards (one per owned catalog, GitHub #171
+ * follow-up), which need a name to show and need to know a just-created, zero-attempt catalog
+ * exists at all (not just infer ownership from whichever activity types already have attempts).
+ *
+ * Deliberately not filtered by grading_kind the way listOwnedActivityTypes is — callers that only
+ * want one kind (e.g. loadAllStudentActivity's mcq-only session_log scope) filter this result in
+ * JS, so a single instructor-facing request only ever needs one activity_type round trip instead
+ * of one per grading kind.
+ *
+ * No explicit return-type annotation: leaving it to inference keeps
+ * `{ activityTypeSummaries: null, error }` / `{ activityTypeSummaries: T[], error: null }`
+ * a clean discriminated union callers can narrow with a plain `if (error) return …` — an explicit
+ * `Promise<{...}>` annotation here previously broke that narrowing for listOwnedActivityTypes and
+ * caused a real build failure; see that history before changing this back.
+ */
+export async function listOwnedActivityTypeSummaries(supabase: SupabaseClient, instructorId: string) {
+  const { data, error } = await supabase
+    .from('activity_type')
+    .select('activity_type, quiz_name, grading_kind')
+    .eq('creator_id', instructorId);
+
+  if (error) return { activityTypeSummaries: null, error };
+
+  const activityTypeSummaries: OwnedActivityTypeSummary[] = (data ?? []).map((row) => {
+    const r = row as { activity_type: string; quiz_name: string; grading_kind: string };
+    return { activityType: r.activity_type, name: r.quiz_name, gradingKind: r.grading_kind as GradingKind };
+  });
+
+  return { activityTypeSummaries, error: null };
+}
+
 type CatalogQuestionRow = {
   question_id: string;
   question_prompt: string;

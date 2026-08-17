@@ -20,7 +20,8 @@ const TABLE_ROW_COUNT = 5;
 export function InstructorDashboardSkeleton() {
   return (
     <div role="status" aria-label="Loading class activity">
-      {/* InstructorActivityStats: one tile per activity in ACTIVITIES */}
+      {/* InstructorActivityStats: a placeholder shape only — the real count depends on how many
+          catalogs the instructor owns, unknown until the data loads */}
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
         {[0, 1].map((tile) => (
           <div key={tile} className="rounded-brand-lg border border-gray-100 bg-gray-50 p-5">
