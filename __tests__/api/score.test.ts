@@ -205,4 +205,33 @@ describe('GET /api/students/{studentId}/score', () => {
     const response = await GET(req(), ctx);
     expect(response.status).toBe(500);
   });
+
+  // GitHub #392: the route always recomputes from session_log rather than reading a stored
+  // total, so a freshly completed, passed session is reflected the moment it's queried again —
+  // no separate "refresh" step is needed on the server side. This is what makes the client-side
+  // fix (lib/scoreStore.ts's cache must be invalidated after a session finishes, which is what
+  // was actually broken for the LLM-graded play flow) sufficient on its own: once the client
+  // asks again, the server was never the stale part.
+  it('reflects a newly completed, passed session added since the last read', async () => {
+    queue('session_log', {
+      data: [{ activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 1, cumulative_score: 75 }],
+      error: null,
+    });
+    const before = await (await GET(req(), ctx)).json();
+    expect(before.score).toBe(75);
+    expect(before.sessionsCompleted).toBe(1);
+
+    // The student just finished another session — a new difficulty level, passed — which lands
+    // in session_log as status: 'completed' before the client ever re-asks this route.
+    queue('session_log', {
+      data: [
+        { activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 1, cumulative_score: 75 },
+        { activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 2, cumulative_score: 90 },
+      ],
+      error: null,
+    });
+    const after = await (await GET(req(), ctx)).json();
+    expect(after.score).toBe(165); // 75 + 90, the new session's points are added, not dropped
+    expect(after.sessionsCompleted).toBe(2);
+  });
 });

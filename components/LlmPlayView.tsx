@@ -21,6 +21,7 @@ import type { LlmGradingResult } from '../lib/llmActivityTypes';
 import { loadActivityLog, loadCompletedAttempts } from '../lib/sessionClient';
 import { deriveStoryTitle } from '../lib/storyMarkdown';
 import { useRequireRole } from '../lib/useRequireRole';
+import { useUser } from './UserProvider';
 
 /** What the last submitted story earned, alongside the feedback for it. */
 type Outcome = { userStory: LlmSessionStory; result: LlmGradingResult; completed: boolean };
@@ -39,6 +40,7 @@ export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
   // Also redirects an instructor account away (GitHub #82) — this page is the "activity
   // durchführen" flow itself, exactly what an instructor must not be able to reach.
   const { token, profile, loading, authorized } = useRequireRole('student');
+  const { refreshScore } = useUser();
 
   const [session, setSession] = useState<CurrentLlmSessionResult | null>(null);
   const [nextPosition, setNextPosition] = useState<number | null>(null);
@@ -224,7 +226,15 @@ export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
     if (token && profile?.user_id) {
       // Await the refresh before navigating so the landing page's cache is already up to date
       // when it mounts — the same reasoning as PlayActivityPage's handleFinishSummary (GitHub #130).
+      //
+      // GitHub #392: this used to omit refreshScore() entirely — an LLM-graded session finishing
+      // never invalidated the cumulative-score cache (lib/scoreStore.ts), so the sidebar (and
+      // everything else reading that cache) kept showing whatever was cached before this session,
+      // including after a full app restart, since that cache is localStorage. The MCQ play flow
+      // (app/activities/[slug]/play/page.tsx's own handleFinishSummary) already refreshed it
+      // correctly; this brings the LLM-graded flow in line with the same call.
       await Promise.all([
+        refreshScore(),
         loadCompletedAttempts(token, profile.user_id, activity.activityType, { forceRefresh: true }),
         loadActivityLog(token, profile.user_id, { forceRefresh: true }),
       ]);

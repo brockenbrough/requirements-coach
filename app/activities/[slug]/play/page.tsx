@@ -19,10 +19,10 @@ import {
   loadCurrentSession,
   loadFeedback,
   loadSessions,
-  loadStudentScore,
   loadStudentTitles,
   submitAnswer,
 } from "../../../../lib/sessionClient";
+import { useUser } from "../../../../components/UserProvider";
 import { useRequireRole } from "../../../../lib/useRequireRole";
 import { useResolvedActivity } from "../../../../lib/useResolvedActivity";
 import { LlmPlayView } from "../../../../components/LlmPlayView";
@@ -49,6 +49,7 @@ function QuizPlayView({
   // Also redirects an instructor account away (GitHub #82) — this page is the "quiz
   // durchführen" flow itself, exactly what an instructor must not be able to reach.
   const { token, profile, loading, authorized } = useRequireRole("student");
+  const { refreshScore } = useUser();
   const { activity, status: activityStatus } = useResolvedActivity(token, params.slug);
 
   const [session, setSession] = useState<CurrentSessionResult | null>(null);
@@ -301,7 +302,7 @@ function QuizPlayView({
       // page's cache is already up to date when it mounts — without this the
       // "previous attempts" table still shows the stale list (GitHub #130).
       await Promise.all([
-        loadStudentScore(token, profile.user_id, { forceRefresh: true }),
+        refreshScore(),
         loadSessions(token, "completed", {
           studentId: profile.user_id,
           forceRefresh: true,

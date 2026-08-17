@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { clearStoredAccessToken, getStoredAccessToken, refreshAccessToken } from '../lib/authClient';
+import { loadStudentScore } from '../lib/sessionClient';
 
 export type Role = 'student' | 'instructor';
 
@@ -29,6 +30,21 @@ type UserContextValue = {
   refresh: () => Promise<void>;
   /** Clear token + profile on logout. */
   signOut: () => void;
+  /**
+   * The signed-in student's cumulative score (REQ-GAM-DL-1) — null while loading, and for an
+   * instructor, who has none. GitHub #392: this is the one app-wide copy every display of the
+   * score (the sidebar pill below, and anything reading lib/scoreStore.ts's cache) is meant to
+   * agree with; keeping it here instead of duplicating a fetch+useState in AppShell means there
+   * is exactly one effect that loads it and exactly one function that invalidates it.
+   */
+  score: number | null;
+  /**
+   * Re-fetches the score from the server (bypassing the cache) and pushes the fresh value into
+   * this context. Call this once after a session completes — every play flow (MCQ and LLM-graded
+   * alike) must call it, since neither the sidebar nor lib/scoreStore.ts's cache otherwise has any
+   * way to learn that a just-finished session changed the total.
+   */
+  refreshScore: () => Promise<void>;
 };
 
 const UserContext = createContext<UserContextValue | null>(null);
@@ -76,6 +92,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [profile, setProfileState] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [score, setScore] = useState<number | null>(null);
 
   const refresh = useCallback(async () => {
     const stored = getStoredAccessToken();
@@ -147,10 +164,43 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     clearStoredAccessToken();
     setToken(null);
     setProfileState(null);
+    setScore(null);
   }
 
+  // Score is a student-only concept (an instructor has no sessions of their own), keyed on the
+  // primitives rather than `profile` itself so a token refresh (which doesn't touch profile) or
+  // an unrelated setProfile call doesn't re-trigger a fetch this effect doesn't actually need —
+  // the same dependency shape AppShell's own score effect used before this moved here.
+  const userId = profile?.user_id;
+  const role = profile?.role;
+
+  useEffect(() => {
+    if (!token || !userId || role !== 'student') {
+      setScore(null);
+      return;
+    }
+
+    let cancelled = false;
+    loadStudentScore(token, userId).then((result) => {
+      if (cancelled) return;
+      if (result.ok) setScore(result.data.score);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, userId, role]);
+
+  const refreshScore = useCallback(async () => {
+    if (!token || !userId || role !== 'student') return;
+    const result = await loadStudentScore(token, userId, { forceRefresh: true });
+    if (result.ok) setScore(result.data.score);
+  }, [token, userId, role]);
+
   return (
-    <UserContext.Provider value={{ token, profile, loading, setProfile: setProfileState, refresh, signOut }}>
+    <UserContext.Provider
+      value={{ token, profile, loading, setProfile: setProfileState, refresh, signOut, score, refreshScore }}
+    >
       {children}
     </UserContext.Provider>
   );
