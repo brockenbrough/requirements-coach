@@ -1,5 +1,6 @@
 import { getSupabaseClient } from '../../../../../lib/supabase';
 import { requireInstructor } from '../../../../../lib/instructorAuth';
+import { listOwnedActivityTypes } from '../../../../../lib/activityTypeQueries';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -15,7 +16,7 @@ type SubmissionRow = {
   submitted_at: string;
   graded_at: string | null;
   student: { user_id: string; first_name: string | null; last_name: string | null; username: string | null; role: string };
-  story: { story_text: string; difficulty_level: number };
+  story: { story_text: string; difficulty_level: number; activity_type: string };
 };
 
 function studentDisplayName(student: SubmissionRow['student']): string {
@@ -24,8 +25,12 @@ function studentDisplayName(student: SubmissionRow['student']): string {
 }
 
 /**
- * GET /api/instructor/acceptance-criteria/submissions — all AC submissions across the class,
- * optionally filtered to one student via ?studentId= (GitHub #154).
+ * GET /api/instructor/acceptance-criteria/submissions — AC submissions on the llm-graded activity
+ * types this instructor created, optionally filtered to one student via ?studentId= (GitHub
+ * #154). Scoped the same way computeAcceptanceCriteriaStatistics is: listOwnedActivityTypes(...,
+ * 'llm-graded') first, short-circuiting to an empty list when the instructor owns none — see that
+ * function's docstring (lib/acceptanceCriteriaStatisticsQueries.ts) for why this reads empty for
+ * every instructor today (WRITE_ACCEPTANCE_CRITERIA is a built-in, creator_id IS NULL).
  *
  * Gated by requireInstructor; uses the service-role client to bypass RLS. The own_submissions_select
  * policy restricts students to their own rows, so a student cannot reach this route at all — but
@@ -51,14 +56,25 @@ export async function GET(request: Request) {
         );
   }
 
+  const { activityTypes: ownedTypes, error: ownedError } = await listOwnedActivityTypes(
+    supabase,
+    guard.user_id,
+    'llm-graded',
+  );
+  if (ownedError || !ownedTypes) {
+    return Response.json({ error: ownedError?.message ?? 'Could not load your catalogs.' }, { status: 500 });
+  }
+  if (ownedTypes.length === 0) return Response.json({ submissions: [] }, { status: 200 });
+
   const studentId = new URL(request.url).searchParams.get('studentId');
 
   let query = supabase
     .from('submission')
     .select(
-      'submission_id, submitted_text, llm_score, llm_feedback, submitted_at, graded_at, student:user!inner(user_id, first_name, last_name, username, role), story:user_story!inner(story_text, difficulty_level)',
+      'submission_id, submitted_text, llm_score, llm_feedback, submitted_at, graded_at, student:user!inner(user_id, first_name, last_name, username, role), story:user_story!inner(story_text, difficulty_level, activity_type)',
     )
     .eq('student.role', 'student')
+    .in('story.activity_type', ownedTypes)
     .order('submitted_at', { ascending: false });
 
   if (studentId) query = query.eq('user_id', studentId);

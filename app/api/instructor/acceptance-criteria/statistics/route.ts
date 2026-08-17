@@ -8,12 +8,13 @@ function getToken(request: Request): string | null {
 }
 
 /**
- * GET /api/instructor/acceptance-criteria/statistics — class-wide aggregates for the
- * write-acceptance-criteria activity (GitHub #152).
+ * GET /api/instructor/acceptance-criteria/statistics — aggregates for the llm-graded activity
+ * types this instructor created (GitHub #152). See computeAcceptanceCriteriaStatistics
+ * (lib/acceptanceCriteriaStatisticsQueries.ts) for exactly what "created" scopes to.
  *
- * An empty submission table still returns 200 with zeroed stats — no submissions yet is a
- * normal state, not an error. No per-student data is returned; use the per-student route for
- * individual review.
+ * An empty submission table, or an instructor who owns no llm-graded catalog, still returns 200
+ * with zeroed stats — no submissions yet is a normal state, not an error. No per-student data is
+ * returned; use the per-student route for individual review.
  */
 export async function GET(request: Request) {
   const supabase = getSupabaseClient();
@@ -29,7 +30,7 @@ export async function GET(request: Request) {
         );
   }
 
-  const { statistics, error } = await computeAcceptanceCriteriaStatistics(supabase);
+  const { statistics, error } = await computeAcceptanceCriteriaStatistics(supabase, guard.user_id);
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
   return Response.json({ statistics }, { status: 200 });

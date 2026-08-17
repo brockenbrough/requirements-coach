@@ -2,13 +2,25 @@
 // Same shape as instructorStudentsStore: versioned key, SSR-guarded read/write, only typed
 // getter/setter exported — no raw store object.
 //
+// v2: the cached value grew a second field, ownedActivityTypes (GitHub #171 follow-up — the
+// Instructor Dashboard's stat cards need the instructor's full owned-catalog list, not just the
+// sessions derived from it), so the key bumped from v1 to v2 rather than reshaping the old one —
+// an old v1 value under the old key is simply never read again instead of being misread as the
+// new shape.
+//
 // Keyed by the instructor's user_id so a shared browser does not hand one instructor's cache
 // to the next. Cleared on logout alongside every other cache that holds students' personal data.
 import type { InstructorActivityEntry } from './sessionTypes';
+import type { OwnedActivityTypeSummary } from './activityTypeQueries';
 
-const STORAGE_KEY = 'rc_instructor_activity_v1';
+const STORAGE_KEY = 'rc_instructor_activity_v2';
 
-type InstructorActivityStore = Partial<Record<string, InstructorActivityEntry[]>>;
+type CachedInstructorActivity = {
+  sessions: InstructorActivityEntry[];
+  ownedActivityTypes: OwnedActivityTypeSummary[];
+};
+
+type InstructorActivityStore = Partial<Record<string, CachedInstructorActivity>>;
 
 function readStore(): InstructorActivityStore {
   if (typeof window === 'undefined') return {};
@@ -25,14 +37,28 @@ function writeStore(store: InstructorActivityStore) {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
 }
 
-export function getCachedInstructorActivities(instructorId: string): InstructorActivityEntry[] | null {
-  const store = readStore();
-  return store[instructorId] ?? null;
+/**
+ * Guards against a malformed entry under this key — not just unparseable JSON (readStore's
+ * try/catch already covers that), but a value that parses fine and is still the wrong shape, e.g.
+ * written by a build from before ownedActivityTypes existed. localStorage is plain, untyped
+ * client state; nothing stops a stale write, a hand-edited value, or a future shape change from
+ * landing here looking valid to JSON.parse but wrong to every reader. A caller that trusted this
+ * blindly would crash on `.sessions.map(...)` the moment the shape didn't match.
+ */
+function isCachedInstructorActivity(value: unknown): value is CachedInstructorActivity {
+  const candidate = value as Partial<CachedInstructorActivity> | null | undefined;
+  return Array.isArray(candidate?.sessions) && Array.isArray(candidate?.ownedActivityTypes);
 }
 
-export function setCachedInstructorActivities(instructorId: string, activities: InstructorActivityEntry[]): void {
+export function getCachedInstructorActivities(instructorId: string): CachedInstructorActivity | null {
   const store = readStore();
-  store[instructorId] = activities;
+  const cached = store[instructorId];
+  return isCachedInstructorActivity(cached) ? cached : null;
+}
+
+export function setCachedInstructorActivities(instructorId: string, data: CachedInstructorActivity): void {
+  const store = readStore();
+  store[instructorId] = data;
   writeStore(store);
 }
 

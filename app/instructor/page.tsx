@@ -23,7 +23,12 @@ import {
   type AcceptanceCriteriaStatistics,
 } from '../../lib/acceptanceCriteriaClient';
 import { summarizeStudents, toAcSubmissionRow, toQuizAttemptRow, type ActivityRow } from '../../lib/activityLogTypes';
-import { loadInstructorActivities, loadInstructorStudents, type StudentSummary } from '../../lib/sessionClient';
+import {
+  loadInstructorActivities,
+  loadInstructorStudents,
+  type OwnedActivityTypeSummary,
+  type StudentSummary,
+} from '../../lib/sessionClient';
 import { useRequireRole } from '../../lib/useRequireRole';
 
 const PAGE_SIZE = 10;
@@ -45,6 +50,7 @@ function InstructorDashboardContent() {
   const searchParams = useSearchParams();
 
   const [entries, setEntries] = useState<ActivityRow[] | null>(null);
+  const [ownedActivityTypes, setOwnedActivityTypes] = useState<OwnedActivityTypeSummary[]>([]);
   const [allStudents, setAllStudents] = useState<StudentSummary[] | null>(null);
   const [acStatistics, setAcStatistics] = useState<AcceptanceCriteriaStatistics | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -89,6 +95,7 @@ function InstructorDashboardContent() {
         ...activitiesResult.data.sessions.map(toQuizAttemptRow),
         ...submissionsResult.data.submissions.map(toAcSubmissionRow),
       ]);
+      setOwnedActivityTypes(activitiesResult.data.ownedActivityTypes);
       // A failed statistics fetch costs the participation metric, not the whole dashboard —
       // InstructorActivityStats renders a placeholder for a null value.
       if (statisticsResult.ok) setAcStatistics(statisticsResult.data.statistics);
@@ -120,6 +127,7 @@ function InstructorDashboardContent() {
         ...activitiesResult.data.sessions.map(toQuizAttemptRow),
         ...submissionsResult.data.submissions.map(toAcSubmissionRow),
       ]);
+      setOwnedActivityTypes(activitiesResult.data.ownedActivityTypes);
       if (statisticsResult.ok) setAcStatistics(statisticsResult.data.statistics);
       setError(null);
     });
@@ -203,7 +211,7 @@ function InstructorDashboardContent() {
           </button>
         </div>
         <p className="mb-6 max-w-2xl text-sm font-semibold text-gray-500">
-          Every student&apos;s activity, across every activity type — filter by student or level, or sort to surface who needs a
+          Activity on quizzes and catalogs you created — filter by student or level, or sort to surface who needs a
           hand.
         </p>
 
@@ -213,11 +221,12 @@ function InstructorDashboardContent() {
           </p>
         ) : entries === null ? (
           <InstructorDashboardSkeleton />
-        ) : entries.length === 0 ? (
-          // Both GET /api/instructor/activities and GET /api/instructor/acceptance-criteria/
-          // submissions answer 200 [] for a class that has not started anything (by design —
-          // see their docstrings). Rendering the full dashboard here would show empty stat
-          // tiles and the table's "No attempts match these filters." message, which blames
+        ) : entries.length === 0 && ownedActivityTypes.length === 0 ? (
+          // Both zero attempts AND zero owned catalogs — genuinely nothing to show. An instructor
+          // who owns a catalog but has no attempts yet does NOT hit this branch: they still get a
+          // real stat card (with '—' placeholders, GitHub #171 follow-up) rather than being told
+          // there's nothing here. Rendering the full dashboard when there's truly nothing at all
+          // would show the table's "No attempts match these filters." message, which blames
           // filters the instructor never set (GitHub #174).
           <div className="rounded-brand-lg border border-gray-100 bg-gray-50 p-10 text-center">
             <p className="text-sm font-extrabold text-brand-navy">No activity yet</p>
@@ -229,6 +238,7 @@ function InstructorDashboardContent() {
           <>
             <InstructorActivityStats
               entries={entries}
+              ownedActivityTypes={ownedActivityTypes}
               acParticipation={
                 acStatistics === null || allStudents === null
                   ? null

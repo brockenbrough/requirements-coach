@@ -17,6 +17,14 @@ export type ActivityType = string;
 import type { SupabaseClient } from './sessionQueries';
 
 /**
+ * The two grading paths an activity_type row can take (ck_activity_type_grading_kind in
+ * supabase/schema.sql) — 'mcq' draws from question/answer, 'llm-graded' from user_story/
+ * instructor_llm_config. The column has existed since before this type did; this is only the
+ * first reader of it (see lib/activityTypeQueries.ts's listOwnedActivityTypes).
+ */
+export type GradingKind = 'mcq' | 'llm-graded';
+
+/**
  * True if `value` is a real key in the activity_type table — a built-in quiz or one an
  * instructor created. Replaces the old synchronous, hardcoded check; every call site now needs
  * a Supabase client and an await.

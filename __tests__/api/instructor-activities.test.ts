@@ -3,10 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 type Result = { data?: unknown; error?: unknown };
 
 // Hoisted so the vi.mock factory below can close over it safely. Same harness as
-// __tests__/api/sessions.test.ts, with one addition: eq() is recorded rather than a no-op,
-// because "only rows whose student has role 'student'" is an acceptance criterion of this
-// endpoint and an ignored filter would let a wrong one pass unnoticed (the same reason
-// __tests__/lib/instructorAuth.test.ts records its filters).
+// __tests__/api/sessions.test.ts, with two additions: eq()/in() are recorded rather than no-ops,
+// because "only rows whose student has role 'student'" and "only this instructor's own mcq
+// activity types" are acceptance criteria of this endpoint and an ignored filter would let a
+// wrong one pass unnoticed (the same reason __tests__/lib/instructorAuth.test.ts records its
+// filters).
 const h = vi.hoisted(() => {
   const state = {
     queues: {} as Record<string, Result[]>,
@@ -22,15 +23,13 @@ const h = vi.hoisted(() => {
         state.filters.push({ table, column, value });
         return builder;
       },
-      // Recorded like eq() rather than a no-op: excluding WRITE_ACCEPTANCE_CRITERIA from this
-      // query is an acceptance criterion (it's shown via a separate submissions route by the
-      // combined Instructor Dashboard instead), not incidental — an ignored filter would let a
-      // regression back in unnoticed.
-      neq: (column: string, value: unknown) => {
-        state.filters.push({ table, column: `${column} (neq)`, value });
+      // Recorded like eq() rather than a no-op: scoping session_log to this instructor's own
+      // owned mcq activity types is an acceptance criterion, not incidental — an ignored filter
+      // would let a regression back in unnoticed.
+      in: (column: string, value: unknown) => {
+        state.filters.push({ table, column: `${column} (in)`, value });
         return builder;
       },
-      in: () => builder,
       order: (column: string, opts?: { ascending?: boolean }) => {
         state.orders.push({ table, column, ascending: opts?.ascending ?? true });
         return builder;
@@ -75,6 +74,21 @@ function queueRole(role: string) {
   queue('user', { data: { role }, error: null });
 }
 
+/**
+ * listOwnedActivityTypeSummaries' query — one activity_type round trip, both grading kinds at
+ * once. Must be queued before session_log in every test that expects session_log to actually be
+ * reached, since an un-queued table resolves to { data: null } and the route short-circuits on
+ * that (via mcqTypes ending up empty).
+ */
+function queueOwnedActivityTypeSummaries(
+  summaries: { activityType: string; name: string; gradingKind: 'mcq' | 'llm-graded' }[],
+) {
+  queue('activity_type', {
+    data: summaries.map((s) => ({ activity_type: s.activityType, quiz_name: s.name, grading_kind: s.gradingKind })),
+    error: null,
+  });
+}
+
 function sessionRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     session_id: 'session-1',
@@ -108,6 +122,7 @@ beforeEach(() => {
 describe('GET /api/instructor/activities', () => {
   it('returns every student’s attempts, with studentId and studentName on each', async () => {
     queueRole('instructor');
+    queueOwnedActivityTypeSummaries([{ activityType: 'IDENTIFY_WEAK_USER_STORIES', name: 'Identify Weak User Stories', gradingKind: 'mcq' }]);
     queue('session_log', {
       data: [
         sessionRow(),
@@ -165,8 +180,24 @@ describe('GET /api/instructor/activities', () => {
     });
   });
 
+  it('returns the instructor’s owned activity types alongside the sessions', async () => {
+    queueRole('instructor');
+    queueOwnedActivityTypeSummaries([
+      { activityType: 'IDENTIFY_WEAK_USER_STORIES', name: 'Identify Weak User Stories', gradingKind: 'mcq' },
+    ]);
+    queue('session_log', { data: [], error: null });
+
+    const response = await GET(request('valid-token'));
+    const body = await response.json();
+
+    expect(body.ownedActivityTypes).toEqual([
+      { activityType: 'IDENTIFY_WEAK_USER_STORIES', name: 'Identify Weak User Stories', gradingKind: 'mcq' },
+    ]);
+  });
+
   it('does not leak the joined "user" row into the response', async () => {
     queueRole('instructor');
+    queueOwnedActivityTypeSummaries([{ activityType: 'IDENTIFY_WEAK_USER_STORIES', name: 'Identify Weak User Stories', gradingKind: 'mcq' }]);
     queue('session_log', { data: [sessionRow()], error: null });
     queue('session_to_question', { data: [], error: null });
     queue('answered_question_log', { data: [], error: null });
@@ -181,6 +212,7 @@ describe('GET /api/instructor/activities', () => {
 
   it('serves no question prompts, options, is_correct or explanation', async () => {
     queueRole('instructor');
+    queueOwnedActivityTypeSummaries([{ activityType: 'IDENTIFY_WEAK_USER_STORIES', name: 'Identify Weak User Stories', gradingKind: 'mcq' }]);
     queue('session_log', { data: [sessionRow()], error: null });
     queue('session_to_question', { data: [], error: null });
     queue('answered_question_log', { data: [], error: null });
@@ -194,6 +226,7 @@ describe('GET /api/instructor/activities', () => {
 
   it('filters to role student, so an instructor’s own sessions stay out of their report', async () => {
     queueRole('instructor');
+    queueOwnedActivityTypeSummaries([{ activityType: 'IDENTIFY_WEAK_USER_STORIES', name: 'Identify Weak User Stories', gradingKind: 'mcq' }]);
     queue('session_log', { data: [], error: null });
 
     await GET(request('valid-token'));
@@ -201,25 +234,55 @@ describe('GET /api/instructor/activities', () => {
     expect(h.state.filters).toContainEqual({ table: 'session_log', column: 'student.role', value: 'student' });
   });
 
-  // app/instructor/page.tsx (GitHub #276) already merges this route's response with
-  // GET /api/instructor/acceptance-criteria/submissions client-side. Now that
-  // WRITE_ACCEPTANCE_CRITERIA sessions have real session_log rows too, this query must keep
-  // excluding them — otherwise every AC attempt would render twice on the combined dashboard.
-  it('excludes Write Acceptance Criteria sessions, which the combined dashboard already gets from the submissions route', async () => {
+  it('scopes activity_type to this instructor’s own creator_id', async () => {
     queueRole('instructor');
+    queueOwnedActivityTypeSummaries([]);
+
+    await GET(request('valid-token'));
+
+    expect(h.state.filters).toContainEqual({ table: 'activity_type', column: 'creator_id', value: 'instructor-1' });
+  });
+
+  // app/instructor/page.tsx (GitHub #276) already merges this route's response with
+  // GET /api/instructor/acceptance-criteria/submissions client-side. WRITE_ACCEPTANCE_CRITERIA
+  // (and any future llm-graded catalog) sessions have real session_log rows too, so this query
+  // must keep excluding them — otherwise every AC attempt would render twice on the combined
+  // dashboard. Only the mcq-kind subset of ownedActivityTypes ever reaches session_log's
+  // .in(...) filter, so an llm-graded catalog can never enter it, even if the instructor owns one.
+  it('scopes session_log to only the mcq-kind owned types, carrying them through as .in(...)', async () => {
+    queueRole('instructor');
+    queueOwnedActivityTypeSummaries([
+      { activityType: 'IDENTIFY_WEAK_USER_STORIES', name: 'Identify Weak User Stories', gradingKind: 'mcq' },
+      { activityType: 'WRITE_STRONG_USER_STORIES', name: 'Write Strong User Stories', gradingKind: 'mcq' },
+      { activityType: 'MY_LLM_CATALOG', name: 'My LLM Catalog', gradingKind: 'llm-graded' },
+    ]);
     queue('session_log', { data: [], error: null });
 
     await GET(request('valid-token'));
 
     expect(h.state.filters).toContainEqual({
       table: 'session_log',
-      column: 'activity_type (neq)',
-      value: 'WRITE_ACCEPTANCE_CRITERIA',
+      column: 'activity_type (in)',
+      value: ['IDENTIFY_WEAK_USER_STORIES', 'WRITE_STRONG_USER_STORIES'],
     });
+  });
+
+  it('answers 200 with sessions: [], without ever querying session_log, when the instructor owns only llm-graded types — but still reports them in ownedActivityTypes', async () => {
+    queueRole('instructor');
+    queueOwnedActivityTypeSummaries([{ activityType: 'MY_LLM_CATALOG', name: 'My LLM Catalog', gradingKind: 'llm-graded' }]);
+
+    const response = await GET(request('valid-token'));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.sessions).toEqual([]);
+    expect(body.ownedActivityTypes).toEqual([{ activityType: 'MY_LLM_CATALOG', name: 'My LLM Catalog', gradingKind: 'llm-graded' }]);
+    expect(h.state.tables).not.toContain('session_log');
   });
 
   it('sorts in the query: ended_at desc, then started_at desc', async () => {
     queueRole('instructor');
+    queueOwnedActivityTypeSummaries([{ activityType: 'IDENTIFY_WEAK_USER_STORIES', name: 'Identify Weak User Stories', gradingKind: 'mcq' }]);
     queue('session_log', { data: [], error: null });
 
     await GET(request('valid-token'));
@@ -236,6 +299,7 @@ describe('GET /api/instructor/activities', () => {
 
   it('falls back to the username when the profile has no first/last name', async () => {
     queueRole('instructor');
+    queueOwnedActivityTypeSummaries([{ activityType: 'IDENTIFY_WEAK_USER_STORIES', name: 'Identify Weak User Stories', gradingKind: 'mcq' }]);
     queue('session_log', {
       data: [sessionRow({ student: { first_name: null, last_name: null, username: 'quiet-owl', role: 'student' } })],
       error: null,
@@ -251,19 +315,33 @@ describe('GET /api/instructor/activities', () => {
 
   it('answers 200 with an empty list for a class that has not started anything', async () => {
     queueRole('instructor');
+    queueOwnedActivityTypeSummaries([{ activityType: 'IDENTIFY_WEAK_USER_STORIES', name: 'Identify Weak User Stories', gradingKind: 'mcq' }]);
     queue('session_log', { data: [], error: null });
 
     const response = await GET(request('valid-token'));
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body).toEqual({ sessions: [] });
+    expect(body.sessions).toEqual([]);
     // loadProgressForSessions short-circuits on an empty id list rather than querying for nothing.
     expect(h.state.tables).not.toContain('session_to_question');
   });
 
+  it('answers 200 with an empty list, without ever querying session_log, when the instructor owns no activity types at all', async () => {
+    queueRole('instructor');
+    queueOwnedActivityTypeSummaries([]);
+
+    const response = await GET(request('valid-token'));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ sessions: [], ownedActivityTypes: [] });
+    expect(h.state.tables).not.toContain('session_log');
+  });
+
   it('rejects a student with 403 and an empty body, before reading any session', async () => {
     queueRole('student');
+    queueOwnedActivityTypeSummaries([{ activityType: 'IDENTIFY_WEAK_USER_STORIES', name: 'Identify Weak User Stories', gradingKind: 'mcq' }]);
     queue('session_log', { data: [sessionRow()], error: null });
 
     const response = await GET(request('valid-token'));
@@ -299,8 +377,21 @@ describe('GET /api/instructor/activities', () => {
     expect(h.state.tables).not.toContain('session_log');
   });
 
+  it('answers 500 when the owned-activity-type lookup fails, without querying session_log', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: null, error: { message: 'boom' } });
+
+    const response = await GET(request('valid-token'));
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body.error).toBe('boom');
+    expect(h.state.tables).not.toContain('session_log');
+  });
+
   it('answers 500 when the session query fails', async () => {
     queueRole('instructor');
+    queueOwnedActivityTypeSummaries([{ activityType: 'IDENTIFY_WEAK_USER_STORIES', name: 'Identify Weak User Stories', gradingKind: 'mcq' }]);
     queue('session_log', { data: null, error: { message: 'boom' } });
 
     const response = await GET(request('valid-token'));

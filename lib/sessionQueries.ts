@@ -435,15 +435,25 @@ function studentDisplayName(student: EmbeddedStudent): string {
 }
 
 /**
- * Every student's attempts across the whole class, newest first (GitHub #171) — the real data
- * behind the Instructor Dashboard.
+ * Every student's attempts on the given mcq-kind catalogs, newest first — the real data behind
+ * the Instructor Dashboard.
+ *
+ * A pure fetch, not an ownership check: ownedMcqTypes is whatever the caller has already decided
+ * this instructor owns. GET /api/instructor/activities derives it from one
+ * listOwnedActivityTypeSummaries(supabase, instructorId) call (lib/activityTypeQueries.ts),
+ * filtered to grading_kind 'mcq' — deliberately not looked up again in here, so a dashboard load
+ * costs one activity_type round trip total instead of one per caller that needs ownership. An
+ * empty list short-circuits before session_log is ever queried; a built-in catalog (creator_id IS
+ * NULL) can never appear in ownedMcqTypes for any instructor, so a fresh instructor with no
+ * catalog of their own gets an empty result here, which is the correct "nothing to show yet"
+ * state, not a bug.
  *
  * The class-wide counterpart to loadActivityLog: same merged timeline of in-progress,
- * completed and abandoned sessions, but without that one's .eq('user_id', …) scope. Nothing in
- * the database restricts this — every data route uses the service-role client, which bypasses
- * the own_sessions_select policy — so the caller MUST run requireInstructor first. Reading
- * another student's rows is exactly what this query is for, and exactly what the guard exists
- * to gate.
+ * completed and abandoned sessions, but scoped by ownedMcqTypes instead of that one's
+ * .eq('user_id', …) scope. Nothing in the database restricts this — every data route uses the
+ * service-role client, which bypasses the own_sessions_select policy — so the caller MUST run
+ * requireInstructor first. Reading another student's rows is exactly what this query is for, and
+ * exactly what the guard exists to gate.
  *
  * Ordered in the query rather than in JS the way loadActivityLog does it. started_at is the
  * secondary key for the same reason as in loadCompletedAttempts: Postgres orders DESC as NULLS
@@ -453,22 +463,28 @@ function studentDisplayName(student: EmbeddedStudent): string {
  * Carries no question prompts, options, is_correct or explanation — this answers "who did what
  * and how did it go", so SESSION_COLUMNS is the whole payload.
  *
- * Excludes WRITE_ACCEPTANCE_CRITERIA session_log rows: this is the query behind
- * loadInstructorActivities, which app/instructor/page.tsx (GitHub #276) already merges
- * client-side with GET /api/instructor/acceptance-criteria/submissions (one row per graded
- * submission, via toAcSubmissionRow) into the combined dashboard. Now that AC attempts have real
- * session_log rows too, including them here as well would show every AC attempt twice — once
- * (correctly) as a submission row, once (redundantly, and mislabeled as a quiz) as a session row.
+ * Excludes every llm-graded activity type (WRITE_ACCEPTANCE_CRITERIA included) by construction,
+ * not by name: the caller only ever passes mcq-kind keys in ownedMcqTypes, so an llm-graded
+ * catalog — this instructor's own or anyone else's — can never reach this query. This is the
+ * query behind loadInstructorActivities, which app/instructor/page.tsx (GitHub #276) already
+ * merges client-side with GET /api/instructor/acceptance-criteria/submissions (one row per graded
+ * submission, via toAcSubmissionRow) into the combined dashboard; AC attempts have real session_log
+ * rows too, so including them here as well would show every AC attempt twice — once (correctly)
+ * as a submission row, once (redundantly, and mislabeled as a quiz) as a session row. The mcq-only
+ * contract is what keeps that true even once an instructor's own llm-graded catalog has real
+ * session_log rows, not just for the one hardcoded built-in type.
  * loadStudentActivityForIds has no such second source to double against — the course CSV export
  * is the only thing that reads it, and there's no separate AC-submissions merge there — so it
  * deliberately keeps including every activity type.
  */
-export async function loadAllStudentActivity(supabase: SupabaseClient) {
+export async function loadAllStudentActivity(supabase: SupabaseClient, ownedMcqTypes: string[]) {
+  if (ownedMcqTypes.length === 0) return { activities: [], error: null };
+
   const { data, error } = await supabase
     .from('session_log')
     .select(`${SESSION_COLUMNS}, ${STUDENT_EMBED}`)
     .eq('student.role', 'student')
-    .neq('activity_type', 'WRITE_ACCEPTANCE_CRITERIA')
+    .in('activity_type', ownedMcqTypes)
     .order('ended_at', { ascending: false })
     .order('started_at', { ascending: false });
 
