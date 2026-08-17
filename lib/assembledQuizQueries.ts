@@ -194,6 +194,88 @@ export async function deleteAssembledQuiz(supabase: SupabaseClient, quizId: stri
 }
 
 /** Every activity_type this quiz currently draws from, for validation and composition queries. */
+export type CourseQuizStat = {
+  quizId: string;
+  quizName: string;
+  classAverage: number;
+  passRate: number;
+  completionCount: number;
+  enrolledCount: number;
+};
+
+/**
+ * Per-assembled-quiz stats for a course: class average, pass rate, and how many enrolled
+ * students completed at least one session for any catalog in that quiz.
+ */
+export async function computeCourseQuizStats(
+  supabase: SupabaseClient,
+  courseId: string,
+): Promise<{ stats: CourseQuizStat[] | null; error: { message: string } | null }> {
+  type QuizRow = {
+    assembled_quiz_id: string;
+    quiz_name: string;
+    assembled_quiz_catalog: { activity_type: string }[] | null;
+  };
+  type SessionRow = { activity_type: string; cumulative_score: number; max_score: number; passed: boolean; user_id: string };
+
+  const [quizzesResult, enrolledResult] = await Promise.all([
+    supabase
+      .from('assembled_quiz')
+      .select('assembled_quiz_id, quiz_name, assembled_quiz_catalog(activity_type)')
+      .eq('course_id', courseId),
+    supabase.from('student_course').select('user_id').eq('course_id', courseId),
+  ]);
+
+  if (quizzesResult.error) return { stats: null, error: quizzesResult.error };
+  if (enrolledResult.error) return { stats: null, error: enrolledResult.error };
+
+  const quizzes = (quizzesResult.data ?? []) as unknown as QuizRow[];
+  const studentIds = ((enrolledResult.data ?? []) as { user_id: string }[]).map((r) => r.user_id);
+  const enrolledCount = studentIds.length;
+
+  if (quizzes.length === 0) return { stats: [], error: null };
+
+  const allActivityTypes = [...new Set(quizzes.flatMap((q) => (q.assembled_quiz_catalog ?? []).map((c) => c.activity_type)))];
+
+  let sessionQuery = supabase
+    .from('session_log')
+    .select('activity_type, cumulative_score, max_score, passed, user_id')
+    .eq('status', 'completed')
+    .in('activity_type', allActivityTypes);
+
+  if (studentIds.length > 0) sessionQuery = sessionQuery.in('user_id', studentIds);
+
+  const { data: sessionRows, error: sessionError } = await sessionQuery;
+  if (sessionError) return { stats: null, error: sessionError };
+
+  const sessions = (sessionRows ?? []) as SessionRow[];
+
+  const stats: CourseQuizStat[] = quizzes.map((quiz) => {
+    const quizActivityTypes = new Set((quiz.assembled_quiz_catalog ?? []).map((c) => c.activity_type));
+    const quizSessions = sessions.filter((s) => quizActivityTypes.has(s.activity_type));
+
+    const completionCount = new Set(quizSessions.map((s) => s.user_id)).size;
+
+    if (quizSessions.length === 0) {
+      return { quizId: quiz.assembled_quiz_id, quizName: quiz.quiz_name, classAverage: 0, passRate: 0, completionCount, enrolledCount };
+    }
+
+    const totalPercent = quizSessions.reduce((sum, s) => sum + (s.max_score > 0 ? (s.cumulative_score / s.max_score) * 100 : 0), 0);
+    const passCount = quizSessions.filter((s) => s.passed).length;
+
+    return {
+      quizId: quiz.assembled_quiz_id,
+      quizName: quiz.quiz_name,
+      classAverage: Math.round(totalPercent / quizSessions.length),
+      passRate: Math.round((passCount / quizSessions.length) * 100),
+      completionCount,
+      enrolledCount,
+    };
+  });
+
+  return { stats, error: null };
+}
+
 export async function listQuizCatalogActivityTypes(supabase: SupabaseClient, quizId: string) {
   const { data, error } = await supabase.from('assembled_quiz_catalog').select('activity_type').eq('assembled_quiz_id', quizId);
   if (error) return { activityTypes: null, error };

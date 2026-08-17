@@ -156,6 +156,24 @@ export function loadCourseQuizzes(token: string, courseId: string): Promise<ApiR
   );
 }
 
+export type CourseActivityStats = {
+  quizId: string;
+  quizName: string;
+  classAverage: number;
+  passRate: number;
+  completionCount: number;
+  enrolledCount: number;
+};
+
+/** Per-quiz completion stats scoped to a course (GET /api/instructor/statistics?courseId=). */
+export function loadCourseStats(token: string, courseId: string): Promise<ApiResult<{ statistics: CourseActivityStats[] }>> {
+  return request<{ statistics: CourseActivityStats[] }>(
+    `/api/instructor/statistics?courseId=${encodeURIComponent(courseId)}`,
+    { method: 'GET' },
+    token,
+  );
+}
+
 /** Enrolls a student in a course (POST /api/instructor/courses/{id}/students). */
 export function addStudentToCourse(token: string, courseId: string, studentId: string): Promise<ApiResult<{ student: CourseStudent }>> {
   return request<{ student: CourseStudent }>(

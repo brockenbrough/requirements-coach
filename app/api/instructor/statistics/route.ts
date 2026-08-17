@@ -1,6 +1,8 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { requireInstructor } from '../../../../lib/instructorAuth';
 import { computeQuizStatistics } from '../../../../lib/quizStatisticsQueries';
+import { findOwnedCourse } from '../../../../lib/courseQueries';
+import { computeCourseQuizStats } from '../../../../lib/assembledQuizQueries';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -32,11 +34,23 @@ export async function GET(request: Request) {
         );
   }
 
+  const { searchParams } = new URL(request.url);
+  const courseId = searchParams.get('courseId');
+
+  if (courseId) {
+    const found = await findOwnedCourse(supabase, courseId, guard.user_id);
+    if (found.status === 'error') return Response.json({ error: found.error.message }, { status: 500 });
+    if (found.status === 'not_found') return Response.json({ error: 'Course not found.' }, { status: 404 });
+    if (found.status === 'forbidden') return new Response(null, { status: 403 });
+
+    const { stats, error } = await computeCourseQuizStats(supabase, courseId);
+    if (error) return Response.json({ error: error.message }, { status: 500 });
+    return Response.json({ statistics: stats ?? [] }, { status: 200 });
+  }
+
   const { statistics, error } = await computeQuizStatistics(supabase);
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
-  // AC: 404 when there are no quizzes at all — not to be confused with a quiz that simply has
-  // no completed attempts yet, which still gets an entry (at 0%/0%).
   if (!statistics || statistics.length === 0) {
     return Response.json({ error: 'No quizzes found for this professor.' }, { status: 404 });
   }
