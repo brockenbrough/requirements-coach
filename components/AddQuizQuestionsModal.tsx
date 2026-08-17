@@ -1,35 +1,93 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { addExtraQuestionsToQuiz, loadAllQuestionsForPicker, type PickableQuestion } from '../lib/assembledQuizClient';
+import {
+  addExtraQuestionsToQuiz,
+  addExtraUserStoriesToQuiz,
+  loadAllQuestionsForPicker,
+  type PickableQuestion,
+  type PickableUserStory,
+} from '../lib/assembledQuizClient';
 import { useModalDismiss } from './useModalDismiss';
 
 const LEVEL_LABEL: Record<1 | 2 | 3, string> = { 1: 'Easy', 2: 'Medium', 3: 'Hard' };
 const ALL_CATALOGS = 'all';
 const ALL_LEVELS = 'all';
+const ALL_TYPES = 'all';
+
+type PickerType = 'mcq' | 'llm-graded';
+
+function PickerRow({
+  id,
+  text,
+  level,
+  catalogName,
+  typeLabel,
+  alreadyIn,
+  selected,
+  onToggle,
+}: {
+  id: string;
+  text: string;
+  level: 1 | 2 | 3;
+  catalogName: string;
+  typeLabel: string;
+  alreadyIn: boolean;
+  selected: boolean;
+  onToggle: (id: string) => void;
+}) {
+  return (
+    <li>
+      <label className={`flex items-start gap-3 px-4 py-3 text-sm ${alreadyIn ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:bg-brand-navy'}`}>
+        <input
+          type="checkbox"
+          checked={alreadyIn || selected}
+          disabled={alreadyIn}
+          onChange={() => onToggle(id)}
+          className="mt-0.5 h-4 w-4 flex-none rounded border-brand-navy-border text-brand-purple focus:ring-brand-purple"
+        />
+        <span className="min-w-0 flex-1">
+          <span className="block font-semibold text-brand-ink">{text}</span>
+          <span className="mt-1 flex flex-wrap items-center gap-2 text-xs font-bold text-brand-ink-muted">
+            <span className="rounded-full bg-brand-purple/20 px-2 py-0.5 text-brand-purple">{typeLabel}</span>
+            <span className="rounded-full bg-brand-navy px-2 py-0.5">{catalogName}</span>
+            <span className="rounded-full bg-brand-navy px-2 py-0.5">{LEVEL_LABEL[level]}</span>
+            {alreadyIn ? <span className="rounded-full bg-brand-teal/20 px-2 py-0.5 text-brand-teal-dark">Already in quiz</span> : null}
+          </span>
+        </span>
+      </label>
+    </li>
+  );
+}
 
 /**
- * The popup that hand-picks individual questions onto an assembled quiz (GitHub #380), from any
- * catalog, without requiring that catalog to be linked to the quiz as a whole — see
- * assembled_quiz_extra_question's own header comment in supabase/schema.sql for why this is a
+ * The popup that hand-picks individual questions and prompts onto an assembled quiz (GitHub #380,
+ * extended with llm-graded parity), from any of the caller's own catalogs, without requiring that
+ * catalog to be linked to the quiz as a whole — see assembled_quiz_extra_question/
+ * assembled_quiz_extra_user_story's own header comments in supabase/schema.sql for why this is a
  * genuinely separate mechanism from "add a catalog". Same overlay/panel/header/footer chrome and
  * useModalDismiss wiring as CreateQuizModal/CreateCatalogModal.
  *
- * Fetches the whole system-wide question list once (loadAllQuestionsForPicker) and
+ * Fetches the whole picker list once (loadAllQuestionsForPicker, both pools) and
  * searches/filters it client-side, the same "fetch once, filter in the browser" choice
  * GET /api/instructor/quizzes' browse table already makes for catalogs — the picker route isn't
  * quiz-scoped, so `alreadyIncludedIds` (computed by the parent page from this quiz's own already-
- * loaded composition: active catalog questions plus existing hand-picks) is what marks a row as
- * already in the quiz, not anything the server returns.
+ * loaded composition: active catalog items plus existing hand-picks, both kinds) is what marks a
+ * row as already in the quiz, not anything the server returns.
  *
- * Selecting several questions and submitting once calls POST .../extra-questions with the whole
- * batch — one round trip, not one per checkbox.
+ * MCQ questions and LLM-graded prompts are rendered as two separately-headed, separately-counted
+ * sections (plus a Type filter to view just one) rather than one undifferentiated list — a badge
+ * per row alone wasn't enough to keep the two kinds visually apart once a catalog mixes both. The
+ * two kinds are always submitted through their own endpoint (POST .../extra-questions vs.
+ * POST .../extra-user-stories) since they're genuinely different tables; selecting one of each and
+ * submitting once still costs only two round trips total, not one per item.
  *
  * onCreateNew is the second entry point into GitHub #380's "create a brand-new question" flow —
  * a "Can't find it? Create a new question" link rather than a full form embedded here, since the
  * actual form is the existing QuestionFormModal, owned and rendered by the composition page
  * itself (not this modal); triggering it means handing control back to the parent, which closes
- * this modal and opens that one. Optional so this component doesn't require the capability if a
+ * this modal and opens that one. MCQ-only for now (llm-graded prompts have no equivalent
+ * create-and-hand-pick route yet). Optional so this component doesn't require the capability if a
  * future caller doesn't want it.
  */
 export function AddQuizQuestionsModal({
@@ -44,14 +102,16 @@ export function AddQuizQuestionsModal({
   quizId: string;
   alreadyIncludedIds: Set<string>;
   onClose: () => void;
-  onAdded: (questionIds: string[]) => void;
+  onAdded: (result: { questionIds: string[]; userStoryIds: string[] }) => void;
   onCreateNew?: () => void;
 }) {
   const [questions, setQuestions] = useState<PickableQuestion[] | null>(null);
+  const [userStories, setUserStories] = useState<PickableUserStory[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [query, setQuery] = useState('');
   const [catalogFilter, setCatalogFilter] = useState(ALL_CATALOGS);
   const [levelFilter, setLevelFilter] = useState<typeof ALL_LEVELS | 1 | 2 | 3>(ALL_LEVELS);
+  const [typeFilter, setTypeFilter] = useState<typeof ALL_TYPES | PickerType>(ALL_TYPES);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -65,8 +125,12 @@ export function AddQuizQuestionsModal({
     let cancelled = false;
     loadAllQuestionsForPicker(token).then((result) => {
       if (cancelled) return;
-      if (result.ok) setQuestions(result.data.questions);
-      else setLoadFailed(true);
+      if (result.ok) {
+        setQuestions(result.data.questions);
+        setUserStories(result.data.userStories);
+      } else {
+        setLoadFailed(true);
+      }
     });
     return () => {
       cancelled = true;
@@ -76,10 +140,12 @@ export function AddQuizQuestionsModal({
   const catalogs = useMemo(() => {
     const seen = new Map<string, string>();
     for (const question of questions ?? []) seen.set(question.catalogActivityType, question.catalogName);
+    for (const story of userStories ?? []) seen.set(story.catalogActivityType, story.catalogName);
     return Array.from(seen.entries()).sort((a, b) => a[1].localeCompare(b[1]));
-  }, [questions]);
+  }, [questions, userStories]);
 
   const visibleQuestions = useMemo(() => {
+    if (typeFilter === 'llm-graded') return [];
     const q = query.trim().toLowerCase();
     return (questions ?? []).filter((question) => {
       if (q && !question.questionText.toLowerCase().includes(q)) return false;
@@ -87,14 +153,25 @@ export function AddQuizQuestionsModal({
       if (levelFilter !== ALL_LEVELS && question.level !== levelFilter) return false;
       return true;
     });
-  }, [questions, query, catalogFilter, levelFilter]);
+  }, [questions, query, catalogFilter, levelFilter, typeFilter]);
 
-  function toggle(questionId: string) {
-    if (alreadyIncludedIds.has(questionId)) return;
+  const visibleUserStories = useMemo(() => {
+    if (typeFilter === 'mcq') return [];
+    const q = query.trim().toLowerCase();
+    return (userStories ?? []).filter((story) => {
+      if (q && !story.storyText.toLowerCase().includes(q)) return false;
+      if (catalogFilter !== ALL_CATALOGS && story.catalogActivityType !== catalogFilter) return false;
+      if (levelFilter !== ALL_LEVELS && story.level !== levelFilter) return false;
+      return true;
+    });
+  }, [userStories, query, catalogFilter, levelFilter, typeFilter]);
+
+  function toggle(id: string) {
+    if (alreadyIncludedIds.has(id)) return;
     setSelected((current) => {
       const next = new Set(current);
-      if (next.has(questionId)) next.delete(questionId);
-      else next.add(questionId);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }
@@ -105,17 +182,35 @@ export function AddQuizQuestionsModal({
     setSubmitting(true);
     setError('');
 
-    const result = await addExtraQuestionsToQuiz(token, quizId, Array.from(selected));
+    const selectedQuestionIds = (questions ?? []).filter((question) => selected.has(question.id)).map((question) => question.id);
+    const selectedUserStoryIds = (userStories ?? []).filter((story) => selected.has(story.id)).map((story) => story.id);
+
+    const [questionResult, userStoryResult] = await Promise.all([
+      selectedQuestionIds.length > 0
+        ? addExtraQuestionsToQuiz(token, quizId, selectedQuestionIds)
+        : Promise.resolve({ ok: true as const, data: { questionIds: [] as string[] } }),
+      selectedUserStoryIds.length > 0
+        ? addExtraUserStoriesToQuiz(token, quizId, selectedUserStoryIds)
+        : Promise.resolve({ ok: true as const, data: { userStoryIds: [] as string[] } }),
+    ]);
+
     setSubmitting(false);
 
-    if (!result.ok) {
-      setError(result.error);
+    if (!questionResult.ok) {
+      setError(questionResult.error);
+      return;
+    }
+    if (!userStoryResult.ok) {
+      setError(userStoryResult.error);
       return;
     }
 
-    onAdded(result.data.questionIds);
+    onAdded({ questionIds: questionResult.data.questionIds, userStoryIds: userStoryResult.data.userStoryIds });
     requestClose();
   }
+
+  const loading = questions === null || userStories === null;
+  const nothingVisible = !loading && visibleQuestions.length === 0 && visibleUserStories.length === 0;
 
   return (
     <div
@@ -159,9 +254,22 @@ export function AddQuizQuestionsModal({
               type="text"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search question text…"
+              placeholder="Search question or prompt text…"
               className="mt-1.5 block w-full rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none transition focus:border-brand-purple"
             />
+          </label>
+
+          <label className="text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted">
+            Type
+            <select
+              value={typeFilter}
+              onChange={(event) => setTypeFilter(event.target.value === ALL_TYPES ? ALL_TYPES : (event.target.value as PickerType))}
+              className="mt-1.5 block w-full rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none transition focus:border-brand-purple sm:w-44"
+            >
+              <option value={ALL_TYPES}>All types</option>
+              <option value="mcq">Multiple choice</option>
+              <option value="llm-graded">LLM-graded</option>
+            </select>
           </label>
 
           <label className="text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted">
@@ -198,40 +306,58 @@ export function AddQuizQuestionsModal({
         <div className="min-h-0 flex-1 overflow-y-auto rounded-brand-md border border-brand-navy-border bg-brand-navy-2">
           {loadFailed ? (
             <p className="p-4 text-center text-sm font-semibold text-brand-danger">Failed to load questions.</p>
-          ) : questions === null ? (
+          ) : loading ? (
             <p className="p-4 text-center text-sm font-semibold text-brand-ink-muted">Loading…</p>
-          ) : visibleQuestions.length === 0 ? (
-            <p className="p-4 text-center text-sm font-semibold text-brand-ink-muted">No questions match this filter.</p>
+          ) : nothingVisible ? (
+            <p className="p-4 text-center text-sm font-semibold text-brand-ink-muted">No questions or prompts match this filter.</p>
           ) : (
-            <ul className="divide-y divide-brand-navy-border">
-              {visibleQuestions.map((question) => {
-                const alreadyIn = alreadyIncludedIds.has(question.id);
-                const isSelected = selected.has(question.id);
-                return (
-                  <li key={question.id}>
-                    <label
-                      className={`flex items-start gap-3 px-4 py-3 text-sm ${alreadyIn ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:bg-brand-navy'}`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={alreadyIn || isSelected}
-                        disabled={alreadyIn}
-                        onChange={() => toggle(question.id)}
-                        className="mt-0.5 h-4 w-4 flex-none rounded border-brand-navy-border text-brand-purple focus:ring-brand-purple"
+            <>
+              {visibleQuestions.length > 0 ? (
+                <div>
+                  <p className="sticky top-0 border-b border-brand-navy-border bg-brand-navy-2 px-4 py-2 text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted">
+                    Multiple Choice Questions ({visibleQuestions.length})
+                  </p>
+                  <ul className="divide-y divide-brand-navy-border">
+                    {visibleQuestions.map((question) => (
+                      <PickerRow
+                        key={question.id}
+                        id={question.id}
+                        text={question.questionText}
+                        level={question.level}
+                        catalogName={question.catalogName}
+                        typeLabel="MCQ"
+                        alreadyIn={alreadyIncludedIds.has(question.id)}
+                        selected={selected.has(question.id)}
+                        onToggle={toggle}
                       />
-                      <span className="min-w-0 flex-1">
-                        <span className="block font-semibold text-brand-ink">{question.questionText}</span>
-                        <span className="mt-1 flex flex-wrap items-center gap-2 text-xs font-bold text-brand-ink-muted">
-                          <span className="rounded-full bg-brand-navy px-2 py-0.5">{question.catalogName}</span>
-                          <span className="rounded-full bg-brand-navy px-2 py-0.5">{LEVEL_LABEL[question.level]}</span>
-                          {alreadyIn ? <span className="rounded-full bg-brand-teal/20 px-2 py-0.5 text-brand-teal-dark">Already in quiz</span> : null}
-                        </span>
-                      </span>
-                    </label>
-                  </li>
-                );
-              })}
-            </ul>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {visibleUserStories.length > 0 ? (
+                <div>
+                  <p className="sticky top-0 border-b border-brand-navy-border bg-brand-navy-2 px-4 py-2 text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted">
+                    LLM-Graded Prompts ({visibleUserStories.length})
+                  </p>
+                  <ul className="divide-y divide-brand-navy-border">
+                    {visibleUserStories.map((story) => (
+                      <PickerRow
+                        key={story.id}
+                        id={story.id}
+                        text={story.storyText}
+                        level={story.level}
+                        catalogName={story.catalogName}
+                        typeLabel="LLM-Graded"
+                        alreadyIn={alreadyIncludedIds.has(story.id)}
+                        selected={selected.has(story.id)}
+                        onToggle={toggle}
+                      />
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </>
           )}
         </div>
 
@@ -265,7 +391,7 @@ export function AddQuizQuestionsModal({
               disabled={selected.size === 0 || submitting}
               className="rounded-brand-md bg-brand-purple px-5 py-2 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {submitting ? 'Adding…' : `Add ${selected.size} question${selected.size === 1 ? '' : 's'}`}
+              {submitting ? 'Adding…' : `Add ${selected.size} item${selected.size === 1 ? '' : 's'}`}
             </button>
           </div>
         </div>

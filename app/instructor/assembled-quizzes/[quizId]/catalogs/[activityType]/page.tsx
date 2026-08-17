@@ -5,12 +5,16 @@ import { useEffect, useState } from 'react';
 import { AppShell } from '../../../../../../components/AppShell';
 import {
   excludeQuestionFromQuiz,
+  excludeUserStoryFromQuiz,
   includeQuestionInQuiz,
+  includeUserStoryInQuiz,
   loadQuizCatalogQuestions,
   loadQuizDetail,
   type AssembledQuizDetail,
   type QuizScopedQuestion,
+  type QuizScopedUserStory,
 } from '../../../../../../lib/assembledQuizClient';
+import type { GradingKind } from '../../../../../../lib/activityTypes';
 import { useRequireRole } from '../../../../../../lib/useRequireRole';
 
 const LEVEL_LABEL: Record<1 | 2 | 3, string> = { 1: 'Easy', 2: 'Medium', 3: 'Hard' };
@@ -33,25 +37,40 @@ function IncludeIcon() {
 }
 
 /**
- * GitHub #361 requirement 3: one catalog's questions, in the context of one quiz — the "copy of
- * the catalog" the user story describes, implemented as the catalog's real questions annotated
- * with this quiz's own exclusion state rather than duplicated rows (see the quiz_excluded_question
- * table comment in supabase/schema.sql). Deliberately no edit/delete affordance here at all — a
- * question's content only ever changes through the real catalog (GitHub #359's
- * app/instructor/quizzes/[activityType]/page.tsx), so there is no path from this screen back to
- * the original catalog getting altered.
+ * GitHub #361 requirement 3: one catalog's questions or prompts, in the context of one quiz — the
+ * "copy of the catalog" the user story describes, implemented as the catalog's real content
+ * annotated with this quiz's own exclusion state rather than duplicated rows (see the
+ * quiz_excluded_question/quiz_excluded_user_story table comments in supabase/schema.sql).
+ * Deliberately no edit/delete affordance here at all, for either kind — content only ever changes
+ * through the real catalog (GitHub #359's app/instructor/quizzes/[activityType]/page.tsx), so
+ * there is no path from this screen back to the original catalog getting altered. Both kinds share
+ * the exact same Include/Exclude interaction, mirrored via a shared `pendingId` (question ids and
+ * user_story ids live in separate namespaces, so one shared pending-state id can't collide).
  */
 export default function QuizCatalogQuestionsPage({ params }: { params: { quizId: string; activityType: string } }) {
   const { token, loading, authorized } = useRequireRole('instructor');
 
   const [quiz, setQuiz] = useState<AssembledQuizDetail | null>(null);
   const [catalogName, setCatalogName] = useState<string | null>(null);
+  const [gradingKind, setGradingKind] = useState<GradingKind | null>(null);
   const [questions, setQuestions] = useState<QuizScopedQuestion[] | null>(null);
+  const [userStories, setUserStories] = useState<QuizScopedUserStory[] | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
-  const [pendingQuestionId, setPendingQuestionId] = useState<string | null>(null);
+  const [pendingId, setPendingId] = useState<string | null>(null);
   const [error, setError] = useState('');
+
+  // See the sibling quiz composition page for why this is needed: browser back/forward restores
+  // the previously-rendered tree instead of remounting it, so the mount-time fetch below would
+  // otherwise never re-run after navigating away to edit this catalog's questions and back.
+  useEffect(() => {
+    function handlePopState() {
+      setRetryCount((count) => count + 1);
+    }
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   useEffect(() => {
     if (!token) return;
@@ -77,7 +96,9 @@ export default function QuizCatalogQuestionsPage({ params }: { params: { quizId:
 
         setQuiz(quizResult.data.quiz);
         setCatalogName(catalogResult.data.catalog.name);
+        setGradingKind(catalogResult.data.catalog.gradingKind);
         setQuestions(catalogResult.data.questions);
+        setUserStories(catalogResult.data.userStories);
       },
     );
 
@@ -90,16 +111,16 @@ export default function QuizCatalogQuestionsPage({ params }: { params: { quizId:
   if (!token) return null;
 
   async function toggleExclusion(question: QuizScopedQuestion) {
-    if (!token || pendingQuestionId) return;
+    if (!token || pendingId) return;
 
-    setPendingQuestionId(question.id);
+    setPendingId(question.id);
     setError('');
 
     const result = question.excludedForQuiz
       ? await includeQuestionInQuiz(token, params.quizId, question.id)
       : await excludeQuestionFromQuiz(token, params.quizId, question.id);
 
-    setPendingQuestionId(null);
+    setPendingId(null);
 
     if (!result.ok) {
       setError(result.error);
@@ -108,6 +129,28 @@ export default function QuizCatalogQuestionsPage({ params }: { params: { quizId:
 
     setQuestions((current) =>
       (current ?? []).map((q) => (q.id === question.id ? { ...q, excludedForQuiz: !question.excludedForQuiz } : q)),
+    );
+  }
+
+  async function toggleUserStoryExclusion(story: QuizScopedUserStory) {
+    if (!token || pendingId) return;
+
+    setPendingId(story.id);
+    setError('');
+
+    const result = story.excludedForQuiz
+      ? await includeUserStoryInQuiz(token, params.quizId, story.id)
+      : await excludeUserStoryFromQuiz(token, params.quizId, story.id);
+
+    setPendingId(null);
+
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+
+    setUserStories((current) =>
+      (current ?? []).map((s) => (s.id === story.id ? { ...s, excludedForQuiz: !story.excludedForQuiz } : s)),
     );
   }
 
@@ -136,13 +179,14 @@ export default function QuizCatalogQuestionsPage({ params }: { params: { quizId:
               Retry
             </button>
           </div>
-        ) : !quiz || catalogName === null || questions === null ? (
+        ) : !quiz || catalogName === null || gradingKind === null || questions === null || userStories === null ? (
           <p className="mt-6 text-sm font-semibold text-gray-500">Loading…</p>
         ) : (
           <>
             <h1 className="mb-1.5 text-2xl font-extrabold text-brand-navy">{catalogName}</h1>
             <p className="mb-1 text-sm font-semibold text-gray-500">
-              Showing this catalog&apos;s questions as they apply to <span className="font-extrabold text-gray-700">{quiz.name}</span>.
+              Showing this catalog&apos;s {gradingKind === 'llm-graded' ? 'prompts' : 'questions'} as they apply to{' '}
+              <span className="font-extrabold text-gray-700">{quiz.name}</span>.
             </p>
             <p className="mb-6 text-xs font-bold uppercase tracking-wide text-brand-purple">
               Exclusions apply to this quiz only — the original catalog is never changed here.
@@ -154,6 +198,55 @@ export default function QuizCatalogQuestionsPage({ params }: { params: { quizId:
               </p>
             ) : null}
 
+            {gradingKind === 'llm-graded' ? (
+              <div className="space-y-4">
+                {userStories.length === 0 ? (
+                  <p className="rounded-brand-lg border border-gray-100 bg-gray-50 p-6 text-center text-sm font-semibold text-gray-500">
+                    This catalog has no prompts yet.
+                  </p>
+                ) : (
+                  userStories.map((story) => (
+                    <div
+                      key={story.id}
+                      className={`rounded-brand-lg border p-5 transition ${
+                        story.excludedForQuiz ? 'border-gray-200 bg-gray-100 opacity-60' : 'border-gray-100 bg-gray-50'
+                      }`}
+                    >
+                      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="inline-block rounded-full bg-white px-2.5 py-1 text-xs font-extrabold text-gray-500">
+                            {LEVEL_LABEL[story.level]} · Level {story.level}
+                          </span>
+                          {story.excludedForQuiz ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-gray-300 px-2.5 py-1 text-[11px] font-extrabold text-gray-600">
+                              Excluded
+                            </span>
+                          ) : null}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => toggleUserStoryExclusion(story)}
+                          disabled={pendingId === story.id}
+                          aria-label={story.excludedForQuiz ? 'Include this prompt in the quiz' : 'Exclude this prompt from the quiz'}
+                          title={story.excludedForQuiz ? 'Include in this quiz' : 'Exclude from this quiz'}
+                          className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-extrabold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                            story.excludedForQuiz
+                              ? 'border-brand-teal/40 bg-white text-brand-teal-dark hover:border-brand-teal'
+                              : 'border-gray-300 bg-white text-gray-600 hover:border-brand-danger hover:text-brand-danger'
+                          }`}
+                        >
+                          {story.excludedForQuiz ? <IncludeIcon /> : <ExcludeIcon />}
+                          {pendingId === story.id ? '…' : story.excludedForQuiz ? 'Include' : 'Exclude'}
+                        </button>
+                      </div>
+                      <p className={`whitespace-pre-wrap text-sm font-bold ${story.excludedForQuiz ? 'text-gray-500' : 'text-brand-navy'}`}>
+                        {story.storyText}
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : (
             <div className="space-y-4">
               {questions.length === 0 ? (
                 <p className="rounded-brand-lg border border-gray-100 bg-gray-50 p-6 text-center text-sm font-semibold text-gray-500">
@@ -181,7 +274,7 @@ export default function QuizCatalogQuestionsPage({ params }: { params: { quizId:
                       <button
                         type="button"
                         onClick={() => toggleExclusion(question)}
-                        disabled={pendingQuestionId === question.id}
+                        disabled={pendingId === question.id}
                         aria-label={question.excludedForQuiz ? 'Include this question in the quiz' : 'Exclude this question from the quiz'}
                         title={question.excludedForQuiz ? 'Include in this quiz' : 'Exclude from this quiz'}
                         className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-extrabold transition disabled:cursor-not-allowed disabled:opacity-50 ${
@@ -191,7 +284,7 @@ export default function QuizCatalogQuestionsPage({ params }: { params: { quizId:
                         }`}
                       >
                         {question.excludedForQuiz ? <IncludeIcon /> : <ExcludeIcon />}
-                        {pendingQuestionId === question.id ? '…' : question.excludedForQuiz ? 'Include' : 'Exclude'}
+                        {pendingId === question.id ? '…' : question.excludedForQuiz ? 'Include' : 'Exclude'}
                       </button>
                     </div>
                     <p className={`mb-4 text-sm font-bold ${question.excludedForQuiz ? 'text-gray-500' : 'text-brand-navy'}`}>
@@ -226,6 +319,7 @@ export default function QuizCatalogQuestionsPage({ params }: { params: { quizId:
                 ))
               )}
             </div>
+            )}
           </>
         )}
       </div>
