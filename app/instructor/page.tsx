@@ -6,7 +6,6 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { AcSubmissionDetails } from '../../components/AcSubmissionDetails';
 import { AppShell } from '../../components/AppShell';
 import { ActivityLogTable } from '../../components/ActivityLogTable';
-import { InstructorActivityStats } from '../../components/InstructorActivityStats';
 import {
   InstructorFilters,
   type InstructorSortOrder,
@@ -138,7 +137,12 @@ function InstructorDashboardContent() {
   async function handleSelectCourse(courseId: string | null) {
     if (!token) return;
     setSelectedCourseId(courseId);
-    if (!courseId) { setCourseStats(null); return; }
+    // Reset to the loading state before the fetch, not just on deselect — otherwise the
+    // previously-selected course's stats would flash inside the newly-selected card for a moment
+    // (GitHub #423: these render inside the specific CourseCard now, so stale data would show up
+    // in the wrong card, not just in a page-level block no one's card owns).
+    setCourseStats(null);
+    if (!courseId) return;
     const result = await loadCourseStats(token, courseId);
     if (result.ok) setCourseStats(result.data.statistics);
   }
@@ -278,6 +282,7 @@ function InstructorDashboardContent() {
                   key={course.id}
                   course={course}
                   classStats={courseClassStatsById?.[course.id] ?? null}
+                  activityStats={selectedCourseId === course.id ? courseStats : undefined}
                   selected={selectedCourseId === course.id}
                   onSelect={(c) => handleSelectCourse(selectedCourseId === c.id ? null : c.id)}
                   onDuplicate={setDuplicateSource}
@@ -310,15 +315,6 @@ function InstructorDashboardContent() {
           </div>
         ) : (
           <>
-            {selectedCourseId ? (
-              <InstructorActivityStats
-                entries={entries}
-                ownedActivityTypes={ownedActivityTypes}
-                acParticipation={null}
-                courseStats={courseStats}
-              />
-            ) : null}
-
             <div className="mb-3 flex items-center justify-between gap-2">
               <h2 className="text-xs font-extrabold uppercase tracking-wide text-gray-400">Students</h2>
               <Link href="/instructor/students" className="text-xs font-bold text-brand-purple hover:underline">
