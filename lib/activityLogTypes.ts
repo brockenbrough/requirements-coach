@@ -107,8 +107,10 @@ export type StudentAggregate = {
  * Pass `roster` (GET /api/instructor/students, GitHub #175) to include students with no attempts
  * at all: deriving the list from `entries` alone silently drops every enrolled student who never
  * started an activity. They come out with attempts 0 and averageScore null, which compareByScore
- * already sorts to the end in both directions. Callers that deliberately want the attempts-only
- * view — the dashboard's roster preview — just omit it.
+ * already sorts to the end in both directions. The Instructor Dashboard's roster preview used to
+ * omit `roster` deliberately, which was exactly the GitHub #415 bug — a student who hadn't
+ * attempted anything yet was invisible even in the "needs the most attention" preview. Every
+ * caller now passes it.
  */
 export function summarizeStudents(
   entries: StudentActivitySummary[],
