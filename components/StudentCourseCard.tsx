@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { joinCourseByCode, leaveCourse } from '../lib/studentCourseClient';
+import { resolveCourseCoverSrc } from '../lib/courseCovers';
 import type { JoinableCourse } from '../lib/courseTypes';
 
 function CheckIcon() {
@@ -25,10 +26,13 @@ function LeaveIcon() {
 }
 
 /**
- * GitHub #242 (UI-2): one course on the student-facing browse/join page. Same card look as
- * components/CourseCard.tsx (the instructor's version — rounded-brand-lg, border-gray-100/
- * bg-gray-50) but a distinct component rather than a shared one: this card's action is "join",
- * that one's is "go manage this course as its instructor" — different audiences, different data.
+ * GitHub #242 (UI-2), restyled to match components/CourseCard.tsx (GitHub #424): one course on
+ * the student-facing browse/join page, in the same Moodle-style cover-image/name/semester-badge
+ * layout the instructor's own course cards use — cover via lib/courseCovers.ts's
+ * resolveCourseCoverSrc (an instructor's pick/upload, or the same deterministic default), and the
+ * same optional semester pill. Still a distinct component rather than a shared one: this card's
+ * action is "join"/"leave", not a kebab menu of instructor actions, and its data (JoinableCourse)
+ * has no ownership/roster fields to expose a menu for.
  *
  * The join code is a secret the instructor hands out directly — this card never sees or
  * displays it (JoinableCourse has no code field at all), only submits whatever the student
@@ -37,11 +41,10 @@ function LeaveIcon() {
  * row's — a typo'd-but-still-valid code for a different course would otherwise silently mark
  * the wrong card as joined.
  *
- * Leave action (GitHub #324, moved here from the profile page's now-removed MyCoursesSection): a
- * borderless icon button pinned to the card's top-right corner, same size/shape convention as
- * components/CourseStudentList.tsx's Remove button, rather than a text link competing with
- * "Joined"/"Join" for the card's one primary-action slot. Still gated behind the same
- * window.confirm() as components/ResumeOrAbandonPrompt.tsx for a single-course, self-only
+ * Leave action (GitHub #324): a round icon button pinned over the top-right corner of the cover
+ * image, the same corner/size CourseCardMenu's kebab trigger uses, rather than a text link
+ * competing with "Joined"/"Join" for the card's one primary-action slot. Still gated behind the
+ * same window.confirm() as components/ResumeOrAbandonPrompt.tsx for a single-course, self-only
  * consequence. On success this card flips back to the not-joined state (onLeft) rather than
  * disappearing, since this page lists every course, member or not.
  */
@@ -100,7 +103,13 @@ export function StudentCourseCard({
   }
 
   return (
-    <div className="relative rounded-brand-lg border border-gray-100 bg-gray-50 p-4">
+    <div className="relative overflow-hidden rounded-brand-lg border border-gray-100 bg-white shadow-sm transition hover:border-brand-purple/40 hover:shadow-md">
+      {/* Plain <img>, not next/image — see components/CourseCard.tsx's own comment on why. */}
+      <div className="relative h-28 w-full overflow-hidden bg-brand-navy sm:h-32">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={resolveCourseCoverSrc(course)} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
+      </div>
+
       {course.alreadyMember ? (
         <button
           type="button"
@@ -108,71 +117,80 @@ export function StudentCourseCard({
           disabled={leaving}
           aria-label={`Leave ${course.name}`}
           title="Leave course"
-          className="absolute right-3 top-3 flex h-8 w-8 flex-none items-center justify-center rounded-full border border-gray-200 bg-white text-black transition hover:border-brand-danger/40 hover:text-brand-danger disabled:cursor-not-allowed disabled:opacity-40"
+          className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full border border-white/40 bg-black/35 text-white backdrop-blur-sm transition hover:bg-black/55 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <LeaveIcon />
         </button>
       ) : null}
 
-      <span className="block pr-10 font-extrabold text-brand-navy">{course.name}</span>
-      <p className="mt-1.5 pr-10 text-xs font-semibold text-gray-500">
-        {course.professorName} · {course.studentCount} student{course.studentCount === 1 ? '' : 's'}
-      </p>
+      <div className="p-4">
+        <p className="line-clamp-1 font-extrabold text-brand-navy">{course.name}</p>
 
-      {error ? <p className="mt-2 text-xs font-semibold text-brand-danger">{error}</p> : null}
-
-      <div className="mt-3.5">
-        {course.alreadyMember ? (
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-teal/20 px-4 py-2 text-sm font-extrabold text-brand-teal-dark">
-            <CheckIcon />
-            Joined
+        {course.semester ? (
+          <span className="mt-1.5 inline-flex items-center rounded-full bg-brand-purple/10 px-2.5 py-0.5 text-xs font-bold text-brand-purple">
+            {course.semester}
           </span>
-        ) : codeInputOpen ? (
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              void handleJoin(enteredCode);
-            }}
-            className="flex flex-col gap-2 sm:flex-row sm:items-center"
-          >
-            <input
-              type="text"
-              value={enteredCode}
-              onChange={(event) => setEnteredCode(event.target.value)}
-              placeholder="Course code"
-              autoFocus
-              className="rounded-brand-md border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-700 outline-none transition focus:border-brand-purple"
-            />
-            <div className="flex gap-2">
-              <button
-                type="submit"
-                disabled={!enteredCode.trim() || joining}
-                className="rounded-full bg-brand-purple px-5 py-2 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {joining ? 'Joining…' : 'Join'}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setCodeInputOpen(false);
-                  setEnteredCode('');
-                  setError('');
-                }}
-                className="rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-bold text-gray-600 transition hover:border-gray-300"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setCodeInputOpen(true)}
-            className="rounded-full bg-brand-purple px-5 py-2 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark"
-          >
-            Join
-          </button>
-        )}
+        ) : null}
+
+        <p className="mt-2.5 text-xs font-semibold text-gray-500">
+          {course.professorName} · {course.studentCount} student{course.studentCount === 1 ? '' : 's'}
+        </p>
+
+        {error ? <p className="mt-2 text-xs font-semibold text-brand-danger">{error}</p> : null}
+
+        <div className="mt-3.5">
+          {course.alreadyMember ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-teal/20 px-4 py-2 text-sm font-extrabold text-brand-teal-dark">
+              <CheckIcon />
+              Joined
+            </span>
+          ) : codeInputOpen ? (
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void handleJoin(enteredCode);
+              }}
+              className="flex flex-col gap-2 sm:flex-row sm:items-center"
+            >
+              <input
+                type="text"
+                value={enteredCode}
+                onChange={(event) => setEnteredCode(event.target.value)}
+                placeholder="Course code"
+                autoFocus
+                className="rounded-brand-md border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-700 outline-none transition focus:border-brand-purple"
+              />
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  disabled={!enteredCode.trim() || joining}
+                  className="rounded-full bg-brand-purple px-5 py-2 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {joining ? 'Joining…' : 'Join'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCodeInputOpen(false);
+                    setEnteredCode('');
+                    setError('');
+                  }}
+                  className="rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-bold text-gray-600 transition hover:border-gray-300"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setCodeInputOpen(true)}
+              className="rounded-full bg-brand-purple px-5 py-2 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark"
+            >
+              Join
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

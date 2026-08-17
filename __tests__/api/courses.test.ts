@@ -50,6 +50,8 @@ function courseRow(overrides: Partial<Record<string, unknown>> = {}) {
     course_id: 'course-1',
     course_name: 'Software Requirements',
     created_at: '2026-08-11T10:00:00',
+    semester: null,
+    cover_image_url: null,
     creator: { first_name: 'Ada', last_name: 'Brockenbrough', username: 'abrock' },
     student_course: [{ count: 2 }],
     ...overrides,
@@ -105,8 +107,23 @@ describe('GET /api/courses', () => {
         professorName: 'Ada Brockenbrough',
         studentCount: 2,
         alreadyMember: false,
+        semester: null,
+        coverImageUrl: null,
       },
     ]);
+  });
+
+  it('passes through semester and coverImageUrl from the course row', async () => {
+    queue('course', {
+      data: [courseRow({ semester: 'SoSe 2026', cover_image_url: 'https://example.com/course-covers/instructor-1/x.png' })],
+      error: null,
+    });
+    queue('student_course', { data: [], error: null });
+
+    const res = await GET(getRequest());
+    const body = await res.json();
+    expect(body.courses[0].semester).toBe('SoSe 2026');
+    expect(body.courses[0].coverImageUrl).toBe('https://example.com/course-covers/instructor-1/x.png');
   });
 
   it('never includes the course code — a secret the instructor hands out directly, not this route', async () => {

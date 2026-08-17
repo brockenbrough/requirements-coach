@@ -46,4 +46,7 @@ export type JoinableCourse = {
   studentCount: number;
   /** Scoped to the caller's own token — never discloses which other students are enrolled. */
   alreadyMember: boolean;
+  /** Same instructor-set fields CourseMeta carries — read-only here (GitHub #424). */
+  semester: string | null;
+  coverImageUrl: string | null;
 };
