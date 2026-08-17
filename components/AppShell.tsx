@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { getHighestTitleOverall } from '../lib/activityStore';
 import { Avatar } from './Avatar';
 import { LLMProviderSettingsModal } from './LLMProviderSettingsModal';
 import { OnboardingTour } from './OnboardingTour';
@@ -213,7 +212,6 @@ export function AppShell({
   const router = useRouter();
   const { token, profile, signOut, score } = useUser();
   const { active: tourActive, startTour } = useOnboardingTour();
-  const [levelLine, setLevelLine] = useState('Getting started');
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   // GitHub #318: the tour highlights sidebar nav items, which are translated off-screen behind
@@ -231,12 +229,14 @@ export function AppShell({
   const visibleNavItems = navItems.filter((item) => item.key !== 'instructor-settings');
 
   // Score and mastery titles are a student concept — an instructor has neither, so there is
-  // nothing to fetch or show under their avatar.
-  useEffect(() => {
-    if (isInstructor) return;
-    const best = getHighestTitleOverall();
-    setLevelLine(best ? best.title : 'Getting started');
-  }, [isInstructor]);
+  // nothing to show under their avatar.
+  //
+  // The line under the username used to come from lib/activityStore.ts's getHighestTitleOverall(),
+  // which has had no writer since the play flow moved to the API and therefore always returned
+  // null — every student saw a permanent "Getting started". It now shows the title the student
+  // actually chose to wear, which arrives on the profile itself (GET /api/profile joins the name),
+  // so there is nothing to fetch here and nothing that can go stale independently of the profile.
+  const levelLine = profile?.selected_title?.title_name ?? 'Getting started';
 
   // GitHub #392: score itself now lives in UserContext (loaded once there, kept fresh by
   // refreshScore) rather than being fetched again here on every AppShell mount — AppShell just

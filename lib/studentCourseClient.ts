@@ -167,6 +167,8 @@ type LeaderboardRow = {
   avatarUrl: string | null;
   points: number;
   streak: number;
+  /** The mastery title this student chose to wear, or null — see LeaderboardEntry.title. */
+  title: string | null;
 };
 
 /**
