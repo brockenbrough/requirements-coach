@@ -7,9 +7,11 @@ export type QuizStatistics = {
   activityType: string;
   classAverage: number;
   passRate: number;
+  completionCount?: number;
+  enrolledCount?: number;
 };
 
-type SessionRow = { activity_type: string; cumulative_score: number; max_score: number; passed: boolean };
+type SessionRow = { activity_type: string; cumulative_score: number; max_score: number; passed: boolean; user_id: string };
 type ActivityTypeRow = { activity_type: string };
 
 /**
@@ -27,21 +29,31 @@ type ActivityTypeRow = { activity_type: string };
  * An empty activity_type table — no quizzes exist at all — is the only case that reports
  * nothing; the caller turns that into the AC's 404.
  */
-export async function computeQuizStatistics(supabase: SupabaseClient) {
+export async function computeQuizStatistics(
+  supabase: SupabaseClient,
+  options?: { studentIds?: string[]; allowedActivityTypes?: string[] },
+) {
+  const sessionQuery = supabase
+    .from('session_log')
+    .select('activity_type, cumulative_score, max_score, passed, user_id')
+    .eq('status', 'completed');
+
   const [{ data: activityRows, error: activityError }, { data: sessionRows, error: sessionError }] =
     await Promise.all([
-      supabase.from('activity_type').select('activity_type'),
-      supabase
-        .from('session_log')
-        .select('activity_type, cumulative_score, max_score, passed')
-        .eq('status', 'completed'),
+      options?.allowedActivityTypes
+        ? Promise.resolve({ data: null, error: null })
+        : supabase.from('activity_type').select('activity_type'),
+      options?.studentIds ? sessionQuery.in('user_id', options.studentIds) : sessionQuery,
     ]);
 
   const error = activityError ?? sessionError ?? null;
   if (error) return { statistics: null, error };
 
-  const activityTypes = (activityRows ?? []) as ActivityTypeRow[];
-  if (activityTypes.length === 0) return { statistics: [], error: null };
+  const effectiveActivityTypes: ActivityTypeRow[] = options?.allowedActivityTypes
+    ? options.allowedActivityTypes.map((t) => ({ activity_type: t }))
+    : (activityRows ?? []) as ActivityTypeRow[];
+
+  if (effectiveActivityTypes.length === 0) return { statistics: [], error: null };
 
   const byActivity = new Map<string, SessionRow[]>();
   for (const row of (sessionRows ?? []) as SessionRow[]) {
@@ -50,11 +62,17 @@ export async function computeQuizStatistics(supabase: SupabaseClient) {
     byActivity.set(row.activity_type, attempts);
   }
 
-  const statistics: QuizStatistics[] = activityTypes.map(({ activity_type: activityType }) => {
+  const statistics: QuizStatistics[] = effectiveActivityTypes.map(({ activity_type: activityType }) => {
     const attempts = byActivity.get(activityType) ?? [];
+    const completionCount = new Set(attempts.map((r) => r.user_id)).size;
 
     if (attempts.length === 0) {
-      return { activityType, classAverage: 0, passRate: 0 };
+      return {
+        activityType,
+        classAverage: 0,
+        passRate: 0,
+        ...(options?.studentIds !== undefined ? { completionCount, enrolledCount: options.studentIds.length } : {}),
+      };
     }
 
     const totalPercent = attempts.reduce((sum, row) => {
@@ -67,6 +85,7 @@ export async function computeQuizStatistics(supabase: SupabaseClient) {
       activityType,
       classAverage: Math.round(totalPercent / attempts.length),
       passRate: Math.round((passCount / attempts.length) * 100),
+      ...(options?.studentIds !== undefined ? { completionCount, enrolledCount: options.studentIds.length } : {}),
     };
   });
 
