@@ -195,9 +195,10 @@ export async function POST(request: Request) {
     startLevel = allowedLevel!;
   }
 
-  // AC 1: draw QUESTIONS_PER_SESSION questions matching activity type and the computed level.
-  // GitHub #124: filtered through an inner join against the activity_type table (#122/#123)
-  // instead of a plain equality check on the free-text column.
+  // AC 1: draw QUESTIONS_PER_SESSION questions (or the granting quiz's own override, GitHub
+  // #416 below) matching activity type and the computed level. GitHub #124: filtered through an
+  // inner join against the activity_type table (#122/#123) instead of a plain equality check on
+  // the free-text column.
   const { data: rawPool, error: poolError } = await supabase
     .from('question')
     .select('question_id, max_score, activity:activity_type!inner ( activity_type )')
@@ -220,15 +221,21 @@ export async function POST(request: Request) {
   const pool = ((rawPool ?? []) as { question_id: string; max_score: number | null }[])
     .filter((question) => !excludedSet.has(question.question_id));
 
+  // GitHub #416: the granting quiz's own draw size overrides the app-wide default — set at
+  // creation on the "Create Quiz" modal, resolved here off the same accessLink row already read
+  // above for exclusions, not a second lookup. Falls back to QUESTIONS_PER_SESSION for a quiz
+  // predating the column (null embed) — see assembled_quiz.questions_per_level's own comment.
+  const questionsPerSession = accessLink.questionsPerLevel ?? QUESTIONS_PER_SESSION;
+
   // AC 5: too small a question bank is a client error, not an empty session.
-  if (pool.length < QUESTIONS_PER_SESSION) {
+  if (pool.length < questionsPerSession) {
     return Response.json(
-      { error: `At least ${QUESTIONS_PER_SESSION} questions are required for this activity type and difficulty level.` },
+      { error: `At least ${questionsPerSession} questions are required for this activity type and difficulty level.` },
       { status: 400 },
     );
   }
 
-  const picked = shuffle(pool).slice(0, QUESTIONS_PER_SESSION);
+  const picked = shuffle(pool).slice(0, questionsPerSession);
 
   // Keep max_score consistent with the questions actually drawn — 4 x 25 = the 100 from AC 2.
   const maxScore = picked.reduce((sum, q) => sum + (q.max_score ?? DEFAULT_QUESTION_MAX_SCORE), 0);

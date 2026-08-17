@@ -224,6 +224,63 @@ describe('POST /api/sessions', () => {
     expect(h.state.inserts).toHaveLength(0);
   });
 
+  // GitHub #416: the granting quiz's own questions_per_level overrides the flat QUESTIONS_PER_SESSION
+  // default for both the draw size and the AC 5 minimum, resolved off the same accessLink row
+  // already read for exclusions — not a second lookup.
+  it('draws the granting quiz\'s own questionsPerLevel, not the flat default', async () => {
+    queue('activity_type', { data: { activity_type: 'IDENTIFY_WEAK_USER_STORIES' }, error: null });
+    queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
+    queue('assembled_quiz_catalog', {
+      data: [{
+        assembled_quiz: {
+          assembled_quiz_id: 'quiz-1',
+          course_id: 'course-1',
+          questions_per_level: 6,
+          course: { course_name: 'Software Requirements' },
+        },
+      }],
+      error: null,
+    });
+    queue('session_log', { data: null, error: null }); // no session in progress
+    queue('session_log', { data: [], error: null });   // no prior passed sessions -> level 1
+    queue('question', { data: pool, error: null });    // exactly 6 available
+    queue('session_log', { data: sessionRow, error: null });
+    queue('session_to_question', { data: null, error: null });
+    queue('session_to_question', { data: drawnQuestions, error: null });
+
+    const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES' }));
+
+    expect(response.status).toBe(201);
+    const [{ payload }] = h.state.inserts.filter((i) => i.table === 'session_to_question');
+    expect(payload as unknown[]).toHaveLength(6);
+  });
+
+  it('returns 400 against the granting quiz\'s own questionsPerLevel, even with 4+ questions available', async () => {
+    queue('activity_type', { data: { activity_type: 'IDENTIFY_WEAK_USER_STORIES' }, error: null });
+    queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
+    queue('assembled_quiz_catalog', {
+      data: [{
+        assembled_quiz: {
+          assembled_quiz_id: 'quiz-1',
+          course_id: 'course-1',
+          questions_per_level: 6,
+          course: { course_name: 'Software Requirements' },
+        },
+      }],
+      error: null,
+    });
+    queue('session_log', { data: null, error: null });
+    queue('session_log', { data: [], error: null });
+    queue('question', { data: pool.slice(0, 5), error: null }); // 5 available, but this quiz needs 6
+
+    const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toMatch(/at least 6 questions/i);
+    expect(h.state.inserts).toHaveLength(0);
+  });
+
   // Regression: the draw used to query `question` straight from the catalog with no awareness of
   // any assembled quiz's quiz_excluded_question rows, so an excluded question kept getting drawn
   // (and counted toward AC 5's minimum) even after an instructor excluded it (GitHub #361).

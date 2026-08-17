@@ -6,6 +6,15 @@ import type { Difficulty } from './activityContent';
 export const START_DIFFICULTY_LEVEL = 1;
 export const QUESTIONS_PER_SESSION = 4;
 
+// GitHub #416: the hard floor for assembled_quiz.questions_per_level — a quiz's per-level draw
+// size may never be set below this, enforced in the CHECK constraint
+// (ck_assembled_quiz_questions_per_level, supabase/schema.sql), the create-quiz route, and the
+// "Create Quiz" modal's own input. Deliberately its own named constant rather than a reuse of
+// QUESTIONS_PER_SESSION even though the two currently share a value: this one is a business rule
+// ("a quiz must always have at least this many questions per level"), that one is only today's
+// default when an instructor doesn't set one — they're free to diverge later.
+export const MIN_QUESTIONS_PER_LEVEL = 4;
+
 // Fallback only for a question row whose max_score is genuinely NULL (legacy data) — every
 // question created through createQuestionWithAnswers now gets mcqPointsForDifficulty's value
 // instead, never this flat one.

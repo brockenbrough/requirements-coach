@@ -21,6 +21,8 @@ export type AssembledQuizSummary = {
   courseName: string;
   /** The single catalog kind this quiz may ever compose/hand-pick from — locked at creation. */
   gradingKind: GradingKind;
+  /** GitHub #416: how many questions/prompts a session draws per level for this quiz. */
+  questionsPerLevel: number;
   catalogs: { activityType: string; name: string; gradingKind: GradingKind }[];
   catalogNames: string[];
   createdAt: string;
@@ -33,6 +35,7 @@ export type AssembledQuizDetail = {
   courseId: string;
   courseName: string;
   gradingKind: GradingKind;
+  questionsPerLevel: number;
 };
 
 export type QuizCatalogComposition = {
@@ -124,15 +127,27 @@ export function loadAssembledQuizzes(token: string): Promise<ApiResult<{ quizzes
 /**
  * Composes a quiz from one or more catalogs for one of the caller's own courses
  * (POST /api/instructor/assembled-quizzes). gradingKind is required and locked forever once set —
- * see assembled_quiz.grading_kind's own comment in supabase/schema.sql.
+ * see assembled_quiz.grading_kind's own comment in supabase/schema.sql. questionsPerLevel (GitHub
+ * #416) is optional — the route falls back to QUESTIONS_PER_SESSION when it's omitted.
  */
 export function createAssembledQuiz(
   token: string,
-  input: { name: string; description?: string; courseId: string; gradingKind: GradingKind; catalogActivityTypes: string[] },
+  input: {
+    name: string;
+    description?: string;
+    courseId: string;
+    gradingKind: GradingKind;
+    questionsPerLevel?: number;
+    catalogActivityTypes: string[];
+  },
 ): Promise<
-  ApiResult<{ quiz: { id: string; name: string; description: string | null; courseId: string; gradingKind: GradingKind } }>
+  ApiResult<{
+    quiz: { id: string; name: string; description: string | null; courseId: string; gradingKind: GradingKind; questionsPerLevel: number };
+  }>
 > {
-  return request<{ quiz: { id: string; name: string; description: string | null; courseId: string; gradingKind: GradingKind } }>(
+  return request<{
+    quiz: { id: string; name: string; description: string | null; courseId: string; gradingKind: GradingKind; questionsPerLevel: number };
+  }>(
     '/api/instructor/assembled-quizzes',
     postJson(input),
     token,

@@ -291,14 +291,28 @@ CREATE TABLE student_course (
 -- "locked forever" convention activity_type.grading_kind already uses. Before this, a quiz
 -- could link catalogs of both kinds at once with nothing to say which one its "Create new
 -- question"/"Add prompt" composition actions should offer.
+--
+-- questions_per_level (GitHub #416): how many questions/prompts a session draws per level for
+-- this quiz, replacing the app-wide QUESTIONS_PER_SESSION constant (lib/sessionRules.ts) as the
+-- draw size for any catalog this quiz grants access to. Defaults to 4 (QUESTIONS_PER_SESSION's
+-- own value) so a quiz created without touching the field draws exactly as every quiz did before
+-- this column existed, and can never be set below MIN_QUESTIONS_PER_LEVEL (also 4 today, but a
+-- separate named constant — see its own comment in lib/sessionRules.ts) via
+-- ck_assembled_quiz_questions_per_level below. Resolved per catalog at session-start time via
+-- getAccessibleCourseForActivity (lib/activityCourseQueries.ts) — the same assembled_quiz row
+-- POST /api/sessions already reads for quiz_excluded_question, not a new lookup — so this is
+-- subject to the same known limitation documented on assembled_quiz.grading_kind and
+-- computeCourseClassStats: a catalog reachable through more than one assembled quiz uses
+-- whichever one that query happens to resolve first.
 CREATE TABLE assembled_quiz (
-    assembled_quiz_id uuid      NOT NULL,
-    quiz_name         text      NOT NULL,
-    description       text,
-    course_id         uuid      NOT NULL,
-    creator_id        uuid      NOT NULL,
-    grading_kind      text      NOT NULL DEFAULT 'mcq',
-    created_at        timestamp NOT NULL DEFAULT now(),
+    assembled_quiz_id   uuid      NOT NULL,
+    quiz_name           text      NOT NULL,
+    description         text,
+    course_id           uuid      NOT NULL,
+    creator_id          uuid      NOT NULL,
+    grading_kind        text      NOT NULL DEFAULT 'mcq',
+    questions_per_level integer   NOT NULL DEFAULT 4,
+    created_at          timestamp NOT NULL DEFAULT now(),
     PRIMARY KEY (assembled_quiz_id));
 
 -- The m:n link to the catalogs (activity_type rows) a quiz draws from.
@@ -615,6 +629,11 @@ ALTER TABLE activity_type ADD CONSTRAINT ck_activity_type_grading_kind CHECK (gr
 -- Same reasoning as ck_activity_type_grading_kind directly above, for assembled_quiz's own
 -- grading_kind column.
 ALTER TABLE assembled_quiz ADD CONSTRAINT ck_assembled_quiz_grading_kind CHECK (grading_kind IN ('mcq', 'llm-graded'));
+
+-- A quiz's per-level draw size may never go below MIN_QUESTIONS_PER_LEVEL (lib/sessionRules.ts,
+-- GitHub #416) — a hard business-rule floor ("every quiz has at least this many questions per
+-- level"), not just "must be positive."
+ALTER TABLE assembled_quiz ADD CONSTRAINT ck_assembled_quiz_questions_per_level CHECK (questions_per_level >= 4);
 
 -- REQ-GAM-DL-2.1: one title per (activity_type, difficulty_level) pair so the BL-1 lookup is
 -- unambiguous. activity_type itself is restricted to the known set via fk_title_definition_activity_type
@@ -1273,3 +1292,17 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 --     WHERE at.grading_kind <> aq.grading_kind;
 --
 -- and unlink (DELETE FROM assembled_quiz_catalog ...) the mismatched rows by hand.
+
+-- assembled_quiz.questions_per_level (GitHub #416): a per-quiz override for how many
+-- questions/prompts a session draws per level, replacing the flat QUESTIONS_PER_SESSION constant
+-- as the draw size for any catalog the quiz grants access to. Never below MIN_QUESTIONS_PER_LEVEL
+-- (lib/sessionRules.ts) — every quiz must have at least 4 questions per level. If your database
+-- predates this:
+--
+--   ALTER TABLE assembled_quiz ADD COLUMN IF NOT EXISTS questions_per_level integer NOT NULL DEFAULT 4;
+--
+--   ALTER TABLE assembled_quiz ADD CONSTRAINT ck_assembled_quiz_questions_per_level
+--     CHECK (questions_per_level >= 4);
+--
+-- No backfill needed: DEFAULT 4 already matches QUESTIONS_PER_SESSION, so every existing quiz
+-- draws exactly as it did before this column existed.
