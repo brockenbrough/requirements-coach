@@ -8,8 +8,21 @@ import { loadAssembledQuizzes, type AssembledQuizSummary } from '../../../lib/as
 import { loadCourses, type CourseSummary } from '../../../lib/courseClient';
 import { loadQuizzes, type QuizSummary } from '../../../lib/quizClient';
 import { useRequireRole } from '../../../lib/useRequireRole';
+import type { GradingKind } from '../../../lib/activityTypes';
 
 const TOAST_MS = 3200;
+
+/**
+ * A quiz's catalogs can be a mix of MCQ and LLM-graded (nothing stops composing both kinds into
+ * one quiz), so its "type" is derived from the distinct set of gradingKinds among its linked
+ * catalogs rather than assumed to be one value.
+ */
+function quizTypeLabel(catalogs: { gradingKind: GradingKind }[]): string {
+  const kinds = new Set(catalogs.map((c) => c.gradingKind));
+  if (kinds.size === 0) return '—';
+  if (kinds.size > 1) return 'Mixed';
+  return kinds.has('llm-graded') ? 'LLM-graded' : 'Multiple choice';
+}
 
 /**
  * GitHub #360: compose a quiz from one or more question catalogs (GitHub #347/#359) for one of
@@ -62,7 +75,7 @@ export default function InstructorAssembledQuizzesPage() {
   if (loading || !authorized) return null;
   if (!token) return null;
 
-  function handleCreated(quiz: { id: string; name: string; description: string | null; courseId: string; catalogs: { activityType: string; name: string }[]; catalogNames: string[] }) {
+  function handleCreated(quiz: { id: string; name: string; description: string | null; courseId: string; catalogs: { activityType: string; name: string; gradingKind: GradingKind }[]; catalogNames: string[] }) {
     const course = (courses ?? []).find((c) => c.id === quiz.courseId);
 
     setQuizzes((current) => [
@@ -146,13 +159,14 @@ export default function InstructorAssembledQuizzesPage() {
                     <tr className="bg-brand-navy text-brand-ink-muted">
                       <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Name</th>
                       <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Course</th>
+                      <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Type</th>
                       <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide">Catalogs</th>
                     </tr>
                   </thead>
                   <tbody>
                     {quizzes.length === 0 ? (
                       <tr>
-                        <td colSpan={3} className="bg-brand-navy-2 px-4 py-10 text-center text-sm font-semibold text-brand-ink-muted">
+                        <td colSpan={4} className="bg-brand-navy-2 px-4 py-10 text-center text-sm font-semibold text-brand-ink-muted">
                           You haven&apos;t created a quiz yet.
                         </td>
                       </tr>
@@ -165,6 +179,24 @@ export default function InstructorAssembledQuizzesPage() {
                             </Link>
                           </td>
                           <td className="whitespace-nowrap px-4 py-3 text-gray-500">{quiz.courseName}</td>
+                          <td className="whitespace-nowrap px-4 py-3">
+                            {(() => {
+                              const label = quizTypeLabel(quiz.catalogs);
+                              const kinds = new Set(quiz.catalogs.map((c) => c.gradingKind));
+                              const isLlmGraded = kinds.size === 1 && kinds.has('llm-graded');
+                              return (
+                                <span
+                                  className={`rounded-full px-2.5 py-1 text-xs font-extrabold ${
+                                    isLlmGraded
+                                      ? 'bg-brand-teal/15 text-brand-teal-dark'
+                                      : 'bg-brand-purple/10 text-brand-purple-dark'
+                                  }`}
+                                >
+                                  {label}
+                                </span>
+                              );
+                            })()}
+                          </td>
                           <td className="px-4 py-3 text-gray-500">{quiz.catalogNames.join(', ') || '—'}</td>
                         </tr>
                       ))
