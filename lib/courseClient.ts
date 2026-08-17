@@ -61,8 +61,16 @@ function patchJson(payload: unknown): RequestInit {
  * answer to "open vs. instructor-assigned" enrollment, not a gate layered on top of a code — so
  * neither ever had a column to persist to. The create-course form no longer collects either.
  */
-export async function createCourse(token: string, name: string): Promise<ApiResult<{ course: CourseSummary }>> {
-  const result = await request<{ course: CourseMeta }>('/api/instructor/courses', postJson({ name }), token);
+export async function createCourse(
+  token: string,
+  name: string,
+  options?: { semester?: string | null; coverImageUrl?: string | null },
+): Promise<ApiResult<{ course: CourseSummary }>> {
+  const result = await request<{ course: CourseMeta }>(
+    '/api/instructor/courses',
+    postJson({ name, semester: options?.semester ?? null, coverImageUrl: options?.coverImageUrl ?? null }),
+    token,
+  );
   if (!result.ok) return result;
 
   return { ok: true, data: { course: { ...result.data.course, createdAt: toInstant(result.data.course.createdAt), studentCount: 0 } } };
@@ -111,16 +119,59 @@ export async function duplicateCourse(token: string, courseId: string, params: {
   return { ok: true, data: { course: { ...result.data.course, createdAt: toInstant(result.data.course.createdAt) } } };
 }
 
-/** Renames a course (PATCH /api/instructor/courses/{id}). No enrollmentKey — see createCourse. */
-export async function updateCourse(token: string, courseId: string, updates: { name: string }): Promise<ApiResult<{ course: CourseMeta }>> {
+/**
+ * Renames a course and/or updates its semester and/or its cover image (PATCH
+ * /api/instructor/courses/{id}). No enrollmentKey — see createCourse. semester/coverImageUrl are
+ * only sent when the caller passes them — omitting one leaves that stored value untouched
+ * server-side (see the route's own docblock).
+ */
+export async function updateCourse(
+  token: string,
+  courseId: string,
+  updates: { name: string; semester?: string | null; coverImageUrl?: string | null },
+): Promise<ApiResult<{ course: CourseMeta }>> {
   const result = await request<{ course: CourseMeta }>(
     `/api/instructor/courses/${encodeURIComponent(courseId)}`,
-    patchJson({ name: updates.name }),
+    patchJson({
+      name: updates.name,
+      ...(updates.semester !== undefined ? { semester: updates.semester } : {}),
+      ...(updates.coverImageUrl !== undefined ? { coverImageUrl: updates.coverImageUrl } : {}),
+    }),
     token,
   );
   if (!result.ok) return result;
 
   return { ok: true, data: { course: { ...result.data.course, createdAt: toInstant(result.data.course.createdAt) } } };
+}
+
+/**
+ * Uploads an image to the public `course-covers` bucket (POST /api/instructor/course-covers,
+ * GitHub #363 follow-up) and returns its public URL — the URL is then passed as `coverImageUrl`
+ * to createCourse/updateCourse; this function never touches a course row itself (see the route's
+ * own docblock for why the two are decoupled). Bypasses the shared request() helper like
+ * exportCourseReport does, since the body here is FormData, not JSON.
+ */
+export async function uploadCourseCover(token: string, file: File): Promise<ApiResult<{ url: string }>> {
+  const formData = new FormData();
+  formData.append('image', file);
+
+  let response: Response;
+  try {
+    response = await fetch('/api/instructor/course-covers', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+  } catch {
+    return { ok: false, status: 0, error: NETWORK_ERROR };
+  }
+
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    return { ok: false, status: response.status, error: body?.error || 'Something went wrong.' };
+  }
+
+  return { ok: true, data: body as { url: string } };
 }
 
 /**

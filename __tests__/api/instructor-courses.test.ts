@@ -72,6 +72,8 @@ function courseRow(overrides: Partial<Record<string, unknown>> = {}) {
     course_name: 'Software Requirements',
     course_code: 'ABCDEF',
     created_at: '2026-08-11T10:00:00',
+    semester: null,
+    cover_image_url: null,
     ...overrides,
   };
 }
@@ -89,6 +91,8 @@ function courseWithCountRow(overrides: Partial<Record<string, unknown>> = {}) {
     course_name: 'Software Requirements',
     course_code: 'ABCDEF',
     created_at: '2026-08-11T10:00:00',
+    semester: null,
+    cover_image_url: null,
     student_course: [{ count: 3 }],
     ...overrides,
   };
@@ -159,7 +163,51 @@ describe('POST /api/instructor/courses', () => {
       name: 'Software Requirements',
       code: 'ABCDEF',
       createdAt: '2026-08-11T10:00:00',
+      semester: null,
+      coverImageUrl: null,
     });
+  });
+
+  it('creates a course with a trimmed cover image URL when one is given', async () => {
+    queueRole('instructor');
+    queue('course', { data: courseRow({ cover_image_url: 'https://example.com/course-covers/instructor-1/x.png' }), error: null });
+
+    const res = await POST(postRequest({ name: 'Software Requirements', coverImageUrl: '  https://example.com/course-covers/instructor-1/x.png  ' }));
+    expect(res.status).toBe(201);
+
+    const body = await res.json();
+    expect(body.course.coverImageUrl).toBe('https://example.com/course-covers/instructor-1/x.png');
+
+    const insert = h.state.inserts.find((i) => i.table === 'course');
+    expect(insert?.payload).toMatchObject({ cover_image_url: 'https://example.com/course-covers/instructor-1/x.png' });
+  });
+
+  it('returns 400 for a non-string coverImageUrl', async () => {
+    queueRole('instructor');
+    const res = await POST(postRequest({ name: 'Software Requirements', coverImageUrl: 123 }));
+    expect(res.status).toBe(400);
+    expect(h.state.tables).not.toContain('course');
+  });
+
+  it('creates a course with a trimmed semester when one is given', async () => {
+    queueRole('instructor');
+    queue('course', { data: courseRow({ semester: 'SoSe 2026' }), error: null });
+
+    const res = await POST(postRequest({ name: 'Software Requirements', semester: '  SoSe 2026  ' }));
+    expect(res.status).toBe(201);
+
+    const body = await res.json();
+    expect(body.course.semester).toBe('SoSe 2026');
+
+    const insert = h.state.inserts.find((i) => i.table === 'course');
+    expect(insert?.payload).toMatchObject({ semester: 'SoSe 2026' });
+  });
+
+  it('returns 400 for a non-string semester', async () => {
+    queueRole('instructor');
+    const res = await POST(postRequest({ name: 'Software Requirements', semester: 123 }));
+    expect(res.status).toBe(400);
+    expect(h.state.tables).not.toContain('course');
   });
 
   it('inserts with creator_id from the token and a 6-character generated code', async () => {
@@ -246,8 +294,8 @@ describe('GET /api/instructor/courses', () => {
 
     const body = await res.json();
     expect(body.courses).toEqual([
-      { id: 'course-1', name: 'Software Requirements', code: 'ABCDEF', createdAt: '2026-08-11T10:00:00', studentCount: 3 },
-      { id: 'course-2', name: 'Software Requirements', code: 'ABCDEF', createdAt: '2026-08-11T10:00:00', studentCount: 0 },
+      { id: 'course-1', name: 'Software Requirements', code: 'ABCDEF', createdAt: '2026-08-11T10:00:00', semester: null, coverImageUrl: null, studentCount: 3 },
+      { id: 'course-2', name: 'Software Requirements', code: 'ABCDEF', createdAt: '2026-08-11T10:00:00', semester: null, coverImageUrl: null, studentCount: 0 },
     ]);
   });
 

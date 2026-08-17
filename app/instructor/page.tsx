@@ -29,7 +29,18 @@ import {
   type OwnedActivityTypeSummary,
   type StudentSummary,
 } from '../../lib/sessionClient';
-import { loadCourses, loadCourseStats, type CourseSummary, type CourseActivityStats } from '../../lib/courseClient';
+import {
+  loadCourses,
+  loadCourseStats,
+  loadAllCourseClassStats,
+  type CourseSummary,
+  type CourseActivityStats,
+  type CourseClassStats as CourseClassStatsData,
+} from '../../lib/courseClient';
+import { CourseCard } from '../../components/CourseCard';
+import { DeleteCourseModal } from '../../components/DeleteCourseModal';
+import { DuplicateCourseModal } from '../../components/DuplicateCourseModal';
+import { EditCourseModal } from '../../components/EditCourseModal';
 import { useRequireRole } from '../../lib/useRequireRole';
 
 const PAGE_SIZE = 10;
@@ -57,6 +68,10 @@ function InstructorDashboardContent() {
   const [courses, setCourses] = useState<CourseSummary[] | null>(null);
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const [courseStats, setCourseStats] = useState<CourseActivityStats[] | null>(null);
+  const [courseClassStatsById, setCourseClassStatsById] = useState<Record<string, CourseClassStatsData> | null>(null);
+  const [duplicateSource, setDuplicateSource] = useState<CourseSummary | null>(null);
+  const [editSource, setEditSource] = useState<CourseSummary | null>(null);
+  const [deleteSource, setDeleteSource] = useState<CourseSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -83,6 +98,12 @@ function InstructorDashboardContent() {
 
     loadCourses(token).then((result) => {
       if (!cancelled && result.ok) setCourses(result.data.courses);
+    });
+
+    loadAllCourseClassStats(token).then((result) => {
+      if (!cancelled && result.ok) {
+        setCourseClassStatsById(Object.fromEntries(result.data.stats.map((s) => [s.courseId, s])));
+      }
     });
 
     Promise.all([
@@ -240,32 +261,18 @@ function InstructorDashboardContent() {
               </Link>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {courses.map((course) => {
-                const selected = selectedCourseId === course.id;
-                return (
-                  <div
-                    key={course.id}
-                    className={`rounded-brand-lg border p-4 shadow-sm transition ${selected ? 'border-brand-purple bg-brand-purple/5' : 'border-gray-100 bg-white'}`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => handleSelectCourse(selected ? null : course.id)}
-                      className="w-full text-left"
-                    >
-                      <p className="mb-1 font-extrabold text-brand-navy">{course.name}</p>
-                      <p className="mb-2 text-sm font-semibold text-gray-500">
-                        {course.studentCount} {course.studentCount === 1 ? 'student' : 'students'} enrolled
-                      </p>
-                    </button>
-                    <Link
-                      href={`/instructor/courses/${course.id}`}
-                      className="text-xs font-bold text-brand-purple hover:underline"
-                    >
-                      View roster →
-                    </Link>
-                  </div>
-                );
-              })}
+              {courses.map((course) => (
+                <CourseCard
+                  key={course.id}
+                  course={course}
+                  classStats={courseClassStatsById?.[course.id] ?? null}
+                  selected={selectedCourseId === course.id}
+                  onSelect={(c) => handleSelectCourse(selectedCourseId === c.id ? null : c.id)}
+                  onDuplicate={setDuplicateSource}
+                  onEdit={setEditSource}
+                  onDelete={setDeleteSource}
+                />
+              ))}
             </div>
           </div>
         ) : null}
@@ -342,6 +349,43 @@ function InstructorDashboardContent() {
           </>
         )}
       </div>
+
+      {duplicateSource && token ? (
+        <DuplicateCourseModal
+          course={duplicateSource}
+          token={token}
+          onClose={() => setDuplicateSource(null)}
+          onCreated={(course) => setCourses((current) => [course, ...(current ?? [])])}
+        />
+      ) : null}
+
+      {editSource && token ? (
+        <EditCourseModal
+          course={editSource}
+          token={token}
+          onClose={() => setEditSource(null)}
+          onSaved={(updated) =>
+            setCourses((current) =>
+              (current ?? []).map((c) =>
+                c.id === updated.id ? { ...c, name: updated.name, semester: updated.semester, coverImageUrl: updated.coverImageUrl } : c,
+              ),
+            )
+          }
+        />
+      ) : null}
+
+      {deleteSource && token ? (
+        <DeleteCourseModal
+          course={{ id: deleteSource.id, name: deleteSource.name, studentCount: deleteSource.studentCount }}
+          token={token}
+          onClose={() => setDeleteSource(null)}
+          onDeleted={() => {
+            setCourses((current) => (current ?? []).filter((c) => c.id !== deleteSource.id));
+            if (selectedCourseId === deleteSource.id) setSelectedCourseId(null);
+            setDeleteSource(null);
+          }}
+        />
+      ) : null}
     </AppShell>
   );
 }

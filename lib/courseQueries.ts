@@ -28,13 +28,15 @@ export type CourseRecord = {
   course_code: string;
   creator_id: string;
   created_at: string;
+  semester: string | null;
+  cover_image_url: string | null;
 };
 
 // creator_id is included even though createCourseWithUniqueCode's own response never discloses
 // it — findOwnedCourse (below) needs it for every ownership check, and reusing one column list
 // keeps the *Queries.ts convention of a single source of truth for "what a course row looks
 // like" rather than a second, narrower select just for the create path.
-const COURSE_COLUMNS = 'course_id, course_name, course_code, creator_id, created_at';
+const COURSE_COLUMNS = 'course_id, course_name, course_code, creator_id, created_at, semester, cover_image_url';
 
 /**
  * Inserts a new course with a freshly generated code, retrying on a uq_course_code collision
@@ -48,13 +50,21 @@ const COURSE_COLUMNS = 'course_id, course_name, course_code, creator_id, created
  * self-serve join — see REQ-DL-5's schema comment), but this route always generates one: its
  * whole point is handing the instructor something to share.
  *
+ * semester (GitHub #363) is optional and defaults to null on insert — the duplicate route
+ * deliberately never passes one (see its own docblock: a copy is typically meant for a *new*
+ * offering, so carrying the source's term over would be misleading more often than helpful).
+ *
+ * coverImageUrl (GitHub #363 follow-up) is likewise optional and defaults to null — but unlike
+ * semester, the duplicate route *does* carry the source's cover over (see its own docblock: a
+ * course's visual identity is more "same course, different section" than semester is).
+ *
  * Any non-23505 error fails immediately. Exhausting every attempt on 23505 is reported back as
  * its own error rather than thrown, matching every other *Queries.ts function's { data, error }
  * shape.
  */
 export async function createCourseWithUniqueCode(
   supabase: SupabaseClient,
-  params: { name: string; creatorId: string },
+  params: { name: string; creatorId: string; semester?: string | null; coverImageUrl?: string | null },
 ) {
   for (let attempt = 0; attempt < MAX_CODE_ATTEMPTS; attempt++) {
     const { data, error } = await supabase
@@ -64,6 +74,8 @@ export async function createCourseWithUniqueCode(
         creator_id: params.creatorId,
         course_name: params.name,
         course_code: generateCourseCode(),
+        semester: params.semester ?? null,
+        cover_image_url: params.coverImageUrl ?? null,
       })
       .select(COURSE_COLUMNS)
       .single();
@@ -155,7 +167,7 @@ export async function findOwnedCourse(
 export async function listCoursesForInstructor(supabase: SupabaseClient, instructorId: string) {
   const { data, error } = await supabase
     .from('course')
-    .select('course_id, course_name, course_code, created_at, student_course(count)')
+    .select('course_id, course_name, course_code, created_at, semester, cover_image_url, student_course(count)')
     .eq('creator_id', instructorId)
     .order('created_at', { ascending: false });
 
@@ -166,6 +178,8 @@ export async function listCoursesForInstructor(supabase: SupabaseClient, instruc
     course_name: string;
     course_code: string;
     created_at: string;
+    semester: string | null;
+    cover_image_url: string | null;
     student_course: { count: number }[] | null;
   };
 
@@ -174,17 +188,33 @@ export async function listCoursesForInstructor(supabase: SupabaseClient, instruc
     course_name: row.course_name,
     course_code: row.course_code,
     created_at: row.created_at,
+    semester: row.semester,
+    cover_image_url: row.cover_image_url,
     student_count: row.student_course?.[0]?.count ?? 0,
   }));
 
   return { courses, error: null };
 }
 
-/** Renames a course. Ownership is checked by the caller (findOwnedCourse) before this runs. */
-export async function updateCourseName(supabase: SupabaseClient, params: { courseId: string; name: string }) {
+/**
+ * Renames a course and/or updates its semester/term label and/or its cover image (GitHub #363,
+ * #363 follow-up). Ownership is checked by the caller (findOwnedCourse) before this runs.
+ * semester/coverImageUrl are only touched when the caller passes them — omitting a key leaves
+ * the stored value alone, rather than every PATCH call needing to resend the full course meta.
+ */
+export async function updateCourseMeta(
+  supabase: SupabaseClient,
+  params: { courseId: string; name: string; semester?: string | null; coverImageUrl?: string | null },
+) {
+  const updates: { course_name: string; semester?: string | null; cover_image_url?: string | null } = {
+    course_name: params.name,
+  };
+  if (params.semester !== undefined) updates.semester = params.semester;
+  if (params.coverImageUrl !== undefined) updates.cover_image_url = params.coverImageUrl;
+
   const { data, error } = await supabase
     .from('course')
-    .update({ course_name: params.name })
+    .update(updates)
     .eq('course_id', params.courseId)
     .select(COURSE_COLUMNS)
     .single();
