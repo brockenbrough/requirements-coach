@@ -104,3 +104,16 @@ export function loadQuizDetail(token: string, activityType: string): Promise<Api
     token,
   );
 }
+
+/**
+ * Deletes a catalog and unlinks it from every assembled quiz it was composed into
+ * (DELETE /api/instructor/quizzes/{activityType}). Refuses with a 409 (surfaced as `error`) if a
+ * student has already engaged with it.
+ */
+export function deleteCatalog(token: string, activityType: string): Promise<ApiResult<{ activityType: string }>> {
+  return request<{ activityType: string }>(
+    `/api/instructor/quizzes/${encodeURIComponent(activityType)}`,
+    { method: 'DELETE' },
+    token,
+  );
+}
