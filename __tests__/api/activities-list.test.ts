@@ -93,12 +93,22 @@ describe('GET /api/activities', () => {
         {
           activity_type: 'IDENTIFY_WEAK_USER_STORIES',
           catalog: { quiz_name: 'Identify Weak User Stories', description: null, grading_kind: 'mcq' },
-          assembled_quiz: { course_id: 'course-1', course: { course_name: 'Software Requirements' } },
+          assembled_quiz: {
+            course_id: 'course-1',
+            quiz_name: 'Weak Stories — Sprint 2',
+            description: 'Sprint 2 edition',
+            course: { course_name: 'Software Requirements' },
+          },
         },
         {
           activity_type: 'MY_CUSTOM_QUIZ',
           catalog: { quiz_name: 'My Custom Quiz', description: 'A quiz about things', grading_kind: 'llm-graded' },
-          assembled_quiz: { course_id: 'course-2', course: { course_name: 'Advanced SE' } },
+          assembled_quiz: {
+            course_id: 'course-2',
+            quiz_name: 'Advanced Practice Set',
+            description: 'For the advanced section',
+            course: { course_name: 'Advanced SE' },
+          },
         },
       ],
       error: null,
@@ -111,16 +121,16 @@ describe('GET /api/activities', () => {
     expect(body.activities).toEqual([
       {
         activityType: 'IDENTIFY_WEAK_USER_STORIES',
-        name: 'Identify Weak User Stories',
-        description: null,
+        name: 'Weak Stories — Sprint 2',
+        description: 'Sprint 2 edition',
         gradingKind: 'mcq',
         courseId: 'course-1',
         courseName: 'Software Requirements',
       },
       {
         activityType: 'MY_CUSTOM_QUIZ',
-        name: 'My Custom Quiz',
-        description: 'A quiz about things',
+        name: 'Advanced Practice Set',
+        description: 'For the advanced section',
         gradingKind: 'llm-graded',
         courseId: 'course-2',
         courseName: 'Advanced SE',

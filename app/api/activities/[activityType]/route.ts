@@ -19,9 +19,13 @@ function getToken(request: Request): string | null {
  * quiz at all" and "only through quizzes in the wrong course" both collapse to the same 403, so
  * neither leaks which catalogs/quizzes exist otherwise. getAccessibleCourseForActivity
  * (lib/activityCourseQueries.ts) is the one call that both answers the access question and, when
- * it says yes, hands back the specific course that granted it — the other two routes that use its
- * sibling checkActivityAccess (POST /api/sessions, GET /api/activities/{activityType}/questions)
- * only need the boolean, this one also needs a courseId/courseName to answer with.
+ * it says yes, hands back the specific course that granted it, plus display name/description
+ * sourced from the assembled quiz itself (not the underlying catalog — see that function's
+ * docstring) — the other two routes that use its sibling checkActivityAccess (POST /api/sessions,
+ * GET /api/activities/{activityType}/questions) only need the boolean. getQuizByActivityType is
+ * still used here, but only for the 404 check and gradingKind (a catalog-level concept an
+ * assembled_quiz has no column for) — do not source name/description from it, that's the bug this
+ * route used to have.
  *
  * - 401 missing/invalid bearer token
  * - 404 activityType matches no catalog
@@ -53,8 +57,8 @@ export async function GET(request: Request, { params }: { params: { activityType
     {
       activity: {
         activityType: quiz.activityType,
-        name: quiz.name,
-        description: quiz.description,
+        name: link.name,
+        description: link.description,
         // GitHub #379: which play flow the client should enter. buildCustomActivityDefinition
         // reads this straight off the response, so a custom LLM-graded catalog reached by its raw
         // key lands in the free-text flow instead of the MCQ one.

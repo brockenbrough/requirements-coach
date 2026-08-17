@@ -69,16 +69,34 @@ describe('getAccessibleCourseForActivity', () => {
     expect(result).toEqual({ link: null, error: null });
   });
 
-  it('returns the granting course when an assembled quiz in an enrolled course references the catalog', async () => {
+  it('returns the granting course and the assembled quiz\'s own name/description', async () => {
     queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
     queue('assembled_quiz_catalog', {
-      data: [{ assembled_quiz: { course_id: 'course-1', course: { course_name: 'Intro to SE' } } }],
+      data: [
+        {
+          assembled_quiz: {
+            course_id: 'course-1',
+            quiz_name: 'Week 3 Review',
+            description: 'Assembled for Week 3',
+            course: { course_name: 'Intro to SE' },
+          },
+          catalog: { quiz_name: 'Sprint 1 Check', description: 'Covers sprint basics' },
+        },
+      ],
       error: null,
     });
 
     const result = await getAccessibleCourseForActivity(makeSupabase(), 'CUSTOM_QUIZ', 'student-1');
 
-    expect(result).toEqual({ link: { courseId: 'course-1', courseName: 'Intro to SE' }, error: null });
+    expect(result).toEqual({
+      link: {
+        courseId: 'course-1',
+        courseName: 'Intro to SE',
+        name: 'Week 3 Review',
+        description: 'Assembled for Week 3',
+      },
+      error: null,
+    });
     expect(state.filters).toContainEqual({ table: 'assembled_quiz_catalog', column: 'activity_type', value: 'CUSTOM_QUIZ' });
     expect(state.filters).toContainEqual({ table: 'assembled_quiz_catalog', column: 'assembled_quiz.course_id', value: ['course-1'] });
   });
@@ -86,13 +104,40 @@ describe('getAccessibleCourseForActivity', () => {
   it('falls back to a placeholder name if the embedded course is missing', async () => {
     queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
     queue('assembled_quiz_catalog', {
-      data: [{ assembled_quiz: { course_id: 'course-1', course: null } }],
+      data: [
+        {
+          assembled_quiz: { course_id: 'course-1', quiz_name: 'Week 3 Review', description: null, course: null },
+          catalog: { quiz_name: 'Sprint 1 Check', description: 'Covers sprint basics' },
+        },
+      ],
       error: null,
     });
 
     const result = await getAccessibleCourseForActivity(makeSupabase(), 'CUSTOM_QUIZ', 'student-1');
 
-    expect(result.link).toEqual({ courseId: 'course-1', courseName: 'Unknown course' });
+    expect(result.link).toEqual({
+      courseId: 'course-1',
+      courseName: 'Unknown course',
+      name: 'Week 3 Review',
+      description: 'Covers sprint basics',
+    });
+  });
+
+  it('falls back to the catalog description, not null, when the assembled quiz has none', async () => {
+    queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
+    queue('assembled_quiz_catalog', {
+      data: [
+        {
+          assembled_quiz: { course_id: 'course-1', quiz_name: 'Week 3 Review', description: null, course: { course_name: 'Intro to SE' } },
+          catalog: { quiz_name: 'Sprint 1 Check', description: 'Covers sprint basics' },
+        },
+      ],
+      error: null,
+    });
+
+    const result = await getAccessibleCourseForActivity(makeSupabase(), 'CUSTOM_QUIZ', 'student-1');
+
+    expect(result.link?.description).toBe('Covers sprint basics');
   });
 
   it('surfaces an enrolled-course lookup error', async () => {
@@ -125,7 +170,12 @@ describe('checkActivityAccess', () => {
   it('is ok when an enrolled course grants access through an assembled quiz', async () => {
     queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
     queue('assembled_quiz_catalog', {
-      data: [{ assembled_quiz: { course_id: 'course-1', course: { course_name: 'Intro to SE' } } }],
+      data: [
+        {
+          assembled_quiz: { course_id: 'course-1', quiz_name: 'Linked Quiz', description: null, course: { course_name: 'Intro to SE' } },
+          catalog: { quiz_name: 'Sprint 1 Check', description: null },
+        },
+      ],
       error: null,
     });
 
@@ -151,13 +201,18 @@ describe('listActivityTypesForCourses', () => {
     expect(state.tables).toEqual([]);
   });
 
-  it('maps every reachable activity with its catalog and granting-course info', async () => {
+  it('maps every reachable activity with the assembled quiz\'s own name/description, not the catalog\'s', async () => {
     queue('assembled_quiz_catalog', {
       data: [
         {
           activity_type: 'CUSTOM_QUIZ',
           catalog: { quiz_name: 'Sprint 1 Check', description: 'Covers sprint basics', grading_kind: 'mcq' },
-          assembled_quiz: { course_id: 'course-1', course: { course_name: 'Intro to SE' } },
+          assembled_quiz: {
+            course_id: 'course-1',
+            quiz_name: 'Week 3 Review',
+            description: 'Assembled for Week 3',
+            course: { course_name: 'Intro to SE' },
+          },
         },
       ],
       error: null,
@@ -169,8 +224,8 @@ describe('listActivityTypesForCourses', () => {
       activities: [
         {
           activityType: 'CUSTOM_QUIZ',
-          name: 'Sprint 1 Check',
-          description: 'Covers sprint basics',
+          name: 'Week 3 Review',
+          description: 'Assembled for Week 3',
           gradingKind: 'mcq',
           courseId: 'course-1',
           courseName: 'Intro to SE',
@@ -181,18 +236,41 @@ describe('listActivityTypesForCourses', () => {
     expect(state.filters).toContainEqual({ table: 'assembled_quiz_catalog', column: 'assembled_quiz.course_id', value: ['course-1'] });
   });
 
-  it('deduplicates a catalog reachable through more than one quiz, keeping the first match', async () => {
+  it('falls back to the catalog name/description when the assembled quiz has none', async () => {
+    queue('assembled_quiz_catalog', {
+      data: [
+        {
+          activity_type: 'CUSTOM_QUIZ',
+          catalog: { quiz_name: 'Sprint 1 Check', description: 'Covers sprint basics', grading_kind: 'mcq' },
+          assembled_quiz: {
+            course_id: 'course-1',
+            quiz_name: null,
+            description: null,
+            course: { course_name: 'Intro to SE' },
+          },
+        },
+      ],
+      error: null,
+    });
+
+    const result = await listActivityTypesForCourses(makeSupabase(), ['course-1']);
+
+    expect(result.activities?.[0].name).toBe('Sprint 1 Check');
+    expect(result.activities?.[0].description).toBe('Covers sprint basics');
+  });
+
+  it('deduplicates a catalog reachable through more than one quiz, keeping the first match — including its name', async () => {
     queue('assembled_quiz_catalog', {
       data: [
         {
           activity_type: 'CUSTOM_QUIZ',
           catalog: { quiz_name: 'Sprint 1 Check', description: null },
-          assembled_quiz: { course_id: 'course-1', course: { course_name: 'Intro to SE' } },
+          assembled_quiz: { course_id: 'course-1', quiz_name: 'Course 1 Sprint Check', description: null, course: { course_name: 'Intro to SE' } },
         },
         {
           activity_type: 'CUSTOM_QUIZ',
           catalog: { quiz_name: 'Sprint 1 Check', description: null },
-          assembled_quiz: { course_id: 'course-2', course: { course_name: 'Advanced SE' } },
+          assembled_quiz: { course_id: 'course-2', quiz_name: 'Course 2 Sprint Check', description: null, course: { course_name: 'Advanced SE' } },
         },
       ],
       error: null,
@@ -202,6 +280,7 @@ describe('listActivityTypesForCourses', () => {
 
     expect(result.activities).toHaveLength(1);
     expect(result.activities?.[0].courseId).toBe('course-1');
+    expect(result.activities?.[0].name).toBe('Course 1 Sprint Check');
   });
 
   it('surfaces a query error', async () => {
