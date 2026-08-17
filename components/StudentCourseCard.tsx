@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { joinCourseByCode, leaveCourse } from '../lib/studentCourseClient';
 import { resolveCourseCoverSrc } from '../lib/courseCovers';
@@ -47,6 +48,16 @@ function LeaveIcon() {
  * same window.confirm() as components/ResumeOrAbandonPrompt.tsx for a single-course, self-only
  * consequence. On success this card flips back to the not-joined state (onLeft) rather than
  * disappearing, since this page lists every course, member or not.
+ *
+ * Already-joined cards are also click-through (GitHub #427 follow-up): the cover+name+meta area
+ * becomes a Link into that course's quiz list (app/courses/[id]/page.tsx), same destination as
+ * components/JoinedCourseCard.tsx on the "My Courses" page — a student shouldn't have to leave
+ * this browse page to reach a course they're already in. The Leave button stays a sibling of that
+ * Link (not nested inside it — a <button> inside an <a> is invalid HTML and unreliable to click,
+ * the same reasoning components/CourseCard.tsx's own kebab menu placement documents), so clicking
+ * it never also navigates. A not-yet-joined card has nothing to link to (there is no accessible
+ * course page until the student is actually enrolled), so it stays a plain, non-clickable
+ * container around the code-entry form.
  */
 export function StudentCourseCard({
   course,
@@ -102,26 +113,13 @@ export function StudentCourseCard({
     onLeft(course.id);
   }
 
-  return (
-    <div className="relative overflow-hidden rounded-brand-lg border border-gray-100 bg-white shadow-sm transition hover:border-brand-purple/40 hover:shadow-md">
+  const cardBody = (
+    <>
       {/* Plain <img>, not next/image — see components/CourseCard.tsx's own comment on why. */}
       <div className="relative h-28 w-full overflow-hidden bg-brand-navy sm:h-32">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={resolveCourseCoverSrc(course)} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
       </div>
-
-      {course.alreadyMember ? (
-        <button
-          type="button"
-          onClick={() => void handleLeave()}
-          disabled={leaving}
-          aria-label={`Leave ${course.name}`}
-          title="Leave course"
-          className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full border border-white/40 bg-black/35 text-white backdrop-blur-sm transition hover:bg-black/55 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          <LeaveIcon />
-        </button>
-      ) : null}
 
       <div className="p-4">
         <p className="line-clamp-1 font-extrabold text-brand-navy">{course.name}</p>
@@ -192,6 +190,31 @@ export function StudentCourseCard({
           )}
         </div>
       </div>
+    </>
+  );
+
+  return (
+    <div className="relative overflow-hidden rounded-brand-lg border border-gray-100 bg-white shadow-sm transition hover:border-brand-purple/40 hover:shadow-md">
+      {course.alreadyMember ? (
+        <Link href={`/courses/${encodeURIComponent(course.id)}`} className="block">
+          {cardBody}
+        </Link>
+      ) : (
+        <div>{cardBody}</div>
+      )}
+
+      {course.alreadyMember ? (
+        <button
+          type="button"
+          onClick={() => void handleLeave()}
+          disabled={leaving}
+          aria-label={`Leave ${course.name}`}
+          title="Leave course"
+          className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full border border-white/40 bg-black/35 text-white backdrop-blur-sm transition hover:bg-black/55 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <LeaveIcon />
+        </button>
+      ) : null}
     </div>
   );
 }

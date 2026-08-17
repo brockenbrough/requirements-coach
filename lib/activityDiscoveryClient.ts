@@ -45,9 +45,16 @@ async function request<T>(url: string, token: string): Promise<ApiResult<T>> {
  * Every activity (built-in or instructor-created) linked to a course the caller is enrolled in
  * (GET /api/activities). Not cached — same reasoning as loadStudentTitles: course membership and
  * catalog linkage can both change between visits, and this list is cheap enough to just refetch.
+ *
+ * An optional courseId (GitHub #427) narrows this to just that one course's activities — the
+ * student course-detail page's "quizzes in this course" list.
  */
-export function loadAvailableActivities(token: string): Promise<ApiResult<{ activities: CourseActivity[] }>> {
-  return request<{ activities: CourseActivity[] }>('/api/activities', token);
+export function loadAvailableActivities(
+  token: string,
+  options?: { courseId?: string },
+): Promise<ApiResult<{ activities: CourseActivity[] }>> {
+  const url = options?.courseId ? `/api/activities?courseId=${encodeURIComponent(options.courseId)}` : '/api/activities';
+  return request<{ activities: CourseActivity[] }>(url, token);
 }
 
 /**

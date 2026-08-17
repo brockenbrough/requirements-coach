@@ -57,6 +57,20 @@ export async function loadJoinableCourses(token: string): Promise<ApiResult<{ co
 }
 
 /**
+ * GET /api/courses/mine — every course the caller is actually enrolled in (GitHub #427), backing
+ * the student "My Courses" page (app/activities/page.tsx). Deliberately not loadJoinableCourses
+ * filtered client-side by alreadyMember — see the route's own docblock for why that would miss a
+ * codeless, instructor-assigned enrollment. Uncached, same reasoning as loadJoinableCourses: a
+ * just-joined or just-left course must show up without waiting out a stale cache.
+ */
+export async function loadMyCourses(token: string): Promise<ApiResult<{ courses: JoinableCourse[] }>> {
+  const result = await request<{ courses: JoinableCourse[] }>('/api/courses/mine', { method: 'GET' }, token);
+  if (!result.ok) return result;
+
+  return { ok: true, data: { courses: result.data.courses.map((c) => ({ ...c, createdAt: toInstant(c.createdAt) })) } };
+}
+
+/**
  * POST /api/courses/join — joins a course by its code. Idempotent: joining a course the caller
  * already belongs to returns alreadyMember: true instead of an error (see the route's own docs).
  *
