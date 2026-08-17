@@ -398,6 +398,8 @@ export type JoinableCourseRecord = {
   professor_name: string;
   student_count: number;
   already_member: boolean;
+  semester: string | null;
+  cover_image_url: string | null;
 };
 
 /**
@@ -411,11 +413,16 @@ export type JoinableCourseRecord = {
  * backs must never disclose which other students are in a course, only whether the caller is.
  * professor_name's fallback chain mirrors loadEnrolledStudents's exactly (first/last name, else
  * username, else a fixed fallback).
+ *
+ * semester/cover_image_url (GitHub #424) are the same instructor-set fields the instructor's own
+ * course cards show — a browsing/joining student only ever reads them here, never sets them.
  */
 export async function listJoinableCourses(supabase: SupabaseClient, userId: string) {
   const { data, error } = await supabase
     .from('course')
-    .select('course_id, course_name, created_at, creator:creator_id(first_name, last_name, username), student_course(count)')
+    .select(
+      'course_id, course_name, created_at, semester, cover_image_url, creator:creator_id(first_name, last_name, username), student_course(count)',
+    )
     .not('course_code', 'is', null)
     .order('created_at', { ascending: false });
 
@@ -434,6 +441,8 @@ export async function listJoinableCourses(supabase: SupabaseClient, userId: stri
     course_id: string;
     course_name: string;
     created_at: string;
+    semester: string | null;
+    cover_image_url: string | null;
     creator: { first_name: string | null; last_name: string | null; username: string | null } | null;
     student_course: { count: number }[] | null;
   };
@@ -447,6 +456,8 @@ export async function listJoinableCourses(supabase: SupabaseClient, userId: stri
       professor_name: fullName || row.creator?.username || 'Unknown instructor',
       student_count: row.student_course?.[0]?.count ?? 0,
       already_member: memberIds.has(row.course_id),
+      semester: row.semester,
+      cover_image_url: row.cover_image_url,
     };
   });
 
