@@ -6,6 +6,11 @@
 // exclusions, and deleting a quiz. "Displayed as copies of the originals" is implemented as an
 // exclusion list (quiz_excluded_question), not duplicated question/answer rows — see the table's
 // comment in supabase/schema.sql for the full reasoning.
+//
+// GitHub #380 added the inverse: hand-picking an individual question directly onto a quiz
+// (assembled_quiz_extra_question), independent of whether its catalog is linked at all. See that
+// table's own header comment in supabase/schema.sql, and loadCatalogQuestionPool's docblock below
+// for the exact pool formula and the exclude-vs-hand-pick conflict rule.
 
 import type { SupabaseClient } from './sessionQueries';
 import { shuffleArray } from './shuffleArray';
@@ -243,6 +248,66 @@ export async function includeQuestionInQuiz(supabase: SupabaseClient, quizId: st
   return { error };
 }
 
+/** Every question this quiz has hand-picked directly (assembled_quiz_extra_question), as bare ids. */
+export async function listQuizExtraQuestionIds(supabase: SupabaseClient, quizId: string) {
+  const { data, error } = await supabase.from('assembled_quiz_extra_question').select('question_id').eq('assembled_quiz_id', quizId);
+  if (error) return { extraIds: null, error };
+  return { extraIds: ((data ?? []) as { question_id: string }[]).map((row) => row.question_id), error: null };
+}
+
+/**
+ * Hand-picks one question directly onto a quiz (GitHub #380), independent of whether its catalog
+ * is one of the quiz's linked catalogs (assembled_quiz_catalog) at all — see
+ * assembled_quiz_extra_question's own header comment in supabase/schema.sql. Never touches
+ * `question`/`answer`, same reasoning as excludeQuestionFromQuiz. Idempotent on a repeat pick
+ * (uq_assembled_quiz_extra_question, 23505).
+ */
+export async function addExtraQuestionToQuiz(supabase: SupabaseClient, quizId: string, questionId: string) {
+  const { error } = await supabase.from('assembled_quiz_extra_question').insert({ assembled_quiz_id: quizId, question_id: questionId });
+  if (!error) return { alreadyPicked: false, error: null };
+  if (error.code === UNIQUE_VIOLATION) return { alreadyPicked: true, error: null };
+  return { alreadyPicked: false, error };
+}
+
+/**
+ * Removes a hand-picked question from a quiz — only the assembled_quiz_extra_question row. The
+ * original question row, its catalog, and every other quiz that references it are untouched.
+ * Idempotent: removing a question that isn't currently hand-picked is still success, matching
+ * includeQuestionInQuiz above.
+ */
+export async function removeExtraQuestionFromQuiz(supabase: SupabaseClient, quizId: string, questionId: string) {
+  const { error } = await supabase.from('assembled_quiz_extra_question').delete().eq('assembled_quiz_id', quizId).eq('question_id', questionId);
+  return { error };
+}
+
+/**
+ * Fetches one question's display summary (question text, level, source catalog) by id — used by
+ * GitHub #380's create-and-hand-pick route to hand the freshly created, freshly hand-picked
+ * question straight back to the caller in the same shape as getQuizComposition's `extraQuestions`,
+ * so the composition page can append it to local state without a full refetch.
+ */
+export async function getExtraQuestionSummary(supabase: SupabaseClient, questionId: string) {
+  const { data, error } = await supabase
+    .from('question')
+    .select('question_id, question_prompt, difficulty_level, activity_type, catalog:activity_type(quiz_name)')
+    .eq('question_id', questionId)
+    .maybeSingle();
+
+  if (error) return { summary: null, error };
+  if (!data) return { summary: null, error: null };
+
+  const row = data as unknown as ExtraQuestionRow;
+  const summary: QuizExtraQuestionSummary = {
+    questionId: row.question_id,
+    questionText: row.question_prompt,
+    level: row.difficulty_level as 1 | 2 | 3,
+    catalogActivityType: row.activity_type,
+    catalogName: row.catalog?.quiz_name ?? row.activity_type,
+  };
+
+  return { summary, error: null };
+}
+
 export type QuizCatalogComposition = {
   activityType: string;
   name: string;
@@ -264,13 +329,40 @@ function buildLevelCoverage(availableQuestions: readonly { difficulty_level: num
 type LinkedCatalogRow = { activity_type: string; catalog: { quiz_name: string; description: string | null } | null };
 type PoolQuestionRow = { question_id: string; activity_type: string; difficulty_level: number };
 
+export type QuizExtraQuestionSummary = {
+  questionId: string;
+  questionText: string;
+  level: 1 | 2 | 3;
+  catalogActivityType: string;
+  catalogName: string;
+};
+
+type ExtraQuestionRow = {
+  question_id: string;
+  question_prompt: string;
+  difficulty_level: number;
+  activity_type: string;
+  catalog: { quiz_name: string } | null;
+};
+
 /**
- * The quiz's full composition (GitHub #361 requirement 2): every linked catalog with its
- * genuinely-active question count (total minus this quiz's own exclusions — never the catalog's
- * or any other quiz's), plus per-level coverage against QUESTIONS_PER_SESSION so the detail page
- * can warn *before* a student ever hits a level with too few questions left to draw a round
- * (requirement 4). One question query (unfiltered, across every linked catalog) backs both: the
- * per-catalog totals need the unfiltered set, and levelCoverage is the same set minus exclusions.
+ * The quiz's full composition (GitHub #361 requirement 2, extended by GitHub #380): every linked
+ * catalog with its genuinely-active question count (total minus this quiz's own exclusions —
+ * never the catalog's or any other quiz's), every individually hand-picked question with its
+ * source catalog for display, and per-level coverage against QUESTIONS_PER_SESSION so the detail
+ * page can warn *before* a student ever hits a level with too few questions left to draw a round
+ * (requirement 4) — now counting hand-picked questions toward that coverage too, since they are
+ * genuinely drawable (see loadCatalogQuestionPool's own docblock for the identical pool formula).
+ *
+ * Hand-picked questions are fetched and returned independent of whether the quiz has any linked
+ * catalogs at all (AC: "Ein Catalog muss dafür NICHT als Ganzes mit dem Quiz verknüpft sein") —
+ * the early return below only skips the *catalog*-derived question query, never the extra-question
+ * one.
+ *
+ * activeCatalogQuestionIds is the bare ids behind `catalogs`' per-catalog counts — the "Add
+ * individual questions" picker (AddQuizQuestionsModal) needs individual ids, not aggregate
+ * numbers, to mark a catalog-sourced question as already in the quiz; reusing the same
+ * already-fetched `catalogActive` array here avoids a second query just for that.
  */
 export async function getQuizComposition(supabase: SupabaseClient, quizId: string) {
   const { data: linkRows, error: linkError } = await supabase
@@ -278,45 +370,82 @@ export async function getQuizComposition(supabase: SupabaseClient, quizId: strin
     .select('activity_type, catalog:activity_type(quiz_name, description)')
     .eq('assembled_quiz_id', quizId);
 
-  if (linkError) return { catalogs: null, levelCoverage: null, error: linkError };
+  if (linkError) return { catalogs: null, levelCoverage: null, extraQuestions: null, activeCatalogQuestionIds: null, error: linkError };
 
   const links = (linkRows ?? []) as unknown as LinkedCatalogRow[];
   const catalogActivityTypes = links.map((link) => link.activity_type);
 
-  if (catalogActivityTypes.length === 0) {
-    return { catalogs: [] as QuizCatalogComposition[], levelCoverage: buildLevelCoverage([]), error: null };
+  let questions: PoolQuestionRow[] = [];
+  let catalogs: QuizCatalogComposition[] = [];
+  let excludedSet = new Set<string>();
+
+  if (catalogActivityTypes.length > 0) {
+    const { data: questionRows, error: questionError } = await supabase
+      .from('question')
+      .select('question_id, activity_type, difficulty_level')
+      .in('activity_type', catalogActivityTypes);
+
+    if (questionError) return { catalogs: null, levelCoverage: null, extraQuestions: null, activeCatalogQuestionIds: null, error: questionError };
+
+    const { excludedIds, error: excludedError } = await listQuizExcludedQuestionIds(supabase, quizId);
+    if (excludedError) return { catalogs: null, levelCoverage: null, extraQuestions: null, activeCatalogQuestionIds: null, error: excludedError };
+
+    questions = (questionRows ?? []) as PoolQuestionRow[];
+    excludedSet = new Set(excludedIds ?? []);
+
+    catalogs = links.map((link) => {
+      const catalogQuestions = questions.filter((q) => q.activity_type === link.activity_type);
+      const excludedCount = catalogQuestions.filter((q) => excludedSet.has(q.question_id)).length;
+
+      return {
+        activityType: link.activity_type,
+        name: link.catalog?.quiz_name ?? link.activity_type,
+        description: link.catalog?.description ?? null,
+        totalQuestions: catalogQuestions.length,
+        excludedCount,
+        activeCount: catalogQuestions.length - excludedCount,
+      };
+    });
   }
 
-  const { data: questionRows, error: questionError } = await supabase
-    .from('question')
-    .select('question_id, activity_type, difficulty_level')
-    .in('activity_type', catalogActivityTypes);
+  const { extraIds, error: extraIdsError } = await listQuizExtraQuestionIds(supabase, quizId);
+  if (extraIdsError) return { catalogs: null, levelCoverage: null, extraQuestions: null, activeCatalogQuestionIds: null, error: extraIdsError };
 
-  if (questionError) return { catalogs: null, levelCoverage: null, error: questionError };
+  let extraQuestions: QuizExtraQuestionSummary[] = [];
+  if ((extraIds ?? []).length > 0) {
+    const { data: extraRows, error: extraRowsError } = await supabase
+      .from('question')
+      .select('question_id, question_prompt, difficulty_level, activity_type, catalog:activity_type(quiz_name)')
+      .in('question_id', extraIds ?? []);
 
-  const { excludedIds, error: excludedError } = await listQuizExcludedQuestionIds(supabase, quizId);
-  if (excludedError) return { catalogs: null, levelCoverage: null, error: excludedError };
+    if (extraRowsError) return { catalogs: null, levelCoverage: null, extraQuestions: null, activeCatalogQuestionIds: null, error: extraRowsError };
 
-  const questions = (questionRows ?? []) as PoolQuestionRow[];
-  const excludedSet = new Set(excludedIds ?? []);
+    extraQuestions = ((extraRows ?? []) as unknown as ExtraQuestionRow[]).map((row) => ({
+      questionId: row.question_id,
+      questionText: row.question_prompt,
+      level: row.difficulty_level as 1 | 2 | 3,
+      catalogActivityType: row.activity_type,
+      catalogName: row.catalog?.quiz_name ?? row.activity_type,
+    }));
+  }
 
-  const catalogs: QuizCatalogComposition[] = links.map((link) => {
-    const catalogQuestions = questions.filter((q) => q.activity_type === link.activity_type);
-    const excludedCount = catalogQuestions.filter((q) => excludedSet.has(q.question_id)).length;
+  // The exact same union-and-dedupe formula loadCatalogQuestionPool uses for a real draw: the
+  // catalog-derived set minus exclusions, plus hand-picked questions, deduplicated by
+  // question_id — a question reachable both ways (linked catalog, not excluded, and also
+  // hand-picked) must not double-count toward "available".
+  const catalogActive = questions.filter((q) => !excludedSet.has(q.question_id));
+  const activeIds = new Set(catalogActive.map((q) => q.question_id));
+  const combinedForCoverage: { difficulty_level: number }[] = [...catalogActive];
+  for (const extra of extraQuestions) {
+    if (!activeIds.has(extra.questionId)) {
+      activeIds.add(extra.questionId);
+      combinedForCoverage.push({ difficulty_level: extra.level });
+    }
+  }
 
-    return {
-      activityType: link.activity_type,
-      name: link.catalog?.quiz_name ?? link.activity_type,
-      description: link.catalog?.description ?? null,
-      totalQuestions: catalogQuestions.length,
-      excludedCount,
-      activeCount: catalogQuestions.length - excludedCount,
-    };
-  });
+  const levelCoverage = buildLevelCoverage(combinedForCoverage);
 
-  const levelCoverage = buildLevelCoverage(questions.filter((q) => !excludedSet.has(q.question_id)));
-
-  return { catalogs, levelCoverage, error: null };
+  return { catalogs, levelCoverage, extraQuestions, activeCatalogQuestionIds: catalogActive.map((q) => q.question_id), error: null };
 }
 
 export type QuizScopedQuestion = CatalogQuestion & { excludedForQuiz: boolean };
@@ -357,18 +486,33 @@ export function pickRandomQuestions<T>(pool: readonly T[], count: number): T[] {
 export type CatalogQuestionPoolRow = { question_id: string; max_score: number | null; activity_type: string };
 
 /**
- * The live pool an assembled quiz would draw from at one difficulty level: every question across
- * every one of its linked catalogs at that level, minus this quiz's own exclusions (GitHub #361
- * requirement 4 — "excluded questions must never be drawn"). Dynamic, not materialized at
- * quiz-creation time — an instructor editing a linked catalog's questions, or excluding one for
- * this quiz, afterward is reflected immediately, the same "always current" property
+ * The live pool an assembled quiz would draw from at one difficulty level (GitHub #360/#361,
+ * extended by GitHub #380): (every question across every one of its linked catalogs at that
+ * level, minus this quiz's own exclusions) UNION (this quiz's individually hand-picked questions
+ * at that level), deduplicated by question_id. Dynamic, not materialized at quiz-creation time —
+ * an instructor editing a linked catalog's questions, excluding one, or hand-picking one,
+ * afterward is reflected immediately, the same "always current" property
  * GET /api/instructor/quizzes/{activityType} (GitHub #359) has for browsing a single catalog.
+ *
+ * Conflict rule when a question is both excluded AND hand-picked for the same quiz: hand-picking
+ * wins, and it isn't a tie-break so much as a consequence of the two lists' actual jobs —
+ * exclusion only ever subtracts from the *catalog-derived* set (`excludedQuestionIds` is applied
+ * to `data` above, never to the extra-question fetch below), so a hand-picked question is never
+ * even a candidate for exclusion to begin with. This mirrors assembled_quiz_extra_question's own
+ * header comment in supabase/schema.sql. The UI (AddQuizQuestionsModal) doesn't block picking an
+ * already-excluded question — that combination is exactly how an instructor would deliberately
+ * override one catalog exclusion for this quiz without re-including it catalog-wide, not an
+ * accident to prevent.
+ *
+ * The second query only runs when `extraQuestionIds` is non-empty — a quiz with nothing
+ * hand-picked costs nothing beyond the original single query.
  */
 export async function loadCatalogQuestionPool(
   supabase: SupabaseClient,
   catalogActivityTypes: string[],
   difficultyLevel: number,
   excludedQuestionIds: readonly string[] = [],
+  extraQuestionIds: readonly string[] = [],
 ): Promise<{ pool: CatalogQuestionPoolRow[] | null; error: { message: string } | null }> {
   const { data, error } = await supabase
     .from('question')
@@ -379,21 +523,81 @@ export async function loadCatalogQuestionPool(
   if (error) return { pool: null, error };
 
   const excludedSet = new Set(excludedQuestionIds);
-  const pool = ((data ?? []) as CatalogQuestionPoolRow[]).filter((question) => !excludedSet.has(question.question_id));
+  const catalogDerived = ((data ?? []) as CatalogQuestionPoolRow[]).filter((question) => !excludedSet.has(question.question_id));
+
+  if (extraQuestionIds.length === 0) return { pool: catalogDerived, error: null };
+
+  const { data: extraData, error: extraError } = await supabase
+    .from('question')
+    .select('question_id, max_score, activity_type')
+    .in('question_id', extraQuestionIds)
+    .eq('difficulty_level', difficultyLevel);
+
+  if (extraError) return { pool: null, error: extraError };
+
+  const seenIds = new Set(catalogDerived.map((question) => question.question_id));
+  const pool = [...catalogDerived];
+  for (const question of (extraData ?? []) as CatalogQuestionPoolRow[]) {
+    if (!seenIds.has(question.question_id)) {
+      seenIds.add(question.question_id);
+      pool.push(question);
+    }
+  }
 
   return { pool, error: null };
 }
 
+export type PickableQuestion = {
+  id: string;
+  questionText: string;
+  level: 1 | 2 | 3;
+  catalogActivityType: string;
+  catalogName: string;
+};
+
+/**
+ * Every MCQ question in the system, any author, any catalog — the pool the "Add individual
+ * questions" picker (GitHub #380, AddQuizQuestionsModal) searches/filters client-side, the same
+ * "fetch the full list once, filter in the browser" choice GET /api/instructor/quizzes already
+ * makes for browsing catalogs. Not quiz-scoped: which of these are already in a given quiz is
+ * computed by the caller from that quiz's own composition (linked-catalog-active-questions +
+ * extraQuestions, both already in hand from loadQuizDetail) rather than asked of this query, so
+ * the same fetched list can back the picker for any quiz without re-fetching per quiz.
+ *
+ * llm-graded catalogs never appear here structurally, without needing a grading_kind filter:
+ * their prompts live in `user_story`, not `question`, so a catalog with no MCQ questions simply
+ * contributes no rows.
+ */
+export async function listAllQuestionsForPicker(supabase: SupabaseClient) {
+  const { data, error } = await supabase
+    .from('question')
+    .select('question_id, question_prompt, difficulty_level, activity_type, catalog:activity_type(quiz_name)')
+    .order('question_prompt', { ascending: true });
+
+  if (error) return { questions: null, error };
+
+  const questions: PickableQuestion[] = ((data ?? []) as unknown as ExtraQuestionRow[]).map((row) => ({
+    id: row.question_id,
+    questionText: row.question_prompt,
+    level: row.difficulty_level as 1 | 2 | 3,
+    catalogActivityType: row.activity_type,
+    catalogName: row.catalog?.quiz_name ?? row.activity_type,
+  }));
+
+  return { questions, error: null };
+}
+
 /**
  * GitHub #362: copies every assembled_quiz belonging to `sourceCourseId` onto `targetCourseId` —
- * same quiz_name/description, the same linked catalogs (assembled_quiz_catalog), and the same
- * per-quiz question exclusions (quiz_excluded_question), all re-pointed at freshly generated
+ * same quiz_name/description, the same linked catalogs (assembled_quiz_catalog), the same
+ * per-quiz question exclusions (quiz_excluded_question), and the same individually hand-picked
+ * questions (assembled_quiz_extra_question, GitHub #380), all re-pointed at freshly generated
  * assembled_quiz ids. Reuses createAssembledQuiz rather than inserting assembled_quiz/
  * assembled_quiz_catalog by hand, so a link-insert failure for one copied quiz already self-cleans
  * (see that function's own docblock) — the caller only has to roll back the quizzes that *did*
  * fully insert, which the route above does by deleting the new course itself: fk_assembled_quiz_course
- * cascades, taking every assembled_quiz/assembled_quiz_catalog/quiz_excluded_question row this
- * function has written so far with it.
+ * cascades, taking every assembled_quiz/assembled_quiz_catalog/quiz_excluded_question/
+ * assembled_quiz_extra_question row this function has written so far with it.
  *
  * Deliberately never touches student_course, session_log, or any attempt/score table — those
  * aren't reachable from a course anywhere in this schema (see CLAUDE.md's Courses section), so
@@ -421,6 +625,9 @@ export async function duplicateQuizzesForCourse(
     const { excludedIds, error: excludedError } = await listQuizExcludedQuestionIds(supabase, sourceQuiz.assembled_quiz_id);
     if (excludedError) return { copiedCount, error: excludedError };
 
+    const { extraIds, error: extraIdsError } = await listQuizExtraQuestionIds(supabase, sourceQuiz.assembled_quiz_id);
+    if (extraIdsError) return { copiedCount, error: extraIdsError };
+
     const { quiz: newQuiz, error: createError } = await createAssembledQuiz(supabase, {
       name: sourceQuiz.quiz_name,
       description: sourceQuiz.description,
@@ -435,6 +642,13 @@ export async function duplicateQuizzesForCourse(
         (excludedIds ?? []).map((questionId) => ({ assembled_quiz_id: newQuiz.id, question_id: questionId })),
       );
       if (exclusionsError) return { copiedCount, error: exclusionsError };
+    }
+
+    if ((extraIds ?? []).length > 0) {
+      const { error: extraError } = await supabase.from('assembled_quiz_extra_question').insert(
+        (extraIds ?? []).map((questionId) => ({ assembled_quiz_id: newQuiz.id, question_id: questionId })),
+      );
+      if (extraError) return { copiedCount, error: extraError };
     }
 
     copiedCount++;

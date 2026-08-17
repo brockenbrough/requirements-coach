@@ -183,6 +183,37 @@ describe('GET /api/instructor/assembled-quizzes/[quizId]', () => {
     expect(body.levelCoverage.every((l: { available: number }) => l.available === 0)).toBe(true);
     expect(h.state.tables).not.toContain('question');
   });
+
+  // GitHub #380: hand-picked questions ride along on the same detail response.
+  it('returns individually hand-picked questions, with their source catalog, even with no linked catalogs at all', async () => {
+    queueRole('instructor');
+    queue('assembled_quiz', { data: quizRow(), error: null });
+    queue('course', { data: { course_name: 'Software Requirements' }, error: null });
+    queue('assembled_quiz_catalog', { data: [], error: null }); // nothing linked
+    queue('assembled_quiz_extra_question', { data: [{ question_id: 'q-9' }], error: null });
+    queue('question', {
+      data: [
+        {
+          question_id: 'q-9',
+          question_prompt: 'What is a stakeholder?',
+          difficulty_level: 2,
+          activity_type: 'CATALOG_Z',
+          catalog: { quiz_name: 'Stakeholder Basics' },
+        },
+      ],
+      error: null,
+    });
+
+    const res = await req();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.extraQuestions).toEqual([
+      { questionId: 'q-9', questionText: 'What is a stakeholder?', level: 2, catalogActivityType: 'CATALOG_Z', catalogName: 'Stakeholder Basics' },
+    ]);
+    expect(body.activeCatalogQuestionIds).toEqual([]);
+    expect(body.levelCoverage).toContainEqual({ level: 2, available: 1, required: 4, sufficient: false });
+  });
 });
 
 describe('DELETE /api/instructor/assembled-quizzes/[quizId]', () => {
