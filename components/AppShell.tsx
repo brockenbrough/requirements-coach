@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { getHighestTitleOverall } from '../lib/activityStore';
-import { loadStudentScore } from '../lib/sessionClient';
 import { Avatar } from './Avatar';
 import { LLMProviderSettingsModal } from './LLMProviderSettingsModal';
 import { OnboardingTour } from './OnboardingTour';
@@ -208,9 +207,8 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const { token, profile, signOut } = useUser();
+  const { token, profile, signOut, score } = useUser();
   const { active: tourActive, startTour } = useOnboardingTour();
-  const [score, setScore] = useState<number | null>(null);
   const [levelLine, setLevelLine] = useState('Getting started');
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -236,23 +234,9 @@ export function AppShell({
     setLevelLine(best ? best.title : 'Getting started');
   }, [isInstructor]);
 
-  // AppShell is rendered by each page rather than by the layout, so this re-runs on every
-  // navigation — returning from a finished activity picks up the new total by itself.
-  const userId = profile?.user_id;
-
-  useEffect(() => {
-    if (!token || !userId || isInstructor) return;
-    let cancelled = false;
-
-    loadStudentScore(token, userId).then((result) => {
-      if (cancelled) return;
-      if (result.ok) setScore(result.data.score);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [token, userId, isInstructor]);
+  // GitHub #392: score itself now lives in UserContext (loaded once there, kept fresh by
+  // refreshScore) rather than being fetched again here on every AppShell mount — AppShell just
+  // displays whatever the context currently holds.
 
   function handleLogout() {
     signOut();
