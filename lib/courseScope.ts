@@ -9,7 +9,7 @@
 // course id. course_code stays what it is: the thing a *student* types to join.
 
 import type { SupabaseClient } from './sessionQueries';
-import { findOwnedCourse, loadEnrolledStudents } from './courseQueries';
+import { findOwnedCourse, loadEnrolledStudents, listOwnedCourseIds, loadEnrolledStudentIdsForCourses } from './courseQueries';
 
 export type CourseScopeResult =
   | { status: 'ok'; studentIds: string[] }
@@ -89,4 +89,27 @@ export function courseScopeErrorResponse(result: Extract<RequireCourseScopeResul
   return result.status === 403
     ? new Response(null, { status: 403 })
     : Response.json({ error: result.error }, { status: result.status });
+}
+
+/**
+ * Every distinct student enrolled in ANY course this instructor owns — the "automatically show
+ * everything I have" counterpart to resolveCourseScope's "show me this one course I picked"
+ * above. Unlike resolveCourseScope, there is no ownership check to fail: instructorId is trusted
+ * to already be a confirmed instructor (requireInstructor), and "owns zero courses" is a normal
+ * state, not an error, so this has no not_found/forbidden branch — just { studentIds, error }.
+ *
+ * This is what GET /api/instructor/students scopes its default (non-?scope=all) response by.
+ *
+ * No explicit return-type annotation, same reasoning as listOwnedActivityTypeSummaries
+ * (lib/activityTypeQueries.ts): leaving it to inference keeps { studentIds: null, error } /
+ * { studentIds: string[], error: null } a clean discriminated union callers can narrow with a
+ * plain `if (error) return …` — an explicit `Promise<{...}>` annotation broke that narrowing
+ * there before and caused a real build failure.
+ */
+export async function resolveInstructorStudentIds(supabase: SupabaseClient, instructorId: string) {
+  const { courseIds, error: courseIdsError } = await listOwnedCourseIds(supabase, instructorId);
+  if (courseIdsError) return { studentIds: null, error: courseIdsError };
+  if (courseIds.length === 0) return { studentIds: [], error: null };
+
+  return loadEnrolledStudentIdsForCourses(supabase, courseIds);
 }

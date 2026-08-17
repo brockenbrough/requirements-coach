@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { addStudentToCourse, type CourseStudent } from '../lib/courseClient';
 import { loadInstructorStudents, type StudentSummary } from '../lib/sessionClient';
+import { clearCachedInstructorStudents } from '../lib/instructorStudentsStore';
 import { useModalDismiss } from './useModalDismiss';
 
 function studentDisplayName(student: StudentSummary): string {
@@ -60,7 +61,10 @@ export function AddStudentModal({
 
   useEffect(() => {
     let cancelled = false;
-    loadInstructorStudents(token, instructorId).then((result) => {
+    // scope: 'all' — this search must be able to find a student who isn't enrolled in any of the
+    // instructor's courses yet (the whole point of enrolling someone new), so it deliberately opts
+    // out of GET /api/instructor/students' now-scoped default.
+    loadInstructorStudents(token, instructorId, { scope: 'all' }).then((result) => {
       if (!cancelled && result.ok) setRoster(result.data.students);
     });
     return () => {
@@ -109,6 +113,11 @@ export function AddStudentModal({
       return;
     }
 
+    // The instructor's scoped roster (GET /api/instructor/students, default scope) now includes
+    // this student — clear the cache so /instructor/students and the dashboard pick it up on
+    // their next load instead of showing the pre-enrollment list for the rest of the tab session,
+    // same precedent as clearing leaderboardCoursesStore when a student joins a course.
+    clearCachedInstructorStudents();
     onAdded(result.data.student);
     setJustAdded(result.data.student.name);
     setQuery('');

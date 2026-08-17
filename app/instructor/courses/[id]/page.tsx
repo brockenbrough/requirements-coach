@@ -21,6 +21,7 @@ import {
   type CourseSummary,
 } from '../../../../lib/courseClient';
 import type { AssembledQuizSummary } from '../../../../lib/assembledQuizClient';
+import { clearCachedInstructorStudents } from '../../../../lib/instructorStudentsStore';
 import { useRequireRole } from '../../../../lib/useRequireRole';
 
 function EditIcon() {
@@ -149,6 +150,10 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
     const result = await removeStudentFromCourse(token!, course.id, student.id);
     if (result.ok) {
       setCourse((current) => (current ? { ...current, students: current.students.filter((s) => s.id !== student.id) } : current));
+      // The instructor's scoped roster (GET /api/instructor/students, default scope) may no
+      // longer include this student if this was their last course — same invalidation as
+      // AddStudentModal's enroll path, in the other direction.
+      clearCachedInstructorStudents();
     } else {
       setError(result.error);
     }
