@@ -13,7 +13,7 @@ function getToken(request: Request): string | null {
  *
  * - 401 missing/invalid bearer token
  * - 403 caller isn't an instructor (no body)
- * - 200 { courses: [{ id, name, code, createdAt, studentCount }] }
+ * - 200 { courses: [{ id, name, code, createdAt, semester, studentCount }] }
  * - 500 Supabase not configured, or the query fails
  */
 export async function GET(request: Request) {
@@ -42,6 +42,8 @@ export async function GET(request: Request) {
         name: c.course_name,
         code: c.course_code,
         createdAt: c.created_at,
+        semester: c.semester,
+        coverImageUrl: c.cover_image_url,
         studentCount: c.student_count,
       })),
     },
@@ -53,12 +55,18 @@ export async function GET(request: Request) {
  * POST /api/instructor/courses — creates a course (REQ-DL-5) and generates its unique,
  * shareable join code server-side (never client-supplied).
  *
- * Body: { name }. creator_id comes from guard.user_id, never the body — see lib/instructorAuth.ts.
+ * Body: { name, semester?, coverImageUrl? }. creator_id comes from guard.user_id, never the body
+ * — see lib/instructorAuth.ts. semester (GitHub #363) is optional and freeform (e.g. "SoSe
+ * 2026"); a blank/whitespace-only value is normalized to null rather than rejected, same "trim,
+ * then null-if-empty" treatment PATCH gives it below. coverImageUrl (GitHub #363 follow-up) is
+ * likewise optional — typically a URL POST /api/instructor/course-covers just returned, or one of
+ * the 3 default covers' own static path — and is not otherwise validated as an actual URL: it's
+ * only ever rendered as an <img src>, and only an authenticated instructor can set it.
  *
  * - 401 missing/invalid bearer token
  * - 403 caller isn't an instructor (no body, matching requireInstructor's convention)
- * - 400 invalid JSON, or missing/blank name
- * - 201 { course: { id, name, code, createdAt } }
+ * - 400 invalid JSON, missing/blank name, or a non-string semester/coverImageUrl
+ * - 201 { course: { id, name, code, createdAt, semester, coverImageUrl } }
  * - 500 Supabase not configured, a non-collision insert error, or every code attempt collided
  */
 export async function POST(request: Request) {
@@ -82,14 +90,24 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Invalid JSON body.' }, { status: 400 });
   }
 
-  const { name } = (body ?? {}) as { name?: unknown };
+  const { name, semester, coverImageUrl } = (body ?? {}) as { name?: unknown; semester?: unknown; coverImageUrl?: unknown };
   if (typeof name !== 'string' || name.trim() === '') {
     return Response.json({ error: 'name is required.' }, { status: 400 });
   }
+  if (semester !== undefined && semester !== null && typeof semester !== 'string') {
+    return Response.json({ error: 'semester must be a string.' }, { status: 400 });
+  }
+  if (coverImageUrl !== undefined && coverImageUrl !== null && typeof coverImageUrl !== 'string') {
+    return Response.json({ error: 'coverImageUrl must be a string.' }, { status: 400 });
+  }
+  const normalizedSemester = typeof semester === 'string' ? semester.trim() || null : null;
+  const normalizedCoverImageUrl = typeof coverImageUrl === 'string' ? coverImageUrl.trim() || null : null;
 
   const { course, error } = await createCourseWithUniqueCode(supabase, {
     name: name.trim(),
     creatorId: guard.user_id,
+    semester: normalizedSemester,
+    coverImageUrl: normalizedCoverImageUrl,
   });
 
   if (error || !course) {
@@ -103,6 +121,8 @@ export async function POST(request: Request) {
         name: course.course_name,
         code: course.course_code,
         createdAt: course.created_at,
+        semester: course.semester,
+        coverImageUrl: course.cover_image_url,
       },
     },
     { status: 201 },

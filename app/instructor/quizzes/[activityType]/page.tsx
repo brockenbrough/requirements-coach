@@ -165,7 +165,10 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
         : [savedQuestion, ...(current ?? [])],
     );
 
-    setLevel('all');
+    // The filter now seeds the modal's level (GitHub #417), so what was just saved is usually
+    // already inside the filtered level and visible. Only a level the instructor changed inside
+    // the modal needs the filter opened up, so the row can't vanish the moment it is written.
+    if (level !== 'all' && savedQuestion.level !== level) setLevel('all');
     setHighlight({ id: savedQuestion.id, label: isEdit ? '✓ Updated' : '✓ Just added' });
     setToastMessage(isEdit ? 'Changes saved.' : 'Question added to this catalog.');
 
@@ -204,7 +207,8 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
         : [saved, ...(current ?? [])],
     );
 
-    setLevel('all');
+    // Same rule as handleSaveQuestion above (GitHub #417).
+    if (level !== 'all' && saved.level !== level) setLevel('all');
     setHighlight({ id: saved.id, label: isEdit ? '✓ Updated' : '✓ Just added' });
     setToastMessage(isEdit ? 'Changes saved.' : 'Prompt added to this catalog.');
 
@@ -476,6 +480,7 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
           mode={modalState.mode}
           initialData={modalState.mode === 'edit' ? modalState.question : undefined}
           defaultQuizType={params.activityType}
+          defaultLevel={level === 'all' ? undefined : level}
           quizOptions={quizOptions}
           onClose={() => setModalState(null)}
           onSave={handleSaveQuestion}
@@ -496,6 +501,7 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
           mode={promptModalState.mode}
           initialData={promptModalState.mode === 'edit' ? promptModalState.prompt : undefined}
           defaultActivityType={params.activityType}
+          defaultLevel={level === 'all' ? undefined : level}
           catalogOptions={quizOptions}
           onClose={() => setPromptModalState(null)}
           onSave={handleSavePrompt}

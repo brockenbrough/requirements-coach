@@ -28,13 +28,15 @@ export type CourseRecord = {
   course_code: string;
   creator_id: string;
   created_at: string;
+  semester: string | null;
+  cover_image_url: string | null;
 };
 
 // creator_id is included even though createCourseWithUniqueCode's own response never discloses
 // it — findOwnedCourse (below) needs it for every ownership check, and reusing one column list
 // keeps the *Queries.ts convention of a single source of truth for "what a course row looks
 // like" rather than a second, narrower select just for the create path.
-const COURSE_COLUMNS = 'course_id, course_name, course_code, creator_id, created_at';
+const COURSE_COLUMNS = 'course_id, course_name, course_code, creator_id, created_at, semester, cover_image_url';
 
 /**
  * Inserts a new course with a freshly generated code, retrying on a uq_course_code collision
@@ -48,13 +50,21 @@ const COURSE_COLUMNS = 'course_id, course_name, course_code, creator_id, created
  * self-serve join — see REQ-DL-5's schema comment), but this route always generates one: its
  * whole point is handing the instructor something to share.
  *
+ * semester (GitHub #363) is optional and defaults to null on insert — the duplicate route
+ * deliberately never passes one (see its own docblock: a copy is typically meant for a *new*
+ * offering, so carrying the source's term over would be misleading more often than helpful).
+ *
+ * coverImageUrl (GitHub #363 follow-up) is likewise optional and defaults to null — but unlike
+ * semester, the duplicate route *does* carry the source's cover over (see its own docblock: a
+ * course's visual identity is more "same course, different section" than semester is).
+ *
  * Any non-23505 error fails immediately. Exhausting every attempt on 23505 is reported back as
  * its own error rather than thrown, matching every other *Queries.ts function's { data, error }
  * shape.
  */
 export async function createCourseWithUniqueCode(
   supabase: SupabaseClient,
-  params: { name: string; creatorId: string },
+  params: { name: string; creatorId: string; semester?: string | null; coverImageUrl?: string | null },
 ) {
   for (let attempt = 0; attempt < MAX_CODE_ATTEMPTS; attempt++) {
     const { data, error } = await supabase
@@ -64,6 +74,8 @@ export async function createCourseWithUniqueCode(
         creator_id: params.creatorId,
         course_name: params.name,
         course_code: generateCourseCode(),
+        semester: params.semester ?? null,
+        cover_image_url: params.coverImageUrl ?? null,
       })
       .select(COURSE_COLUMNS)
       .single();
@@ -155,7 +167,7 @@ export async function findOwnedCourse(
 export async function listCoursesForInstructor(supabase: SupabaseClient, instructorId: string) {
   const { data, error } = await supabase
     .from('course')
-    .select('course_id, course_name, course_code, created_at, student_course(count)')
+    .select('course_id, course_name, course_code, created_at, semester, cover_image_url, student_course(count)')
     .eq('creator_id', instructorId)
     .order('created_at', { ascending: false });
 
@@ -166,6 +178,8 @@ export async function listCoursesForInstructor(supabase: SupabaseClient, instruc
     course_name: string;
     course_code: string;
     created_at: string;
+    semester: string | null;
+    cover_image_url: string | null;
     student_course: { count: number }[] | null;
   };
 
@@ -174,17 +188,33 @@ export async function listCoursesForInstructor(supabase: SupabaseClient, instruc
     course_name: row.course_name,
     course_code: row.course_code,
     created_at: row.created_at,
+    semester: row.semester,
+    cover_image_url: row.cover_image_url,
     student_count: row.student_course?.[0]?.count ?? 0,
   }));
 
   return { courses, error: null };
 }
 
-/** Renames a course. Ownership is checked by the caller (findOwnedCourse) before this runs. */
-export async function updateCourseName(supabase: SupabaseClient, params: { courseId: string; name: string }) {
+/**
+ * Renames a course and/or updates its semester/term label and/or its cover image (GitHub #363,
+ * #363 follow-up). Ownership is checked by the caller (findOwnedCourse) before this runs.
+ * semester/coverImageUrl are only touched when the caller passes them — omitting a key leaves
+ * the stored value alone, rather than every PATCH call needing to resend the full course meta.
+ */
+export async function updateCourseMeta(
+  supabase: SupabaseClient,
+  params: { courseId: string; name: string; semester?: string | null; coverImageUrl?: string | null },
+) {
+  const updates: { course_name: string; semester?: string | null; cover_image_url?: string | null } = {
+    course_name: params.name,
+  };
+  if (params.semester !== undefined) updates.semester = params.semester;
+  if (params.coverImageUrl !== undefined) updates.cover_image_url = params.coverImageUrl;
+
   const { data, error } = await supabase
     .from('course')
-    .update({ course_name: params.name })
+    .update(updates)
     .eq('course_id', params.courseId)
     .select(COURSE_COLUMNS)
     .single();
@@ -220,65 +250,128 @@ export async function loadEnrolledStudents(supabase: SupabaseClient, courseId: s
   return { students, error: null };
 }
 
-export type CourseEngagement = {
-  enrolledCount: number;
-  activeStudentCount: number;
-  averageScore: number | null;
-  passRate: number | null;
+export type CourseClassStats = {
+  totalStudents: number;
+  // quizzes.length > 0 — matches CourseQuizzesList.tsx's own "No quizzes assigned to this course
+  // yet." condition exactly, so the course detail page never carries two different definitions
+  // of "no quizzes" between that section and this one.
+  hasQuizzes: boolean;
+  startedCount: number;
+  startedPercent: number | null;
+  passedCount: number;
+  passedPercent: number | null;
 };
 
+type QuizWithCatalogRow = { assembled_quiz_id: string; assembled_quiz_catalog: { activity_type: string }[] | null };
+
 /**
- * Per-course engagement stats for the instructor dashboard (GitHub #335).
- * Three numbers come from two queries merged in JS:
- *   1. student_course → list of enrolled user_ids (→ enrolledCount)
- *   2. session_log for those users, status=completed → activeStudentCount, averageScore, passRate
- * "Active" means at least one completed session ever, not necessarily in a date window.
- * averageScore/passRate are null when no enrolled student has a completed session yet.
+ * Per-course class engagement stats (GitHub #315) — how much of the class has started and passed
+ * at least one of THIS course's quizzes, strictly scoped to this course's roster and to the
+ * activity_types its assembled_quiz rows actually compose (course → assembled_quiz →
+ * assembled_quiz_catalog → activity_type, the same resolution computeCourseQuizStats in
+ * lib/assembledQuizQueries.ts already does for its own per-quiz breakdown — a different,
+ * complementary metric this one doesn't replace).
+ *
+ * "Started" deliberately has no status filter: an in-progress or abandoned session still counts,
+ * since the question is "did the student attempt it," not "did they finish it." "Passed" filters
+ * on session_log.passed = true alone (no separate status check needed — that column is only ever
+ * set true by the completion/grading path).
+ *
+ * Percent is null only when there's truly nothing to divide by (0 enrolled) or nothing was ever
+ * administered (0 quizzes) — deliberately different from computeCourseQuizStats's own "always 0,
+ * never null" convention, which is safe there only because its one caller reads it through a
+ * `value > 0 ? … : '—'` idiom. When quizzes exist but none currently compose any catalog
+ * (assembled_quiz_catalog empty), hasQuizzes is still true and percent is a real 0, not null.
+ *
+ * Known limitation, shared with computeCourseQuizStats: session_log has no course_id or
+ * assembled_quiz_id column, only (user_id, activity_type) — a student enrolled in two courses
+ * that each independently compose the same catalog will have one attempt counted toward both
+ * courses' stats. Not fixable without a schema change; not specific to this function.
  */
-export async function getCourseEngagement(
+export async function computeCourseClassStats(
   supabase: SupabaseClient,
   courseId: string,
-): Promise<{ engagement: CourseEngagement | null; error: { message: string } | null }> {
-  const { data: enrolled, error: enrolledError } = await supabase
-    .from('student_course')
-    .select('user_id')
-    .eq('course_id', courseId);
+): Promise<{ stats: CourseClassStats | null; error: { message: string } | null }> {
+  const [quizzesResult, enrolledResult] = await Promise.all([
+    supabase.from('assembled_quiz').select('assembled_quiz_id, assembled_quiz_catalog(activity_type)').eq('course_id', courseId),
+    supabase.from('student_course').select('user_id').eq('course_id', courseId),
+  ]);
 
-  if (enrolledError) return { engagement: null, error: enrolledError };
+  if (quizzesResult.error) return { stats: null, error: quizzesResult.error };
+  if (enrolledResult.error) return { stats: null, error: enrolledResult.error };
 
-  const enrolledIds = ((enrolled ?? []) as { user_id: string }[]).map((r) => r.user_id);
+  const quizzes = (quizzesResult.data ?? []) as unknown as QuizWithCatalogRow[];
+  const enrolledIds = ((enrolledResult.data ?? []) as { user_id: string }[]).map((r) => r.user_id);
+  const activityTypes = [...new Set(quizzes.flatMap((q) => (q.assembled_quiz_catalog ?? []).map((c) => c.activity_type)))];
 
-  if (enrolledIds.length === 0) {
+  const totalStudents = enrolledIds.length;
+  const hasQuizzes = quizzes.length > 0;
+
+  if (totalStudents === 0 || activityTypes.length === 0) {
+    const percent = totalStudents === 0 || !hasQuizzes ? null : 0;
     return {
-      engagement: { enrolledCount: 0, activeStudentCount: 0, averageScore: null, passRate: null },
+      stats: { totalStudents, hasQuizzes, startedCount: 0, startedPercent: percent, passedCount: 0, passedPercent: percent },
       error: null,
     };
   }
 
   const { data: sessions, error: sessionsError } = await supabase
     .from('session_log')
-    .select('user_id, cumulative_score, max_score, passed')
-    .in('user_id', enrolledIds)
-    .eq('status', 'completed');
+    .select('user_id, passed')
+    .in('activity_type', activityTypes)
+    .in('user_id', enrolledIds);
 
-  if (sessionsError) return { engagement: null, error: sessionsError };
+  if (sessionsError) return { stats: null, error: sessionsError };
 
-  type SessionRow = { user_id: string; cumulative_score: number; max_score: number; passed: boolean | null };
+  type SessionRow = { user_id: string; passed: boolean | null };
   const rows = (sessions ?? []) as SessionRow[];
 
-  const activeStudentCount = new Set(rows.map((r) => r.user_id)).size;
-
-  const scorable = rows.filter((r) => r.max_score > 0);
-  const averageScore =
-    scorable.length > 0
-      ? scorable.reduce((sum, r) => sum + r.cumulative_score / r.max_score, 0) / scorable.length
-      : null;
-
-  const passRate =
-    rows.length > 0 ? rows.filter((r) => r.passed === true).length / rows.length : null;
+  const startedIds = new Set(rows.map((r) => r.user_id));
+  const passedIds = new Set(rows.filter((r) => r.passed === true).map((r) => r.user_id));
 
   return {
-    engagement: { enrolledCount: enrolledIds.length, activeStudentCount, averageScore, passRate },
+    stats: {
+      totalStudents,
+      hasQuizzes,
+      startedCount: startedIds.size,
+      startedPercent: Math.round((startedIds.size / totalStudents) * 100),
+      passedCount: passedIds.size,
+      passedPercent: Math.round((passedIds.size / totalStudents) * 100),
+    },
+    error: null,
+  };
+}
+
+/**
+ * computeCourseClassStats for every course an instructor owns, in one call — backs the dashboard
+ * and course-browse-list grids so they don't have to issue one request per course card. Reuses
+ * computeCourseClassStats per course (via Promise.all) rather than a hand-duplicated broad query,
+ * so the null/zero percent rule above only lives in one place; this costs more round trips than a
+ * single broad query would (O(3·C) instead of O(3)), which is fine for a typical instructor's
+ * course count — switch to a broad-query version only if that stops being true.
+ */
+export async function computeAllOwnedCoursesClassStats(
+  supabase: SupabaseClient,
+  instructorId: string,
+): Promise<{ stats: (CourseClassStats & { courseId: string; courseName: string })[] | null; error: { message: string } | null }> {
+  const { data, error } = await supabase.from('course').select('course_id, course_name').eq('creator_id', instructorId);
+
+  if (error) return { stats: null, error };
+
+  const courses = (data ?? []) as { course_id: string; course_name: string }[];
+
+  const results = await Promise.all(
+    courses.map(async (course) => {
+      const { stats, error: statsError } = await computeCourseClassStats(supabase, course.course_id);
+      return { course, stats, error: statsError };
+    }),
+  );
+
+  const failed = results.find((r) => r.error || !r.stats);
+  if (failed) return { stats: null, error: failed.error ?? { message: 'Could not compute course class stats.' } };
+
+  return {
+    stats: results.map((r) => ({ courseId: r.course.course_id, courseName: r.course.course_name, ...r.stats! })),
     error: null,
   };
 }

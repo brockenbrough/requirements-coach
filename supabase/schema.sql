@@ -228,6 +228,18 @@ CREATE TABLE course (
     creator_id  uuid      NOT NULL,
     course_name text      NOT NULL,
     course_code text,
+    -- Term the course is offered in (e.g. "SoSe 2026"), freeform text — display-only, unlike
+    -- "user".semester above (an int2 count of the student's own study progress; a different
+    -- concept entirely, just an unfortunate name collision across two unrelated tables).
+    -- Nullable: GitHub #363's card only renders a semester badge when this is set.
+    semester    text,
+    -- One of: NULL (no explicit choice — the card deterministically picks one of the 3 built-in
+    -- defaults from course_id, see lib/courseCovers.ts), one of the 3 default covers' own static
+    -- path (an explicit pick, not the auto one), or a public Storage URL in the course-covers
+    -- bucket (an instructor-uploaded image, POST /api/instructor/course-covers). The column
+    -- doesn't distinguish between these — lib/courseCovers.ts's resolveCourseCoverSrc treats
+    -- "any non-null string" as "use this directly", the same way "user".avatar_url works.
+    cover_image_url text,
     created_at  timestamp NOT NULL DEFAULT now(),
     PRIMARY KEY (course_id));
 
@@ -1148,3 +1160,22 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 -- No existing table's shape changes, and every quiz created before this migration keeps drawing
 -- exactly the pool it already had — both tables start empty, which is the correct "nothing
 -- excluded or hand-picked yet" state, not a gap to backfill.
+-- GitHub #363 (Moodle-style course card: semester badge): course.semester is a brand new,
+-- nullable text column — every existing course row simply has no semester until an instructor
+-- sets one via the Edit Course modal, which is exactly the "badge just doesn't render" state the
+-- card already handles. Additive only, no backfill:
+--
+--   ALTER TABLE course ADD COLUMN IF NOT EXISTS semester text;
+
+-- GitHub #363 follow-up (pick a default cover, or upload a custom one): course.cover_image_url,
+-- another brand new nullable text column. Additive only, no backfill — every existing course
+-- simply has no explicit cover until an instructor picks one, which is exactly the "fall back to
+-- the deterministic default" state lib/courseCovers.ts's resolveCourseCoverSrc already handles:
+--
+--   ALTER TABLE course ADD COLUMN IF NOT EXISTS cover_image_url text;
+--
+-- Also requires a new **public** Storage bucket named `course-covers` (same as the existing
+-- `avatars` bucket — create it the same way, via the Supabase dashboard's Storage section, not
+-- SQL) for POST /api/instructor/course-covers to upload into. No RLS policy is added for it: like
+-- `avatars`, every write goes through a service-role route (lib/supabase.ts's
+-- getSupabaseClient()), never a client-side Supabase call.

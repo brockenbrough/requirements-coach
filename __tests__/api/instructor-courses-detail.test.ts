@@ -63,6 +63,8 @@ function courseRow(overrides: Partial<Record<string, unknown>> = {}) {
     course_code: 'ABCDEF',
     creator_id: 'instructor-1',
     created_at: '2026-08-11T10:00:00',
+    semester: null,
+    cover_image_url: null,
     ...overrides,
   };
 }
@@ -160,7 +162,14 @@ describe('GET /api/instructor/courses/[id]', () => {
     expect(res.status).toBe(200);
 
     const body = await res.json();
-    expect(body.course).toEqual({ id: 'course-1', name: 'Software Requirements', code: 'ABCDEF', createdAt: '2026-08-11T10:00:00' });
+    expect(body.course).toEqual({
+      id: 'course-1',
+      name: 'Software Requirements',
+      code: 'ABCDEF',
+      createdAt: '2026-08-11T10:00:00',
+      semester: null,
+      coverImageUrl: null,
+    });
     expect(body.students).toEqual([
       { id: 'student-1', name: 'Alex Chen', attempts: 1, averageScore: 75, abandonedCount: 0, needsAttention: false },
       { id: 'student-2', name: 'Sam Lee', attempts: 0, averageScore: null, abandonedCount: 0, needsAttention: false },
@@ -222,7 +231,117 @@ describe('PATCH /api/instructor/courses/[id]', () => {
     expect(res.status).toBe(200);
 
     const body = await res.json();
-    expect(body.course).toEqual({ id: 'course-1', name: 'New name', code: 'ABCDEF', createdAt: '2026-08-11T10:00:00' });
+    expect(body.course).toEqual({
+      id: 'course-1',
+      name: 'New name',
+      code: 'ABCDEF',
+      createdAt: '2026-08-11T10:00:00',
+      semester: null,
+      coverImageUrl: null,
+    });
     expect(h.state.updates).toEqual([{ table: 'course', payload: { course_name: 'New name' } }]);
+  });
+
+  it('returns 400 for a non-string coverImageUrl', async () => {
+    queueRole('instructor');
+    queue('course', { data: courseRow(), error: null });
+
+    const res = await PATCH(patchRequest({ name: 'New name', coverImageUrl: 123 }), params);
+    expect(res.status).toBe(400);
+    expect(h.state.updates).toEqual([]);
+  });
+
+  it('updates the cover image alongside the name when one is given', async () => {
+    queueRole('instructor');
+    queue('course', { data: courseRow(), error: null });
+    queue('course', {
+      data: courseRow({ course_name: 'New name', cover_image_url: 'https://example.com/course-covers/instructor-1/x.png' }),
+      error: null,
+    });
+
+    const res = await PATCH(
+      patchRequest({ name: 'New name', coverImageUrl: 'https://example.com/course-covers/instructor-1/x.png' }),
+      params,
+    );
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.course.coverImageUrl).toBe('https://example.com/course-covers/instructor-1/x.png');
+    expect(h.state.updates).toEqual([
+      { table: 'course', payload: { course_name: 'New name', cover_image_url: 'https://example.com/course-covers/instructor-1/x.png' } },
+    ]);
+  });
+
+  it('leaves the stored cover image untouched when the field is omitted from the body', async () => {
+    queueRole('instructor');
+    queue('course', { data: courseRow({ cover_image_url: 'https://example.com/course-covers/instructor-1/x.png' }), error: null });
+    queue('course', {
+      data: courseRow({ course_name: 'New name', cover_image_url: 'https://example.com/course-covers/instructor-1/x.png' }),
+      error: null,
+    });
+
+    const res = await PATCH(patchRequest({ name: 'New name' }), params);
+    expect(res.status).toBe(200);
+
+    expect(h.state.updates).toEqual([{ table: 'course', payload: { course_name: 'New name' } }]);
+  });
+
+  it('clears the cover image when explicitly set to null, reverting to the deterministic default', async () => {
+    queueRole('instructor');
+    queue('course', { data: courseRow({ cover_image_url: 'https://example.com/course-covers/instructor-1/x.png' }), error: null });
+    queue('course', { data: courseRow({ course_name: 'New name', cover_image_url: null }), error: null });
+
+    const res = await PATCH(patchRequest({ name: 'New name', coverImageUrl: null }), params);
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.course.coverImageUrl).toBeNull();
+    expect(h.state.updates).toEqual([{ table: 'course', payload: { course_name: 'New name', cover_image_url: null } }]);
+  });
+
+  it('returns 400 for a non-string semester', async () => {
+    queueRole('instructor');
+    queue('course', { data: courseRow(), error: null });
+
+    const res = await PATCH(patchRequest({ name: 'New name', semester: 123 }), params);
+    expect(res.status).toBe(400);
+    expect(h.state.updates).toEqual([]);
+  });
+
+  it('updates the semester alongside the name when one is given', async () => {
+    queueRole('instructor');
+    queue('course', { data: courseRow(), error: null });
+    queue('course', { data: courseRow({ course_name: 'New name', semester: 'SoSe 2026' }), error: null });
+
+    const res = await PATCH(patchRequest({ name: 'New name', semester: 'SoSe 2026' }), params);
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.course.semester).toBe('SoSe 2026');
+    expect(h.state.updates).toEqual([{ table: 'course', payload: { course_name: 'New name', semester: 'SoSe 2026' } }]);
+  });
+
+  it('leaves the stored semester untouched when the field is omitted from the body', async () => {
+    queueRole('instructor');
+    queue('course', { data: courseRow({ semester: 'SoSe 2026' }), error: null });
+    queue('course', { data: courseRow({ course_name: 'New name', semester: 'SoSe 2026' }), error: null });
+
+    const res = await PATCH(patchRequest({ name: 'New name' }), params);
+    expect(res.status).toBe(200);
+
+    expect(h.state.updates).toEqual([{ table: 'course', payload: { course_name: 'New name' } }]);
+  });
+
+  it('clears the semester when explicitly set to null', async () => {
+    queueRole('instructor');
+    queue('course', { data: courseRow({ semester: 'SoSe 2026' }), error: null });
+    queue('course', { data: courseRow({ course_name: 'New name', semester: null }), error: null });
+
+    const res = await PATCH(patchRequest({ name: 'New name', semester: null }), params);
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.course.semester).toBeNull();
+    expect(h.state.updates).toEqual([{ table: 'course', payload: { course_name: 'New name', semester: null } }]);
   });
 });

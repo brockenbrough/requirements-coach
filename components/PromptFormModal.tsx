@@ -34,6 +34,7 @@ export function PromptFormModal({
   mode,
   initialData,
   defaultActivityType,
+  defaultLevel,
   catalogOptions,
   onClose,
   onSave,
@@ -41,12 +42,14 @@ export function PromptFormModal({
   mode: 'add' | 'edit';
   initialData?: CatalogUserStory;
   defaultActivityType: ActivityType;
+  /** Mirrors QuestionFormModal's prop of the same name (GitHub #417): the page's active level filter. */
+  defaultLevel?: 1 | 2 | 3;
   catalogOptions: { value: ActivityType; label: string }[];
   onClose: () => void;
   onSave: (prompt: UserStoryDraft) => Promise<{ ok: true } | { ok: false; error: string }>;
 }) {
   const [activityType, setActivityType] = useState<ActivityType>(initialData?.activityType ?? defaultActivityType);
-  const [level, setLevel] = useState<1 | 2 | 3>(initialData?.level ?? 1);
+  const [level, setLevel] = useState<1 | 2 | 3>(initialData?.level ?? defaultLevel ?? 1);
   const [storyText, setStoryText] = useState(initialData?.storyText ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');

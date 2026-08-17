@@ -15,11 +15,14 @@ import {
   exportCourseReport,
   loadCourse,
   loadCourseQuizzes,
+  loadCourseClassStats,
   removeStudentFromCourse,
   type CourseDetail,
   type CourseStudent,
   type CourseSummary,
+  type CourseClassStats as CourseClassStatsData,
 } from '../../../../lib/courseClient';
+import { CourseClassStats } from '../../../../components/CourseClassStats';
 import type { AssembledQuizSummary } from '../../../../lib/assembledQuizClient';
 import { clearCachedInstructorStudents } from '../../../../lib/instructorStudentsStore';
 import { useRequireRole } from '../../../../lib/useRequireRole';
@@ -97,6 +100,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
   const [quizzes, setQuizzes] = useState<AssembledQuizSummary[] | null>(null);
   const [quizzesLoadFailed, setQuizzesLoadFailed] = useState(false);
   const [quizzesRetryCount, setQuizzesRetryCount] = useState(0);
+  const [classStats, setClassStats] = useState<CourseClassStatsData | null>(null);
   const [error, setError] = useState('');
   const [exporting, setExporting] = useState(false);
 
@@ -136,6 +140,22 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
       cancelled = true;
     };
   }, [token, params.id, quizzesRetryCount]);
+
+  // Also independent (GitHub #315): class engagement has nothing to do with the roster fetch or
+  // the Quizzes section above, and a failure here shouldn't block either of them — it just leaves
+  // CourseClassStats showing its loading placeholder.
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+
+    loadCourseClassStats(token, params.id).then((result) => {
+      if (!cancelled && result.ok) setClassStats(result.data);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, params.id]);
 
   if (loading || !authorized) return null;
   if (!token || !profile) return null;
@@ -249,6 +269,10 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
               </div>
             </div>
 
+            <div className="mb-6">
+              <CourseClassStats stats={classStats} />
+            </div>
+
             {error ? <p className="mb-4 text-sm font-semibold text-brand-danger">{error}</p> : null}
 
             {quizzesLoadFailed ? (
@@ -276,13 +300,19 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
           course={course}
           token={token}
           onClose={() => setEditModalOpen(false)}
-          onSaved={(updated) => setCourse((current) => (current ? { ...current, name: updated.name, code: updated.code } : current))}
+          onSaved={(updated) =>
+            setCourse((current) =>
+              current
+                ? { ...current, name: updated.name, code: updated.code, semester: updated.semester, coverImageUrl: updated.coverImageUrl }
+                : current,
+            )
+          }
         />
       ) : null}
 
       {deleteModalOpen && course ? (
         <DeleteCourseModal
-          course={course}
+          course={{ id: course.id, name: course.name, studentCount: course.students.length }}
           token={token}
           onClose={() => setDeleteModalOpen(false)}
           // Back to the list rather than staying on a page whose course no longer exists. The

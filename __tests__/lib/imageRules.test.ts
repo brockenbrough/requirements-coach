@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   AVATAR_MIME_EXTENSIONS,
   MAX_AVATAR_BYTES,
+  MAX_COURSE_COVER_BYTES,
   avatarSizeError,
+  courseCoverSizeError,
   sniffAvatarMime,
 } from '../../lib/imageRules';
 
@@ -71,5 +73,24 @@ describe('AVATAR_MIME_EXTENSIONS', () => {
     const extensions = Object.values(AVATAR_MIME_EXTENSIONS);
     expect(extensions).toEqual(['png', 'jpg', 'webp']);
     expect(new Set(extensions).size).toBe(extensions.length);
+  });
+});
+
+describe('courseCoverSizeError', () => {
+  it('accepts sizes up to the limit', () => {
+    expect(courseCoverSizeError(1)).toBeNull();
+    expect(courseCoverSizeError(MAX_COURSE_COVER_BYTES)).toBeNull();
+  });
+
+  it('rejects an empty file', () => {
+    expect(courseCoverSizeError(0)).toBe('The image file is empty.');
+  });
+
+  it('rejects anything over the limit', () => {
+    expect(courseCoverSizeError(MAX_COURSE_COVER_BYTES + 1)).toBe('Image must be 4 MB or smaller.');
+  });
+
+  it('has a higher limit than avatars, since a course cover is a wide banner, not a small circle', () => {
+    expect(MAX_COURSE_COVER_BYTES).toBeGreaterThan(MAX_AVATAR_BYTES);
   });
 });
