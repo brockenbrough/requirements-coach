@@ -25,7 +25,7 @@ export const studentTourSteps: TourStep[] = [
   },
   {
     target: 'nav-courses',
-    title: 'Courses',
+    title: 'Course Browser',
     description:
       'Join your instructor’s course here — search by course name, code, or instructor, and enter a course code (and enrollment key, if required) to get started.',
   },

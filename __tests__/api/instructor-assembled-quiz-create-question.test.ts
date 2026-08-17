@@ -77,6 +77,7 @@ function queueOwnedQuiz(overrides: Partial<Record<string, unknown>> = {}) {
       description: null,
       course_id: 'course-1',
       creator_id: 'instructor-1',
+      grading_kind: 'mcq',
       created_at: '2026-08-14T10:00:00',
       ...overrides,
     },
@@ -183,6 +184,17 @@ describe('POST /api/instructor/assembled-quizzes/[quizId]/questions', () => {
       { params: { quizId: 'quiz-1' } },
     );
     expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when this quiz's grading_kind isn't 'mcq'", async () => {
+    queueRole('instructor');
+    queueOwnedQuiz({ grading_kind: 'llm-graded' });
+
+    const res = await postRequest(validBody());
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error).toBe('This quiz can only include multiple-choice questions.');
+    expect(h.state.tables).not.toContain('question');
   });
 
   it('rejects a missing questionPrompt with 400', async () => {

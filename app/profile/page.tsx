@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { ChangePasswordForm } from '../../components/ChangePasswordForm';
+import { EarnedTitleSelect } from '../../components/EarnedTitleSelect';
 import { EditableField } from '../../components/EditableField';
 import { ImageCropModal } from '../../components/ImageCropModal';
 import { MasteryProgressSection } from '../../components/MasteryProgressSection';
@@ -17,6 +18,7 @@ import {
   avatarSizeError,
 } from '../../lib/imageRules';
 import { getInitials } from '../../lib/initials';
+import { useMasteryProgress } from '../../lib/useMasteryProgress';
 
 type ProfileDraft = {
   first_name: string;
@@ -102,6 +104,25 @@ export default function ProfilePage() {
   const [uploading, setUploading] = useState(false);
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // One load for two consumers: the title dropdown next to the name and the mastery section in the
+  // right column. Empty strings mean "don't load" — see the hook's own note on why the caller does
+  // that instead of skipping the call (hooks can't be conditional), and why an instructor, who has
+  // no mastery at all, passes them too.
+  const mastery = useMasteryProgress(
+    !isInstructor && token ? token : '',
+    !isInstructor && profile ? profile.user_id : '',
+  );
+  const [savingTitle, setSavingTitle] = useState(false);
+
+  async function handleSelectTitle(titleDefinitionId: string | null) {
+    setSavingTitle(true);
+    // Same PATCH as every other profile field, so the fresh profile (with the joined title name)
+    // lands in UserContext and the sidebar under the avatar updates without its own fetch.
+    const failure = await patchProfile({ selected_title_definition_id: titleDefinitionId });
+    setSavingTitle(false);
+    setError(failure ?? '');
+  }
 
   /** Shared by profile creation and handleSaveAll below — both need the same age/semester validation. */
   function parseOptionalNumber(raw: string, min: number, max: number): { value: number | null; error?: string } {
@@ -294,15 +315,19 @@ export default function ProfilePage() {
   return (
     <>
       <AppShell active="profile">
-      <section className="mx-auto w-full max-w-md rounded-2xl border border-gray-100 bg-gray-50 p-8">
-        <p className="text-sm font-extrabold uppercase tracking-wide text-[#7C4DFF]">Profile</p>
-
-        {error ? (
-          <p className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-600">{error}</p>
-        ) : null}
-
+      {/* The whole page used to sit in a single max-w-md column with no breakpoints at all, so a
+          1440px screen showed a 448px strip with the mastery cards stacked single-file down it.
+          The card keeps a narrow measure (it's a form), the mastery grid gets the room it needs,
+          and below lg the two stack back into one column. */}
+      <section className="mx-auto w-full max-w-5xl">
         {profile === null ? (
-          <>
+          <div className="mx-auto w-full max-w-md rounded-2xl border border-gray-100 bg-gray-50 p-8">
+            <p className="text-sm font-extrabold uppercase tracking-wide text-[#7C4DFF]">Profile</p>
+
+            {error ? (
+              <p className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-600">{error}</p>
+            ) : null}
+
             <h1 className="mt-4 text-3xl font-extrabold text-[#1B1642]">Create your profile</h1>
             <form onSubmit={handleCreate} className="mt-6 space-y-4">
               <label className="block text-sm font-bold text-gray-600">
@@ -382,9 +407,16 @@ export default function ProfilePage() {
                 {creating ? 'Creating…' : 'Create profile'}
               </button>
             </form>
-          </>
+          </div>
         ) : (
-          <>
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <div className="rounded-2xl border border-gray-100 bg-gray-50 p-6 sm:p-8 lg:col-span-1">
+            <p className="text-sm font-extrabold uppercase tracking-wide text-[#7C4DFF]">Profile</p>
+
+            {error ? (
+              <p className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-600">{error}</p>
+            ) : null}
+
             <div className="mt-6 flex flex-col items-center gap-3">
               <button
                 onClick={() => fileInputRef.current?.click()}
@@ -411,7 +443,33 @@ export default function ProfilePage() {
                 onChange={handleAvatarChange}
               />
               <h1 className="text-3xl font-extrabold text-[#1B1642]">{profile.username}</h1>
+              {/* The worn title sits directly above the name fields, in the brand accent rather
+                  than the username's near-black, so the two read as different things at a glance
+                  instead of as one two-line heading. */}
+              {profile.selected_title ? (
+                <p className="text-base font-extrabold text-brand-purple">{profile.selected_title.title_name}</p>
+              ) : null}
             </div>
+
+            {/* Instructors have no sessions and therefore no titles, same reasoning as the mastery
+                section and the sidebar's score pill being student-only. */}
+            {!isInstructor ? (
+              <div className="mt-5">
+                {/* Held back until the ladder has loaded: with entries still null the select would
+                    render its "pass a level to earn a title" empty state for a beat, which reads as
+                    a fact about the student rather than a loading state. */}
+                {mastery.loading ? (
+                  <div className="h-9 w-full animate-pulse rounded-brand-md bg-gray-100" />
+                ) : (
+                  <EarnedTitleSelect
+                    entries={mastery.entries ?? []}
+                    value={profile.selected_title_definition_id}
+                    onChange={handleSelectTitle}
+                    disabled={savingTitle}
+                  />
+                )}
+              </div>
+            ) : null}
 
             {!isEditing ? (
               <div className="mt-6 flex justify-center">
@@ -426,20 +484,26 @@ export default function ProfilePage() {
               </div>
             ) : null}
 
-            <EditableField
-              label="First name"
-              editing={isEditing}
-              value={isEditing ? (draft?.first_name ?? '') : (profile.first_name ?? '')}
-              onChange={(v) => updateDraft('first_name', v)}
-              placeholder="Enter your first name"
-            />
-            <EditableField
-              label="Last name"
-              editing={isEditing}
-              value={isEditing ? (draft?.last_name ?? '') : (profile.last_name ?? '')}
-              onChange={(v) => updateDraft('last_name', v)}
-              placeholder="Enter your last name"
-            />
+            {/* First and last name are one piece of information split across two fields, so they
+                share a row instead of stacking — the same grid-cols-2 pairing the create form
+                already uses for Age/Semester. Single column below sm, where two inputs side by side
+                would each be too narrow to read. */}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <EditableField
+                label="First name"
+                editing={isEditing}
+                value={isEditing ? (draft?.first_name ?? '') : (profile.first_name ?? '')}
+                onChange={(v) => updateDraft('first_name', v)}
+                placeholder="Enter your first name"
+              />
+              <EditableField
+                label="Last name"
+                editing={isEditing}
+                value={isEditing ? (draft?.last_name ?? '') : (profile.last_name ?? '')}
+                onChange={(v) => updateDraft('last_name', v)}
+                placeholder="Enter your last name"
+              />
+            </div>
             <EditableField
               label="Age"
               editing={isEditing}
@@ -525,11 +589,26 @@ export default function ProfilePage() {
               </button>
             </div>
 
+            </div>
+
             {/* GitHub #39: cumulative score and mastery titles are a student concept, same as
                 the sidebar's score pill (AppShell.tsx) already being instructor-only — an
-                instructor has no sessions of their own to have a score or title from. */}
-            {!isInstructor ? <MasteryProgressSection token={token} studentId={profile.user_id} /> : null}
-          </>
+                instructor has no sessions of their own to have a score or title from. Its data
+                comes from the page's single useMasteryProgress call, shared with the title
+                dropdown above, rather than a fetch of its own. */}
+            {!isInstructor ? (
+              <div className="rounded-2xl border border-gray-100 bg-gray-50 p-6 sm:p-8 lg:col-span-2">
+                <MasteryProgressSection
+                  entries={mastery.entries}
+                  cumulativeScore={mastery.cumulativeScore}
+                  sessionsCompleted={mastery.sessionsCompleted}
+                  error={mastery.error}
+                  loading={mastery.loading}
+                  onRetry={mastery.retry}
+                />
+              </div>
+            ) : null}
+          </div>
         )}
       </section>
       </AppShell>

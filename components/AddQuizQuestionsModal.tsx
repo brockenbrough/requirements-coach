@@ -8,14 +8,12 @@ import {
   type PickableQuestion,
   type PickableUserStory,
 } from '../lib/assembledQuizClient';
+import type { GradingKind } from '../lib/activityTypes';
 import { useModalDismiss } from './useModalDismiss';
 
 const LEVEL_LABEL: Record<1 | 2 | 3, string> = { 1: 'Easy', 2: 'Medium', 3: 'Hard' };
 const ALL_CATALOGS = 'all';
 const ALL_LEVELS = 'all';
-const ALL_TYPES = 'all';
-
-type PickerType = 'mcq' | 'llm-graded';
 
 function PickerRow({
   id,
@@ -61,7 +59,7 @@ function PickerRow({
 }
 
 /**
- * The popup that hand-picks individual questions and prompts onto an assembled quiz (GitHub #380,
+ * The popup that hand-picks individual questions or prompts onto an assembled quiz (GitHub #380,
  * extended with llm-graded parity), from any of the caller's own catalogs, without requiring that
  * catalog to be linked to the quiz as a whole — see assembled_quiz_extra_question/
  * assembled_quiz_extra_user_story's own header comments in supabase/schema.sql for why this is a
@@ -75,24 +73,23 @@ function PickerRow({
  * loaded composition: active catalog items plus existing hand-picks, both kinds) is what marks a
  * row as already in the quiz, not anything the server returns.
  *
- * MCQ questions and LLM-graded prompts are rendered as two separately-headed, separately-counted
- * sections (plus a Type filter to view just one) rather than one undifferentiated list — a badge
- * per row alone wasn't enough to keep the two kinds visually apart once a catalog mixes both. The
- * two kinds are always submitted through their own endpoint (POST .../extra-questions vs.
- * POST .../extra-user-stories) since they're genuinely different tables; selecting one of each and
- * submitting once still costs only two round trips total, not one per item.
+ * `gradingKind` is the quiz's own locked kind (assembled_quiz.grading_kind) — a quiz can never mix
+ * kinds, so only the matching pool (questions for 'mcq', prompts for 'llm-graded') is ever fetched
+ * into view, computed, or offered here; there is no Type filter, since there is only ever one type
+ * to show. The other pool's endpoint (POST .../extra-questions vs. POST .../extra-user-stories) is
+ * simply never called from this modal.
  *
- * onCreateNew is the second entry point into GitHub #380's "create a brand-new question" flow —
- * a "Can't find it? Create a new question" link rather than a full form embedded here, since the
- * actual form is the existing QuestionFormModal, owned and rendered by the composition page
- * itself (not this modal); triggering it means handing control back to the parent, which closes
- * this modal and opens that one. MCQ-only for now (llm-graded prompts have no equivalent
- * create-and-hand-pick route yet). Optional so this component doesn't require the capability if a
- * future caller doesn't want it.
+ * onCreateNew is the second entry point into GitHub #380's "create a brand-new question/prompt"
+ * flow — a "Can't find it? Create a new question/prompt" link rather than a full form embedded
+ * here, since the actual form is the existing QuestionFormModal/PromptFormModal, owned and
+ * rendered by the composition page itself (not this modal); triggering it means handing control
+ * back to the parent, which closes this modal and opens that one. Optional so this component
+ * doesn't require the capability if a future caller doesn't want it.
  */
 export function AddQuizQuestionsModal({
   token,
   quizId,
+  gradingKind,
   alreadyIncludedIds,
   onClose,
   onAdded,
@@ -100,6 +97,7 @@ export function AddQuizQuestionsModal({
 }: {
   token: string;
   quizId: string;
+  gradingKind: GradingKind;
   alreadyIncludedIds: Set<string>;
   onClose: () => void;
   onAdded: (result: { questionIds: string[]; userStoryIds: string[] }) => void;
@@ -111,7 +109,6 @@ export function AddQuizQuestionsModal({
   const [query, setQuery] = useState('');
   const [catalogFilter, setCatalogFilter] = useState(ALL_CATALOGS);
   const [levelFilter, setLevelFilter] = useState<typeof ALL_LEVELS | 1 | 2 | 3>(ALL_LEVELS);
-  const [typeFilter, setTypeFilter] = useState<typeof ALL_TYPES | PickerType>(ALL_TYPES);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -139,13 +136,16 @@ export function AddQuizQuestionsModal({
 
   const catalogs = useMemo(() => {
     const seen = new Map<string, string>();
-    for (const question of questions ?? []) seen.set(question.catalogActivityType, question.catalogName);
-    for (const story of userStories ?? []) seen.set(story.catalogActivityType, story.catalogName);
+    if (gradingKind === 'mcq') {
+      for (const question of questions ?? []) seen.set(question.catalogActivityType, question.catalogName);
+    } else {
+      for (const story of userStories ?? []) seen.set(story.catalogActivityType, story.catalogName);
+    }
     return Array.from(seen.entries()).sort((a, b) => a[1].localeCompare(b[1]));
-  }, [questions, userStories]);
+  }, [questions, userStories, gradingKind]);
 
   const visibleQuestions = useMemo(() => {
-    if (typeFilter === 'llm-graded') return [];
+    if (gradingKind !== 'mcq') return [];
     const q = query.trim().toLowerCase();
     return (questions ?? []).filter((question) => {
       if (q && !question.questionText.toLowerCase().includes(q)) return false;
@@ -153,10 +153,10 @@ export function AddQuizQuestionsModal({
       if (levelFilter !== ALL_LEVELS && question.level !== levelFilter) return false;
       return true;
     });
-  }, [questions, query, catalogFilter, levelFilter, typeFilter]);
+  }, [questions, query, catalogFilter, levelFilter, gradingKind]);
 
   const visibleUserStories = useMemo(() => {
-    if (typeFilter === 'mcq') return [];
+    if (gradingKind !== 'llm-graded') return [];
     const q = query.trim().toLowerCase();
     return (userStories ?? []).filter((story) => {
       if (q && !story.storyText.toLowerCase().includes(q)) return false;
@@ -164,7 +164,7 @@ export function AddQuizQuestionsModal({
       if (levelFilter !== ALL_LEVELS && story.level !== levelFilter) return false;
       return true;
     });
-  }, [userStories, query, catalogFilter, levelFilter, typeFilter]);
+  }, [userStories, query, catalogFilter, levelFilter, gradingKind]);
 
   function toggle(id: string) {
     if (alreadyIncludedIds.has(id)) return;
@@ -230,7 +230,7 @@ export function AddQuizQuestionsModal({
           <div>
             <p className="text-xs font-extrabold uppercase tracking-wide text-brand-gold">Quizzes</p>
             <h2 id="add-quiz-questions-title" className="mt-1 text-xl font-extrabold text-white">
-              Add Individual Questions
+              {gradingKind === 'llm-graded' ? 'Add Individual Prompts' : 'Add Individual Questions'}
             </h2>
           </div>
           <button
@@ -254,22 +254,9 @@ export function AddQuizQuestionsModal({
               type="text"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search question or prompt text…"
+              placeholder={gradingKind === 'llm-graded' ? 'Search prompt text…' : 'Search question text…'}
               className="mt-1.5 block w-full rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none transition focus:border-brand-purple"
             />
-          </label>
-
-          <label className="text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted">
-            Type
-            <select
-              value={typeFilter}
-              onChange={(event) => setTypeFilter(event.target.value === ALL_TYPES ? ALL_TYPES : (event.target.value as PickerType))}
-              className="mt-1.5 block w-full rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none transition focus:border-brand-purple sm:w-44"
-            >
-              <option value={ALL_TYPES}>All types</option>
-              <option value="mcq">Multiple choice</option>
-              <option value="llm-graded">LLM-graded</option>
-            </select>
           </label>
 
           <label className="text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted">
@@ -309,7 +296,9 @@ export function AddQuizQuestionsModal({
           ) : loading ? (
             <p className="p-4 text-center text-sm font-semibold text-brand-ink-muted">Loading…</p>
           ) : nothingVisible ? (
-            <p className="p-4 text-center text-sm font-semibold text-brand-ink-muted">No questions or prompts match this filter.</p>
+            <p className="p-4 text-center text-sm font-semibold text-brand-ink-muted">
+              {gradingKind === 'llm-graded' ? 'No prompts match this filter.' : 'No questions match this filter.'}
+            </p>
           ) : (
             <>
               {visibleQuestions.length > 0 ? (
@@ -371,7 +360,7 @@ export function AddQuizQuestionsModal({
               disabled={submitting}
               className="text-xs font-bold text-brand-purple underline-offset-2 transition hover:underline disabled:opacity-60"
             >
-              Can&apos;t find it? Create a new question
+              {gradingKind === 'llm-graded' ? "Can't find it? Create a new prompt" : "Can't find it? Create a new question"}
             </button>
           ) : (
             <span />

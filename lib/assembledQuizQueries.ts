@@ -28,6 +28,8 @@ export type AssembledQuizSummary = {
   description: string | null;
   courseId: string;
   courseName: string;
+  /** GitHub: the single catalog kind this quiz may ever compose/hand-pick from — see assembled_quiz.grading_kind's own comment in supabase/schema.sql. */
+  gradingKind: GradingKind;
   catalogs: { activityType: string; name: string; gradingKind: GradingKind }[];
   catalogNames: string[];
   createdAt: string;
@@ -38,13 +40,14 @@ type AssembledQuizRow = {
   quiz_name: string;
   description: string | null;
   course_id: string;
+  grading_kind: string;
   created_at: string;
   course: { course_name: string } | null;
   assembled_quiz_catalog: { activity_type: string; catalog: { quiz_name: string; grading_kind: string } | null }[] | null;
 };
 
 const ASSEMBLED_QUIZ_SUMMARY_SELECT =
-  'assembled_quiz_id, quiz_name, description, course_id, created_at, course:course_id(course_name), assembled_quiz_catalog(activity_type, catalog:activity_type(quiz_name, grading_kind))';
+  'assembled_quiz_id, quiz_name, description, course_id, grading_kind, created_at, course:course_id(course_name), assembled_quiz_catalog(activity_type, catalog:activity_type(quiz_name, grading_kind))';
 
 function mapAssembledQuizRow(row: AssembledQuizRow): AssembledQuizSummary {
   const catalogs = (row.assembled_quiz_catalog ?? []).map((link) => ({
@@ -58,6 +61,7 @@ function mapAssembledQuizRow(row: AssembledQuizRow): AssembledQuizSummary {
     description: row.description,
     courseId: row.course_id,
     courseName: row.course?.course_name ?? 'Unknown course',
+    gradingKind: row.grading_kind === 'llm-graded' ? 'llm-graded' : 'mcq',
     catalogs,
     catalogNames: catalogs.map((c) => c.name),
     createdAt: row.created_at,
@@ -103,7 +107,13 @@ export async function listAssembledQuizzesForCourse(supabase: SupabaseClient, co
   return { quizzes, error: null };
 }
 
-export type AssembledQuizRecord = { id: string; name: string; description: string | null; courseId: string };
+export type AssembledQuizRecord = {
+  id: string;
+  name: string;
+  description: string | null;
+  courseId: string;
+  gradingKind: GradingKind;
+};
 
 /**
  * Inserts an assembled_quiz row plus one assembled_quiz_catalog link per catalog. No transaction
@@ -111,10 +121,21 @@ export type AssembledQuizRecord = { id: string; name: string; description: strin
  * documents) — a link-insert failure deletes the quiz row it was about to belong to, mirroring
  * that route's rollbackAndFail, so a partial write never leaves an orphaned quiz with zero
  * catalogs linked to it.
+ *
+ * gradingKind is required, not inferred from catalogActivityTypes — the caller (the POST route)
+ * already validated every catalog matches it, and locking the value in here rather than deriving
+ * it is what makes the column meaningful once catalogs are later added/removed.
  */
 export async function createAssembledQuiz(
   supabase: SupabaseClient,
-  params: { name: string; description: string | null; courseId: string; creatorId: string; catalogActivityTypes: string[] },
+  params: {
+    name: string;
+    description: string | null;
+    courseId: string;
+    creatorId: string;
+    gradingKind: GradingKind;
+    catalogActivityTypes: string[];
+  },
 ): Promise<{ quiz: AssembledQuizRecord | null; error: { message: string } | null }> {
   const assembledQuizId = crypto.randomUUID();
 
@@ -124,6 +145,7 @@ export async function createAssembledQuiz(
     description: params.description,
     course_id: params.courseId,
     creator_id: params.creatorId,
+    grading_kind: params.gradingKind,
   });
 
   if (quizError) return { quiz: null, error: quizError };
@@ -141,7 +163,13 @@ export async function createAssembledQuiz(
   }
 
   return {
-    quiz: { id: assembledQuizId, name: params.name, description: params.description, courseId: params.courseId },
+    quiz: {
+      id: assembledQuizId,
+      name: params.name,
+      description: params.description,
+      courseId: params.courseId,
+      gradingKind: params.gradingKind,
+    },
     error: null,
   };
 }
@@ -152,10 +180,11 @@ type AssembledQuizMetaRow = {
   description: string | null;
   course_id: string;
   creator_id: string;
+  grading_kind: string;
   created_at: string;
 };
 
-const ASSEMBLED_QUIZ_COLUMNS = 'assembled_quiz_id, quiz_name, description, course_id, creator_id, created_at';
+const ASSEMBLED_QUIZ_COLUMNS = 'assembled_quiz_id, quiz_name, description, course_id, creator_id, grading_kind, created_at';
 
 export type OwnedAssembledQuizResult =
   | { status: 'ok'; quiz: AssembledQuizMetaRow }
@@ -445,6 +474,34 @@ export async function getExtraQuestionSummary(supabase: SupabaseClient, question
   const summary: QuizExtraQuestionSummary = {
     questionId: row.question_id,
     questionText: row.question_prompt,
+    level: row.difficulty_level as 1 | 2 | 3,
+    catalogActivityType: row.activity_type,
+    catalogName: row.catalog?.quiz_name ?? row.activity_type,
+  };
+
+  return { summary, error: null };
+}
+
+/**
+ * The llm-graded counterpart of getExtraQuestionSummary — fetches one user_story's display
+ * summary (story text, level, source catalog) by id, used by the create-and-hand-pick prompt
+ * route to hand the freshly created, freshly hand-picked prompt straight back to the caller in
+ * the same shape as getQuizComposition's `extraUserStories`.
+ */
+export async function getExtraUserStorySummary(supabase: SupabaseClient, userStoryId: string) {
+  const { data, error } = await supabase
+    .from('user_story')
+    .select('user_story_id, story_text, difficulty_level, activity_type, catalog:activity_type(quiz_name)')
+    .eq('user_story_id', userStoryId)
+    .maybeSingle();
+
+  if (error) return { summary: null, error };
+  if (!data) return { summary: null, error: null };
+
+  const row = data as unknown as ExtraUserStoryRow;
+  const summary: QuizExtraUserStorySummary = {
+    userStoryId: row.user_story_id,
+    storyText: row.story_text,
     level: row.difficulty_level as 1 | 2 | 3,
     catalogActivityType: row.activity_type,
     catalogName: row.catalog?.quiz_name ?? row.activity_type,
@@ -953,12 +1010,12 @@ export async function duplicateQuizzesForCourse(
 ): Promise<{ copiedCount: number; error: { message: string } | null }> {
   const { data, error: sourceError } = await supabase
     .from('assembled_quiz')
-    .select('assembled_quiz_id, quiz_name, description')
+    .select('assembled_quiz_id, quiz_name, description, grading_kind')
     .eq('course_id', params.sourceCourseId);
 
   if (sourceError) return { copiedCount: 0, error: sourceError };
 
-  type SourceQuizRow = { assembled_quiz_id: string; quiz_name: string; description: string | null };
+  type SourceQuizRow = { assembled_quiz_id: string; quiz_name: string; description: string | null; grading_kind: string };
   const sourceQuizzes = (data ?? []) as SourceQuizRow[];
   let copiedCount = 0;
 
@@ -983,6 +1040,7 @@ export async function duplicateQuizzesForCourse(
       description: sourceQuiz.description,
       courseId: params.targetCourseId,
       creatorId: params.creatorId,
+      gradingKind: sourceQuiz.grading_kind === 'llm-graded' ? 'llm-graded' : 'mcq',
       catalogActivityTypes: activityTypes ?? [],
     });
     if (createError || !newQuiz) return { copiedCount, error: createError };

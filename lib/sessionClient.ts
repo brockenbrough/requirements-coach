@@ -680,6 +680,7 @@ type PublicProfileResponse = {
   username: string;
   avatarUrl: string | null;
   biography: string;
+  selectedTitle: string | null;
   score: number;
   titles: PublicStudentTitle[];
   availableTitles: AvailableActivityTitles[];

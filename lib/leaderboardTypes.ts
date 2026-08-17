@@ -37,6 +37,13 @@ export type LeaderboardEntry = {
    * device", not "since yesterday". See that store's header for the limits.
    */
   rankChange: number | null;
+  /**
+   * The mastery title this student chose to wear ("user".selected_title_definition_id, resolved to
+   * title_definition.title_name), or null if they haven't picked one. Read straight off the "user"
+   * embed this query already joins for username/avatar — no extra round trip, and no re-derivation
+   * of "highest earned", which would show a title the student never chose to display.
+   */
+  title: string | null;
 };
 
 /** A course the signed-in student can view a leaderboard for. */
@@ -69,7 +76,21 @@ export type AvailableActivityTitles = {
   activityName: string;
   courseId: string;
   courseName: string;
-  titles: { difficultyLevel: number; title: string | null }[];
+  titles: TitleLadderRung[];
+};
+
+/**
+ * One rung of an earnable title ladder, same shape as lib/titleQueries.ts's TitleLadderRung —
+ * re-declared here for the same reason PublicStudentTitle above is: this file imports nothing, so
+ * a client component can use it without dragging a server query module into the bundle.
+ *
+ * titleDefinitionId is null exactly when title is. It's what a student's chosen title is stored
+ * as ("user".selected_title_definition_id), so a rung without one is not wearable.
+ */
+export type TitleLadderRung = {
+  difficultyLevel: number;
+  titleDefinitionId: string | null;
+  title: string | null;
 };
 
 /**
@@ -80,6 +101,10 @@ export type AvailableActivityTitles = {
  * and deliberately so, are first_name/last_name, age, semester, email, the student's courses,
  * and anything about individual answers or attempts — all of which exist on the "user" row or a
  * join away from it, and none of which a peer has a reason to see.
+ *
+ * selectedTitle is a deliberate addition to that list rather than an oversight: a worn title is
+ * chosen by the student precisely to be seen next to their name, and it is already visible to
+ * every classmate on the course leaderboard.
  *
  * titles and availableTitles both stay in the raw API shape rather than a pre-built
  * MasteryTitleEntry[] so that lib/masteryTitles.ts remains the single place that reconciles the
@@ -93,6 +118,8 @@ export type PublicStudentProfile = {
   biography: string;
   /** Cumulative score, same definition as computeStudentScore (lib/scoreQueries.ts). */
   score: number;
+  /** The mastery title this student chose to wear, or null — same field as LeaderboardEntry.title. */
+  selectedTitle: string | null;
   titles: PublicStudentTitle[];
   /** The target's full earnable title ladder — lib/titleQueries.ts's loadAvailableTitleLadders. */
   availableTitles: AvailableActivityTitles[];

@@ -137,6 +137,7 @@ function StudentProfileContent({ studentId }: { studentId: string }) {
             username: ownProfile.username,
             avatarUrl: ownProfile.avatar_url,
             biography: ownProfile.biography,
+            selectedTitle: ownProfile.selected_title?.title_name ?? null,
             score: ownScore,
             titles: ownTitles,
             availableTitles: ownAvailableTitles,
@@ -178,6 +179,9 @@ function StudentProfileContent({ studentId }: { studentId: string }) {
               <Avatar avatarUrl={profile.avatarUrl} fallbackName={profile.username} size="xl" />
               <div className="min-w-0">
                 <h1 className="break-words text-2xl font-extrabold text-brand-navy">{profile.username}</h1>
+                {profile.selectedTitle ? (
+                  <p className="mt-0.5 text-sm font-bold text-brand-purple">{profile.selectedTitle}</p>
+                ) : null}
                 {isSelf ? (
                   <p className="mt-1 text-sm font-semibold text-gray-500">
                     This is you —{' '}

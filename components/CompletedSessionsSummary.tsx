@@ -17,7 +17,10 @@ export function CompletedSessionsSummary({
   levelsPassed: number;
 }) {
   return (
-    <div className="grid grid-cols-3 gap-3">
+    // grid-cols-1 below sm so three tiles don't squeeze to ~100px on a phone — this matches
+    // components/MasteryProgressSkeleton.tsx, which was already responsive while this wasn't, so
+    // the layout no longer reflows the moment real data replaces the skeleton.
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
       <StatTile value={cumulativeScore} label="Cumulative score" />
       <StatTile value={sessionsCompleted} label="Sessions completed" />
       <StatTile value={levelsPassed} label="Levels passed" />
