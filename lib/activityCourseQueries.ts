@@ -9,17 +9,31 @@ import type { SupabaseClient } from './sessionQueries';
 import { getEnrolledCourseIds } from './courseQueries';
 import { isGradingKind, type GradingKind } from './activityTypes';
 
-export type ActivityCourseLink = { courseId: string; courseName: string };
+export type ActivityCourseLink = { courseId: string; courseName: string; name: string; description: string | null };
 
-type GrantingQuizRow = { assembled_quiz: { course_id: string; course: { course_name: string } | null } | null };
+type GrantingQuizRow = {
+  assembled_quiz: {
+    course_id: string;
+    quiz_name: string;
+    description: string | null;
+    course: { course_name: string } | null;
+  } | null;
+  catalog: { quiz_name: string; description: string | null } | null;
+};
 
 /**
  * One course, among the caller's own enrolled courses, that grants access to `activityType`
  * through some assembled_quiz — or null if none does. There can be more than one (the same
  * catalog can be composed into quizzes in several of the caller's courses); this returns
  * whichever the query finds first, which is enough for both existing callers below
- * (checkActivityAccess only needs a yes/no, and GET /api/activities/{activityType} only needs
- * *a* valid course to answer with, not an exhaustive list).
+ * (checkActivityAccess only needs a yes/no, and GET /api/activities/{activityType} needs a valid
+ * course plus display name/description to answer with, not an exhaustive list).
+ *
+ * name/description prefer the assembled quiz's own (what the instructor actually called it for
+ * this course) over the underlying catalog's — the catalog embed rides along on the same query
+ * (this function already filters by activity_type, so it's the same row, not a second round
+ * trip) purely as a fallback for assembled_quiz.description being nullable; assembled_quiz's own
+ * quiz_name is NOT NULL, so its catalog fallback is defensive rather than a reachable path.
  *
  * Two queries (enrolled course ids, then the quiz-catalog join filtered to them) rather than one
  * three-way join, matching the shape getCourseForActivityType + isEnrolledInAnyCourse used to
@@ -36,7 +50,9 @@ export async function getAccessibleCourseForActivity(
 
   const { data, error } = await supabase
     .from('assembled_quiz_catalog')
-    .select('assembled_quiz:assembled_quiz_id!inner(course_id, course:course_id(course_name))')
+    .select(
+      'assembled_quiz:assembled_quiz_id!inner(course_id, quiz_name, description, course:course_id(course_name)), catalog:activity_type(quiz_name, description)',
+    )
     .eq('activity_type', activityType)
     .in('assembled_quiz.course_id', courseIds)
     .limit(1);
@@ -47,7 +63,12 @@ export async function getAccessibleCourseForActivity(
   if (!row?.assembled_quiz) return { link: null, error: null };
 
   return {
-    link: { courseId: row.assembled_quiz.course_id, courseName: row.assembled_quiz.course?.course_name ?? 'Unknown course' },
+    link: {
+      courseId: row.assembled_quiz.course_id,
+      courseName: row.assembled_quiz.course?.course_name ?? 'Unknown course',
+      name: row.assembled_quiz.quiz_name ?? row.catalog?.quiz_name ?? activityType,
+      description: row.assembled_quiz.description ?? row.catalog?.description ?? null,
+    },
     error: null,
   };
 }
@@ -91,7 +112,12 @@ export type CourseActivitySummary = {
 type DiscoveryRow = {
   activity_type: string;
   catalog: { quiz_name: string; description: string | null; grading_kind: string } | null;
-  assembled_quiz: { course_id: string; course: { course_name: string } | null } | null;
+  assembled_quiz: {
+    course_id: string;
+    quiz_name: string;
+    description: string | null;
+    course: { course_name: string } | null;
+  } | null;
 };
 
 /**
@@ -103,8 +129,14 @@ type DiscoveryRow = {
  * A catalog composed into more than one quiz across the given courses appears only once here,
  * keyed by activityType — the caller's discovery list shows one card per catalog, not one per
  * quiz that happens to include it, so the first quiz/course found for a given catalog is what's
- * used to fill in courseId/courseName (display-only fields; access itself doesn't depend on which
- * one is picked, only that at least one exists).
+ * used to fill in every display field (courseId/courseName/name/description; access itself
+ * doesn't depend on which one is picked, only that at least one exists).
+ *
+ * name/description prefer the assembled quiz's own quiz_name/description — what the instructor
+ * actually called it for this course — over the underlying catalog's, falling back to the
+ * catalog's only when the assembled quiz doesn't have one (real for description, which is
+ * nullable; effectively unreachable for quiz_name, which is NOT NULL, but free to keep since the
+ * catalog embed is already fetched here for grading_kind).
  */
 export async function listActivityTypesForCourses(
   supabase: SupabaseClient,
@@ -115,7 +147,7 @@ export async function listActivityTypesForCourses(
   const { data, error } = await supabase
     .from('assembled_quiz_catalog')
     .select(
-      'activity_type, catalog:activity_type(quiz_name, description, grading_kind), assembled_quiz:assembled_quiz_id!inner(course_id, course:course_id(course_name))',
+      'activity_type, catalog:activity_type(quiz_name, description, grading_kind), assembled_quiz:assembled_quiz_id!inner(course_id, quiz_name, description, course:course_id(course_name))',
     )
     .in('assembled_quiz.course_id', courseIds);
 
@@ -130,8 +162,8 @@ export async function listActivityTypesForCourses(
 
     activities.push({
       activityType: row.activity_type,
-      name: row.catalog?.quiz_name ?? row.activity_type,
-      description: row.catalog?.description ?? null,
+      name: row.assembled_quiz.quiz_name ?? row.catalog?.quiz_name ?? row.activity_type,
+      description: row.assembled_quiz.description ?? row.catalog?.description ?? null,
       // Same 'mcq' fallback as lib/activityTypeQueries.ts's gradingKindOf, for the same reason: the
       // column defaults to 'mcq' because every activity_type predating it drew from question/answer.
       gradingKind: isGradingKind(row.catalog?.grading_kind) ? row.catalog.grading_kind : 'mcq',
