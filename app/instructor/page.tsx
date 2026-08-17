@@ -180,7 +180,19 @@ function InstructorDashboardContent() {
     return () => { cancelled = true; };
   }, [token, profile?.user_id]);
 
-  const roster = useMemo(() => summarizeStudents(entries ?? []), [entries]);
+  // Merges in allStudents so an enrolled student with zero attempts still gets a card here,
+  // the same fix app/instructor/students/page.tsx already applies — without this, the dashboard
+  // roster silently drops every student who hasn't started an activity yet (GitHub #415).
+  const rosterEntries = useMemo(
+    () =>
+      (allStudents ?? []).map((s) => ({
+        studentId: s.userId,
+        studentName: `${s.firstName} ${s.lastName}`.trim() || s.username,
+      })),
+    [allStudents],
+  );
+
+  const roster = useMemo(() => summarizeStudents(entries ?? [], rosterEntries), [entries, rosterEntries]);
 
   // Used by ActivityLogTable to resolve a student name for each attempt row.
   const studentNameById = useMemo(
