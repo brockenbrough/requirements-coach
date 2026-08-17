@@ -465,6 +465,61 @@ export async function listJoinableCourses(supabase: SupabaseClient, userId: stri
 }
 
 /**
+ * Every course a student is actually enrolled in (GitHub #427), display-ready in the same
+ * JoinableCourseRecord shape listJoinableCourses uses — deliberately a *different* query from
+ * that one rather than a client-side `.filter(already_member)` over it: listJoinableCourses only
+ * selects courses with `course_code IS NOT NULL` (self-serve joinable ones), so a course a student
+ * was enrolled in directly by their instructor (course_code IS NULL, REQ-DL-5) would silently
+ * never appear on a "my courses" list built that way, even though the student is genuinely in it.
+ * This query starts from student_course membership instead, so it has no such gap.
+ *
+ * already_member is always true here by construction (every row IS one of the caller's own
+ * enrollments) — kept on the record only so this can share JoinableCourseRecord/JoinableCourse
+ * with listJoinableCourses instead of introducing a near-duplicate type for one boolean's absence.
+ */
+export async function listEnrolledCoursesForStudent(supabase: SupabaseClient, userId: string) {
+  const { courseIds, error: courseIdsError } = await getEnrolledCourseIds(supabase, userId);
+  if (courseIdsError || !courseIds) return { courses: null, error: courseIdsError };
+  if (courseIds.length === 0) return { courses: [], error: null };
+
+  const { data, error } = await supabase
+    .from('course')
+    .select(
+      'course_id, course_name, created_at, semester, cover_image_url, creator:creator_id(first_name, last_name, username), student_course(count)',
+    )
+    .in('course_id', courseIds)
+    .order('created_at', { ascending: false });
+
+  if (error) return { courses: null, error };
+
+  type Row = {
+    course_id: string;
+    course_name: string;
+    created_at: string;
+    semester: string | null;
+    cover_image_url: string | null;
+    creator: { first_name: string | null; last_name: string | null; username: string | null } | null;
+    student_course: { count: number }[] | null;
+  };
+
+  const courses: JoinableCourseRecord[] = ((data ?? []) as unknown as Row[]).map((row) => {
+    const fullName = [row.creator?.first_name, row.creator?.last_name].filter(Boolean).join(' ').trim();
+    return {
+      course_id: row.course_id,
+      course_name: row.course_name,
+      created_at: row.created_at,
+      professor_name: fullName || row.creator?.username || 'Unknown instructor',
+      student_count: row.student_course?.[0]?.count ?? 0,
+      already_member: true,
+      semester: row.semester,
+      cover_image_url: row.cover_image_url,
+    };
+  });
+
+  return { courses, error: null };
+}
+
+/**
  * Every course a user is enrolled in (student_course), as bare ids. The building block for
  * "does this student share a course with that one" — GET /api/students/{id}/public-profile uses
  * this to get the target's course list before checking the caller against it (isEnrolledInAnyCourse

@@ -52,8 +52,9 @@ vi.mock('../../lib/supabase', () => ({
 
 import { GET } from '../../app/api/activities/route';
 
-function req(token: string | null = 'valid-token') {
-  return new Request('http://localhost/api/activities', {
+function req(token: string | null = 'valid-token', courseId?: string) {
+  const url = courseId ? `http://localhost/api/activities?courseId=${courseId}` : 'http://localhost/api/activities';
+  return new Request(url, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
 }
@@ -142,6 +143,43 @@ describe('GET /api/activities', () => {
       column: 'assembled_quiz.course_id',
       value: ['course-1', 'course-2'],
     });
+  });
+
+  it('scopes to a single course when ?courseId= is given and the caller is enrolled in it', async () => {
+    queue('student_course', { data: [{ course_id: 'course-1' }, { course_id: 'course-2' }], error: null });
+    queue('assembled_quiz_catalog', {
+      data: [
+        {
+          activity_type: 'IDENTIFY_WEAK_USER_STORIES',
+          catalog: { quiz_name: 'Identify Weak User Stories', description: null, grading_kind: 'mcq' },
+          assembled_quiz: {
+            course_id: 'course-1',
+            quiz_name: 'Weak Stories — Sprint 2',
+            description: 'Sprint 2 edition',
+            course: { course_name: 'Software Requirements' },
+          },
+        },
+      ],
+      error: null,
+    });
+
+    const res = await GET(req('valid-token', 'course-1'));
+    expect(res.status).toBe(200);
+
+    expect(h.state.filters).toContainEqual({
+      table: 'assembled_quiz_catalog',
+      column: 'assembled_quiz.course_id',
+      value: ['course-1'],
+    });
+  });
+
+  it('returns 403 with an empty body when ?courseId= is a course the caller is not enrolled in', async () => {
+    queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
+
+    const res = await GET(req('valid-token', 'course-999'));
+    expect(res.status).toBe(403);
+    expect(await res.text()).toBe('');
+    expect(h.state.tables).not.toContain('assembled_quiz_catalog');
   });
 
   it('returns 500 when the enrolled-course lookup fails', async () => {
