@@ -276,7 +276,7 @@ function ActivityDetailContent({
             href="/activities"
             className="mb-5 inline-flex items-center gap-1 text-sm font-bold text-gray-500 hover:text-[#1B1642]"
           >
-            ← Back to Activities
+            ← Back to My Courses
           </Link>
           <p className="rounded-2xl border border-brand-danger/40 bg-brand-danger/10 p-6 text-sm font-semibold text-brand-danger-light">
             {activityStatus === 'forbidden'
@@ -387,7 +387,7 @@ function ActivityDetailContent({
           href="/activities"
           className="mb-5 inline-flex items-center gap-1 text-sm font-bold text-gray-500 hover:text-[#1B1642]"
         >
-          ← Back to Activities
+          ← Back to My Courses
         </Link>
 
         {isLoading ? (

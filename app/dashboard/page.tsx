@@ -271,13 +271,13 @@ export default function DashboardPage() {
             No activity in progress
           </h3>
           <p className="mb-4 text-sm font-semibold text-[#A79FC9]">
-            Head to Activities to start practicing.
+            Head to My Courses to start practicing.
           </p>
           <Link
             href="/activities"
             className="inline-block rounded-[10px] bg-[#7C4DFF] px-5 py-2.5 text-sm font-extrabold text-white hover:bg-[#6234d1]"
           >
-            Browse Activities
+            My Courses
           </Link>
         </div>
       )}

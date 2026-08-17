@@ -139,7 +139,7 @@ function QuizPlayView({
             ? "You're not enrolled in a course that offers this activity."
             : "This activity doesn't exist."}
           <Link href="/activities" className="ml-1 underline hover:text-white">
-            Back to Activities
+            Back to My Courses
           </Link>
         </div>
       </AppShell>
@@ -460,7 +460,7 @@ export default function PlayActivityPage({
             ? "You're not enrolled in a course that offers this activity."
             : "This activity doesn't exist."}
           <Link href="/activities" className="ml-1 underline hover:text-white">
-            Back to Activities
+            Back to My Courses
           </Link>
         </div>
       </AppShell>
