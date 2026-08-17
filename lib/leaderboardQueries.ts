@@ -13,11 +13,23 @@ import { computeStreakFromSessions, type StreakSessionRow } from './streakQuerie
 // without it, .eq('student.role', 'student') would null the embed instead of dropping the row,
 // and an instructor who was somehow enrolled would still show up ranked among their own
 // students. Backed by ix_user_role, the same index that embed relies on.
-const ROSTER_STUDENT_EMBED = 'student:user!inner(username, avatar_url, role)';
+//
+// selected_title rides along on this same embed rather than costing a query of its own: the worn
+// title is stored as a title_definition_id on "user", and PostgREST resolves the name through the
+// existing fk_user_title_definition foreign key. Note it is the title the student *chose*, not a
+// re-derivation of their highest earned one — showing a title nobody picked would put a name on a
+// leaderboard row its owner never opted into.
+const ROSTER_STUDENT_EMBED =
+  'student:user!inner(username, avatar_url, role, selected_title:title_definition(title_name))';
 
 type RosterRow = {
   user_id: string;
-  student: { username: string; avatar_url: string | null; role: string };
+  student: {
+    username: string;
+    avatar_url: string | null;
+    role: string;
+    selected_title: { title_name: string } | null;
+  };
 };
 
 /** One ranked row. No rankChange here — that's derived client-side, see LeaderboardEntry's own doc. */
@@ -29,6 +41,8 @@ export type LeaderboardRow = {
   points: number;
   /** Same definition as computeStudentStreak (lib/streakQueries.ts, GitHub #307). */
   streak: number;
+  /** The mastery title this student chose to wear, or null if they haven't picked one. */
+  title: string | null;
 };
 
 /**
@@ -97,6 +111,7 @@ export async function computeCourseLeaderboard(
         studentId: row.user_id,
         username: row.student.username,
         avatarUrl: row.student.avatar_url,
+        title: row.student.selected_title?.title_name ?? null,
         points: sumBestScores(sessions),
         streak: computeStreakFromSessions(sessions.filter((session) => session.passed)),
       };
@@ -116,6 +131,7 @@ export async function computeCourseLeaderboard(
       avatarUrl: entry.avatarUrl,
       points: entry.points,
       streak: entry.streak,
+      title: entry.title,
     });
     previousPoints = entry.points;
     previousRank = rank;

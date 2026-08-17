@@ -55,7 +55,10 @@ export async function GET(request: Request, { params }: { params: { studentId: s
 
   const { data: target, error: targetError } = await supabase
     .from('user')
-    .select('username, avatar_url, biography, role')
+    // selected_title is embedded through fk_user_title_definition, same as GET /api/profile and the
+    // course leaderboard do — one join instead of a second query, and the same "what they chose to
+    // wear", not "what they've earned".
+    .select('username, avatar_url, biography, role, selected_title:title_definition(title_name)')
     .eq('user_id', params.studentId)
     .maybeSingle();
 
@@ -92,13 +95,22 @@ export async function GET(request: Request, { params }: { params: { studentId: s
     return Response.json({ error: computeError?.message ?? 'Could not load profile.' }, { status: 500 });
   }
 
-  const profile = target as { username: string; avatar_url: string | null; biography: string };
+  // `as unknown as` because supabase-js types an embed as an array without generated schema types,
+  // while PostgREST returns a single object (or null) for a many-to-one like this one — the same
+  // cast lib/activityCourseQueries.ts makes for its own embeds.
+  const profile = target as unknown as {
+    username: string;
+    avatar_url: string | null;
+    biography: string;
+    selected_title: { title_name: string } | null;
+  };
 
   return Response.json(
     {
       username: profile.username,
       avatarUrl: profile.avatar_url,
       biography: profile.biography,
+      selectedTitle: profile.selected_title?.title_name ?? null,
       score,
       titles,
       availableTitles,

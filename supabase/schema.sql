@@ -41,6 +41,13 @@ CREATE TABLE "user" (
     -- account backfilled by the ALTER TABLE below is treated the same as a brand new one: they
     -- get the tour once, same as everybody else.
     has_seen_onboarding_tour bool NOT NULL DEFAULT false,
+    -- The mastery title this student has chosen to wear next to their name. NULL means none,
+    -- which is every account's starting state — nothing is auto-selected on the student's behalf.
+    -- A title_definition_id rather than the title text: an instructor renaming a title carries
+    -- straight through to every display, and ON DELETE SET NULL (below) cleans up after a deleted
+    -- one instead of leaving a dangling name. Which titles are *earnable* stays derived from
+    -- session_log as it always was — only the student's pick is stored here.
+    selected_title_definition_id uuid,
     PRIMARY KEY (user_id));
 
 -- ---------------------------------------------------------------------
@@ -483,6 +490,13 @@ ALTER TABLE assembled_quiz_extra_question ADD CONSTRAINT fk_assembled_quiz_extra
 ALTER TABLE assembled_quiz_extra_question ADD CONSTRAINT fk_assembled_quiz_extra_question_question FOREIGN KEY (question_id) REFERENCES question (question_id) ON DELETE CASCADE;
 
 ALTER TABLE title_definition ADD CONSTRAINT fk_title_definition_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
+
+-- The title a student has chosen to wear. ON DELETE SET NULL rather than RESTRICT or CASCADE:
+-- deleting a title_definition row must not be blocked by whoever happens to be wearing it, and it
+-- certainly must not delete their profile — the wearer simply stops having a title, which is the
+-- same state every account starts in. This FK is also why the column stores an id instead of the
+-- title text: it is what keeps a stale name from surviving the row it came from.
+ALTER TABLE "user" ADD CONSTRAINT fk_user_title_definition FOREIGN KEY (selected_title_definition_id) REFERENCES title_definition (title_definition_id) ON DELETE SET NULL;
 -- Who authored the story, for attribution/moderation.
 ALTER TABLE user_story ADD CONSTRAINT fk_user_story_user FOREIGN KEY (creator_id) REFERENCES "user" (user_id);
 
@@ -961,6 +975,16 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 -- tour once, exactly like a freshly registered one:
 --
 --   ALTER TABLE "user" ADD COLUMN IF NOT EXISTS has_seen_onboarding_tour bool NOT NULL DEFAULT false;
+
+-- Selectable mastery title (the profile page's title dropdown): if your "user" table predates
+-- this column, add it and its foreign key. Existing rows backfill to NULL — nobody is wearing a
+-- title until they pick one, which is deliberate: auto-selecting the highest earned title would
+-- put a name on accounts that never asked for one.
+--
+--   ALTER TABLE "user" ADD COLUMN IF NOT EXISTS selected_title_definition_id uuid;
+--   ALTER TABLE "user" ADD CONSTRAINT fk_user_title_definition
+--     FOREIGN KEY (selected_title_definition_id)
+--     REFERENCES title_definition (title_definition_id) ON DELETE SET NULL;
 
 -- GitHub #347 (create and browse quizzes): if your activity_type table predates quiz_name/
 -- description/creator_id, add them without touching the three existing rows' keys — every

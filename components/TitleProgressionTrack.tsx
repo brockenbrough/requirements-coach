@@ -1,3 +1,5 @@
+import type { TitleLadderRung } from '../lib/leaderboardTypes';
+
 function LockIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
@@ -29,13 +31,13 @@ export function TitleProgressionTrack({
   progression,
   currentLevel,
 }: {
-  progression: string[];
+  progression: TitleLadderRung[];
   currentLevel: number | null;
 }) {
   return (
     <div className="mt-3 space-y-2">
-      {progression.map((title, index) => {
-        const level = index + 1;
+      {progression.map((rung) => {
+        const { difficultyLevel: level, title } = rung;
         const reached = currentLevel !== null && level <= currentLevel;
         const isCurrent = level === currentLevel;
         const isNext = currentLevel === null ? level === 1 : level === currentLevel + 1;
@@ -58,9 +60,21 @@ export function TitleProgressionTrack({
             >
               {reached ? <CheckIcon /> : <LockIcon />}
             </span>
+            {/* An activity whose title_definition rows don't exist yet (any freshly created quiz)
+                has no name for this rung. Showing the level alone is the whole row then — the
+                previous version substituted a "Level N" *title* and still rendered the level
+                sub-label underneath, so every such ladder read "Level 1 / Level 1 / Level 2 / …". */}
             <div className="min-w-0 flex-1">
-              <p className={`truncate text-sm font-extrabold ${reached ? 'text-brand-navy' : 'text-gray-400'}`}>{title}</p>
-              <p className="text-xs font-semibold text-gray-400">Level {level}</p>
+              {title === null ? (
+                <p className={`truncate text-sm font-extrabold ${reached ? 'text-brand-navy' : 'text-gray-400'}`}>
+                  Level {level}
+                </p>
+              ) : (
+                <>
+                  <p className={`truncate text-sm font-extrabold ${reached ? 'text-brand-navy' : 'text-gray-400'}`}>{title}</p>
+                  <p className="text-xs font-semibold text-gray-400">Level {level}</p>
+                </>
+              )}
             </div>
             {isCurrent ? (
               <span className="flex-none whitespace-nowrap rounded-full bg-brand-purple px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-white">

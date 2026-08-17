@@ -9,7 +9,7 @@
 // in behavior, not just a data-source swap: this reconciliation used to always show all three
 // built-in activity types, even ones with no course link at all.
 
-import type { AvailableActivityTitles } from './leaderboardTypes';
+import type { AvailableActivityTitles, TitleLadderRung } from './leaderboardTypes';
 import type { StudentTitle } from './sessionClient';
 
 /**
@@ -25,8 +25,12 @@ import type { StudentTitle } from './sessionClient';
 export type MasteryTitleEntry = {
   activityType: string;
   activityName: string;
-  /** Every level's title in order, e.g. ["Story Apprentice", "Story Analyst", "Story Expert"]. */
-  progression: string[];
+  /**
+   * Every level's rung in order — e.g. "Story Apprentice", "Story Analyst", "Story Expert", each
+   * with the title_definition id a student would wear. A rung whose title is null has no
+   * title_definition row yet; see progressionOf below for why that stays null here.
+   */
+  progression: TitleLadderRung[];
   /** Highest level passed, or null if none has been. */
   currentLevel: number | null;
   /** progression[currentLevel - 1], or null alongside currentLevel === null. */
@@ -34,16 +38,18 @@ export type MasteryTitleEntry = {
 };
 
 /**
- * A level with no title_definition row yet (a freshly created custom quiz, or
- * WRITE_ACCEPTANCE_CRITERIA today, per lib/titleQueries.ts's own note) falls back to a generic
- * "Level N" label — the same placeholder lib/activityContent.ts's buildCustomActivityDefinition
- * used to hardcode, kept here instead now that the ladder itself comes from title_definition.
+ * The ladder's rungs in level order, kept as rungs rather than flattened to display strings.
+ *
+ * This used to substitute a generic "Level N" string for a level with no title_definition row (a
+ * freshly created custom quiz, or WRITE_ACCEPTANCE_CRITERIA today, per lib/titleQueries.ts's own
+ * note). That lost the distinction between "the title is called Level 2" and "there is no title
+ * here", and components/TitleProgressionTrack.tsx renders a "Level N" sub-label under every rung's
+ * name — so an untitled ladder came out as "Level 1 / Level 1 / Level 2 / Level 2 / …". Keeping
+ * title null lets the track render the level line exactly once, and lets the title dropdown skip
+ * rungs that aren't real, wearable titles.
  */
-function progressionOf(activity: AvailableActivityTitles): string[] {
-  return activity.titles
-    .slice()
-    .sort((a, b) => a.difficultyLevel - b.difficultyLevel)
-    .map((rung) => rung.title ?? `Level ${rung.difficultyLevel}`);
+function progressionOf(activity: AvailableActivityTitles): TitleLadderRung[] {
+  return activity.titles.slice().sort((a, b) => a.difficultyLevel - b.difficultyLevel);
 }
 
 /**

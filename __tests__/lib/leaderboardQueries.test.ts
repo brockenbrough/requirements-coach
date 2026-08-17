@@ -45,8 +45,24 @@ function makeSupabase() {
   } as any;
 }
 
-function rosterRow(userId: string, username: string, avatarUrl: string | null = null, role = 'student') {
-  return { user_id: userId, student: { username, avatar_url: avatarUrl, role } };
+function rosterRow(
+  userId: string,
+  username: string,
+  avatarUrl: string | null = null,
+  role = 'student',
+  selectedTitle: string | null = null,
+) {
+  return {
+    user_id: userId,
+    student: {
+      username,
+      avatar_url: avatarUrl,
+      role,
+      // The embed PostgREST returns for fk_user_title_definition: an object when the student wears
+      // a title, null when selected_title_definition_id is null.
+      selected_title: selectedTitle === null ? null : { title_name: selectedTitle },
+    },
+  };
 }
 
 function sessionRow(
@@ -93,7 +109,7 @@ describe('computeCourseLeaderboard', () => {
     const result = await computeCourseLeaderboard(makeSupabase(), COURSE_ID);
 
     expect(result).toEqual({
-      data: [{ rank: 1, studentId: 'stu-1', username: 'newcomer', avatarUrl: null, points: 0, streak: 0 }],
+      data: [{ rank: 1, studentId: 'stu-1', username: 'newcomer', avatarUrl: null, points: 0, streak: 0, title: null }],
       error: null,
     });
   });
@@ -113,7 +129,7 @@ describe('computeCourseLeaderboard', () => {
 
     const result = await computeCourseLeaderboard(makeSupabase(), COURSE_ID);
 
-    expect(result.data).toEqual([{ rank: 1, studentId: 'stu-1', username: 'ada', avatarUrl: null, points: 150, streak: 0 }]);
+    expect(result.data).toEqual([{ rank: 1, studentId: 'stu-1', username: 'ada', avatarUrl: null, points: 150, streak: 0, title: null }]);
   });
 
   // AC: completed, not passed — a finished attempt below the pass threshold still contributes.
@@ -123,7 +139,7 @@ describe('computeCourseLeaderboard', () => {
 
     const result = await computeCourseLeaderboard(makeSupabase(), COURSE_ID);
 
-    expect(result.data).toEqual([{ rank: 1, studentId: 'stu-1', username: 'ada', avatarUrl: null, points: 25, streak: 0 }]);
+    expect(result.data).toEqual([{ rank: 1, studentId: 'stu-1', username: 'ada', avatarUrl: null, points: 25, streak: 0, title: null }]);
   });
 
   // AC: streak reuses computeStreakFromSessions (lib/streakQueries.ts) over the passed=true
@@ -175,9 +191,9 @@ describe('computeCourseLeaderboard', () => {
     const result = await computeCourseLeaderboard(makeSupabase(), COURSE_ID);
 
     expect(result.data).toEqual([
-      { rank: 1, studentId: 'stu-2', username: 'anne', avatarUrl: null, points: 100, streak: 0 },
-      { rank: 1, studentId: 'stu-1', username: 'brockenbrough', avatarUrl: null, points: 100, streak: 0 },
-      { rank: 3, studentId: 'stu-3', username: 'zed', avatarUrl: null, points: 50, streak: 0 },
+      { rank: 1, studentId: 'stu-2', username: 'anne', avatarUrl: null, points: 100, streak: 0, title: null },
+      { rank: 1, studentId: 'stu-1', username: 'brockenbrough', avatarUrl: null, points: 100, streak: 0, title: null },
+      { rank: 3, studentId: 'stu-3', username: 'zed', avatarUrl: null, points: 50, streak: 0, title: null },
     ]);
   });
 
@@ -201,14 +217,27 @@ describe('computeCourseLeaderboard', () => {
     expect(result.data?.map((row) => row.studentId)).toEqual(['stu-2', 'stu-3', 'stu-1']);
   });
 
-  // AC: only username/avatar_url leave "user" — no first/last name, age or semester.
-  it('selects only username and avatar_url from the student embed', async () => {
+  // AC: only username/avatar_url and the worn title leave "user" — no first/last name, age or
+  // semester. The title is deliberately public: it is chosen to be displayed next to the name.
+  it('selects only username, avatar_url and the worn title from the student embed', async () => {
     queue('student_course', { data: [rosterRow('stu-1', 'ada', 'https://example.com/a.png')], error: null });
     queue('session_log', { data: [], error: null });
 
     const result = await computeCourseLeaderboard(makeSupabase(), COURSE_ID);
 
-    expect(result.data?.[0]).toEqual({ rank: 1, studentId: 'stu-1', username: 'ada', avatarUrl: 'https://example.com/a.png', points: 0, streak: 0 });
+    expect(result.data?.[0]).toEqual({ rank: 1, studentId: 'stu-1', username: 'ada', avatarUrl: 'https://example.com/a.png', points: 0, streak: 0, title: null });
+  });
+
+  it("carries through the title a student chose to wear", async () => {
+    queue('student_course', {
+      data: [rosterRow('stu-1', 'ada', null, 'student', 'Story Analyst')],
+      error: null,
+    });
+    queue('session_log', { data: [], error: null });
+
+    const result = await computeCourseLeaderboard(makeSupabase(), COURSE_ID);
+
+    expect(result.data?.[0].title).toBe('Story Analyst');
   });
 
   // AC: roster and session queries are both scoped to the given course/roster.

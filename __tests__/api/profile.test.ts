@@ -11,6 +11,25 @@ const mockBuilder = {
   single: vi.fn(async () => ({ data: mockProfile, error: null })),
 };
 
+// PATCH with selected_title_definition_id reaches into canWearTitle (lib/titleQueries.ts), which
+// reads title_definition and session_log — tables the single shared mockBuilder above can't answer
+// for, since it resolves everything to a profile row. These two are per-table and thenable, matching
+// the queue-per-table style the other route tests use.
+const titleState = {
+  definition: null as { activity_type: string; difficulty_level: number } | null,
+  sessions: [] as { activity_type: string; difficulty_level: number; passed: boolean }[],
+};
+
+function makeTitleBuilder(rows: unknown, single: unknown) {
+  const builder: Record<string, unknown> = {
+    select: () => builder,
+    eq: () => builder,
+    maybeSingle: async () => ({ data: single, error: null }),
+    then: (onOk: (r: unknown) => unknown) => Promise.resolve({ data: rows, error: null }).then(onOk),
+  };
+  return builder;
+}
+
 vi.mock('../../lib/supabase', () => ({
   getSupabaseClient: vi.fn(() => ({
     auth: {
@@ -24,7 +43,11 @@ vi.mock('../../lib/supabase', () => ({
         return { data: { user: null }, error: { message: 'Invalid token' } };
       }),
     },
-    from: vi.fn(() => mockBuilder),
+    from: vi.fn((table: string) => {
+      if (table === 'title_definition') return makeTitleBuilder(null, titleState.definition);
+      if (table === 'session_log') return makeTitleBuilder(titleState.sessions, null);
+      return mockBuilder;
+    }),
   })),
 }));
 
@@ -50,6 +73,8 @@ describe('Profile API routes', () => {
     mockBuilder.insert.mockReturnThis();
     mockBuilder.maybeSingle.mockResolvedValue({ data: mockProfile, error: null });
     mockBuilder.single.mockResolvedValue({ data: mockProfile, error: null });
+    titleState.definition = null;
+    titleState.sessions = [];
   });
 
   it('GET returns profile for authenticated user', async () => {
@@ -130,5 +155,51 @@ describe('Profile API routes', () => {
   it('PATCH sends has_seen_onboarding_tour through to the update call', async () => {
     await PATCH(req('PATCH', { has_seen_onboarding_tour: true }));
     expect(mockBuilder.update).toHaveBeenCalledWith(expect.objectContaining({ has_seen_onboarding_tour: true }));
+  });
+
+  // The mastery title a student wears. Which titles they may pick is decided against their own
+  // session history, never against the request body — see canWearTitle (lib/titleQueries.ts).
+  describe('PATCH selected_title_definition_id', () => {
+    it('stores a title for a level the caller has passed', async () => {
+      titleState.definition = { activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 2 };
+      titleState.sessions = [{ activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 2, passed: true }];
+
+      const response = await PATCH(req('PATCH', { selected_title_definition_id: 'title-2' }));
+
+      expect(response.status).toBe(200);
+      expect(mockBuilder.update).toHaveBeenCalledWith(
+        expect.objectContaining({ selected_title_definition_id: 'title-2' }),
+      );
+    });
+
+    it('returns 400 and writes nothing for a title the caller has not earned', async () => {
+      titleState.definition = { activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 3 };
+      titleState.sessions = [{ activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 1, passed: true }];
+
+      const response = await PATCH(req('PATCH', { selected_title_definition_id: 'title-3' }));
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: 'You have not earned that title yet.' });
+      expect(mockBuilder.update).not.toHaveBeenCalled();
+    });
+
+    it('returns 400 for a title_definition_id that does not exist', async () => {
+      titleState.definition = null;
+
+      const response = await PATCH(req('PATCH', { selected_title_definition_id: 'nope' }));
+
+      expect(response.status).toBe(400);
+      expect(mockBuilder.update).not.toHaveBeenCalled();
+    });
+
+    // Taking a title off needs no check — nobody has to have earned "no title".
+    it('clears the title on null without consulting session history', async () => {
+      const response = await PATCH(req('PATCH', { selected_title_definition_id: null }));
+
+      expect(response.status).toBe(200);
+      expect(mockBuilder.update).toHaveBeenCalledWith(
+        expect.objectContaining({ selected_title_definition_id: null }),
+      );
+    });
   });
 });
