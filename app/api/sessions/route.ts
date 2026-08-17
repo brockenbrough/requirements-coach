@@ -1,6 +1,7 @@
 import { getSupabaseClient } from '../../../lib/supabase';
 import { isActivityType } from '../../../lib/activityTypes';
-import { checkActivityAccess } from '../../../lib/activityCourseQueries';
+import { getAccessibleCourseForActivity } from '../../../lib/activityCourseQueries';
+import { listQuizExcludedQuestionIds } from '../../../lib/assembledQuizQueries';
 import {
   DEFAULT_QUESTION_MAX_SCORE,
   QUESTIONS_PER_SESSION,
@@ -160,12 +161,15 @@ export async function POST(request: Request) {
   if (authError || !user) return Response.json({ error: 'Invalid or expired token.' }, { status: 401 });
 
   // A catalog has no course of its own — it's reachable only through an assembled quiz that
-  // references it and belongs to a course (lib/activityCourseQueries.ts's checkActivityAccess).
-  // Checked here rather than folded into isActivityType above: "does this exist" and "can this
-  // caller see it" are different questions, and only the second one needs the caller's identity.
-  const access = await checkActivityAccess(supabase, activityType, user.id);
-  if (access.status === 'error') return Response.json({ error: access.error.message }, { status: 500 });
-  if (access.status === 'forbidden') {
+  // references it and belongs to a course (lib/activityCourseQueries.ts's
+  // getAccessibleCourseForActivity). Checked here rather than folded into isActivityType above:
+  // "does this exist" and "can this caller see it" are different questions, and only the second
+  // one needs the caller's identity. Resolved via the richer link (not the plain
+  // checkActivityAccess wrapper) because the draw below needs assembledQuizId to know which
+  // quiz's exclusions/hand-picks govern this catalog's pool for this caller.
+  const { link: accessLink, error: accessError } = await getAccessibleCourseForActivity(supabase, activityType, user.id);
+  if (accessError) return Response.json({ error: accessError.message }, { status: 500 });
+  if (!accessLink) {
     return Response.json({ error: 'You are not enrolled in a course that offers this activity.' }, { status: 403 });
   }
 
@@ -194,7 +198,7 @@ export async function POST(request: Request) {
   // AC 1: draw QUESTIONS_PER_SESSION questions matching activity type and the computed level.
   // GitHub #124: filtered through an inner join against the activity_type table (#122/#123)
   // instead of a plain equality check on the free-text column.
-  const { data: pool, error: poolError } = await supabase
+  const { data: rawPool, error: poolError } = await supabase
     .from('question')
     .select('question_id, max_score, activity:activity_type!inner ( activity_type )')
     .eq('activity.activity_type', activityType)
@@ -202,16 +206,29 @@ export async function POST(request: Request) {
 
   if (poolError) return Response.json({ error: poolError.message }, { status: 500 });
 
+  // A question this catalog's questions have been drawn from can still be individually excluded
+  // from the assembled quiz that granted access (quiz_excluded_question, GitHub #361) — the
+  // catalog itself is unaffected, but this specific quiz must never draw an excluded question,
+  // and an excluded question must not count toward whether there are enough to draw from either.
+  // This was previously missing entirely: the draw queried `question` straight from the catalog
+  // with no awareness of any quiz's exclusions, so an "excluded" question kept being served to
+  // students, and the AC-5 count check below was counting questions that could never be drawn.
+  const { excludedIds, error: excludedError } = await listQuizExcludedQuestionIds(supabase, accessLink.assembledQuizId);
+  if (excludedError) return Response.json({ error: excludedError.message }, { status: 500 });
+
+  const excludedSet = new Set(excludedIds);
+  const pool = ((rawPool ?? []) as { question_id: string; max_score: number | null }[])
+    .filter((question) => !excludedSet.has(question.question_id));
+
   // AC 5: too small a question bank is a client error, not an empty session.
-  if (!pool || pool.length < QUESTIONS_PER_SESSION) {
+  if (pool.length < QUESTIONS_PER_SESSION) {
     return Response.json(
       { error: `At least ${QUESTIONS_PER_SESSION} questions are required for this activity type and difficulty level.` },
       { status: 400 },
     );
   }
 
-  const picked = shuffle(pool as { question_id: string; max_score: number | null }[])
-    .slice(0, QUESTIONS_PER_SESSION);
+  const picked = shuffle(pool).slice(0, QUESTIONS_PER_SESSION);
 
   // Keep max_score consistent with the questions actually drawn — 4 x 25 = the 100 from AC 2.
   const maxScore = picked.reduce((sum, q) => sum + (q.max_score ?? DEFAULT_QUESTION_MAX_SCORE), 0);

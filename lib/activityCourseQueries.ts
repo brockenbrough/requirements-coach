@@ -9,10 +9,17 @@ import type { SupabaseClient } from './sessionQueries';
 import { getEnrolledCourseIds } from './courseQueries';
 import { isGradingKind, type GradingKind } from './activityTypes';
 
-export type ActivityCourseLink = { courseId: string; courseName: string; name: string; description: string | null };
+export type ActivityCourseLink = {
+  courseId: string;
+  courseName: string;
+  name: string;
+  description: string | null;
+  assembledQuizId: string;
+};
 
 type GrantingQuizRow = {
   assembled_quiz: {
+    assembled_quiz_id: string;
     course_id: string;
     quiz_name: string;
     description: string | null;
@@ -35,6 +42,12 @@ type GrantingQuizRow = {
  * trip) purely as a fallback for assembled_quiz.description being nullable; assembled_quiz's own
  * quiz_name is NOT NULL, so its catalog fallback is defensive rather than a reachable path.
  *
+ * assembledQuizId is also returned (not just used to derive display fields): POST /api/sessions
+ * and GET /api/activities/{activityType}/questions both need it to know which quiz's
+ * quiz_excluded_question/assembled_quiz_extra_question rows apply to the draw pool they build —
+ * "which course grants access" and "which quiz's composition governs the draw" are answered by
+ * the same row, so there is no reason to make either caller resolve it a second time.
+ *
  * Two queries (enrolled course ids, then the quiz-catalog join filtered to them) rather than one
  * three-way join, matching the shape getCourseForActivityType + isEnrolledInAnyCourse used to
  * have as two separate calls — no round-trip regression, just a different second query.
@@ -51,7 +64,7 @@ export async function getAccessibleCourseForActivity(
   const { data, error } = await supabase
     .from('assembled_quiz_catalog')
     .select(
-      'assembled_quiz:assembled_quiz_id!inner(course_id, quiz_name, description, course:course_id(course_name)), catalog:activity_type(quiz_name, description)',
+      'assembled_quiz:assembled_quiz_id!inner(assembled_quiz_id, course_id, quiz_name, description, course:course_id(course_name)), catalog:activity_type(quiz_name, description)',
     )
     .eq('activity_type', activityType)
     .in('assembled_quiz.course_id', courseIds)
@@ -68,6 +81,7 @@ export async function getAccessibleCourseForActivity(
       courseName: row.assembled_quiz.course?.course_name ?? 'Unknown course',
       name: row.assembled_quiz.quiz_name ?? row.catalog?.quiz_name ?? activityType,
       description: row.assembled_quiz.description ?? row.catalog?.description ?? null,
+      assembledQuizId: row.assembled_quiz.assembled_quiz_id,
     },
     error: null,
   };
