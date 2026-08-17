@@ -15,8 +15,10 @@
 import type { SupabaseClient } from './sessionQueries';
 import { shuffleArray } from './shuffleArray';
 import { QUESTIONS_PER_SESSION } from './sessionRules';
-import { listCatalogQuestions } from './activityTypeQueries';
+import { listCatalogQuestions, listCatalogUserStories } from './activityTypeQueries';
 import type { CatalogQuestion } from './quizQuestionTypes';
+import type { CatalogUserStory } from './llmActivityTypes';
+import type { GradingKind } from './activityTypes';
 
 const UNIQUE_VIOLATION = '23505';
 
@@ -369,6 +371,60 @@ export async function removeExtraQuestionFromQuiz(supabase: SupabaseClient, quiz
 }
 
 /**
+ * Every user_story this quiz currently excludes, as bare ids — the llm-graded counterpart of
+ * listQuizExcludedQuestionIds, same subtraction-set role for the composition view (no live draw
+ * pool exists for llm-graded quizzes yet, so this has no loadCatalogQuestionPool counterpart).
+ */
+export async function listQuizExcludedUserStoryIds(supabase: SupabaseClient, quizId: string) {
+  const { data, error } = await supabase.from('quiz_excluded_user_story').select('user_story_id').eq('assembled_quiz_id', quizId);
+  if (error) return { excludedIds: null, error };
+  return { excludedIds: ((data ?? []) as { user_story_id: string }[]).map((row) => row.user_story_id), error: null };
+}
+
+/** Excludes one user_story from one quiz. Mirrors excludeQuestionFromQuiz — never touches `user_story` itself, idempotent on a repeat exclude (uq_quiz_excluded_user_story, 23505). */
+export async function excludeUserStoryFromQuiz(supabase: SupabaseClient, quizId: string, userStoryId: string) {
+  const { error } = await supabase.from('quiz_excluded_user_story').insert({ assembled_quiz_id: quizId, user_story_id: userStoryId });
+  if (!error) return { alreadyExcluded: false, error: null };
+  if (error.code === UNIQUE_VIOLATION) return { alreadyExcluded: true, error: null };
+  return { alreadyExcluded: false, error };
+}
+
+/** Re-includes a previously excluded user_story. Idempotent: nothing to remove is still success. */
+export async function includeUserStoryInQuiz(supabase: SupabaseClient, quizId: string, userStoryId: string) {
+  const { error } = await supabase.from('quiz_excluded_user_story').delete().eq('assembled_quiz_id', quizId).eq('user_story_id', userStoryId);
+  return { error };
+}
+
+/** Every user_story this quiz has hand-picked directly (assembled_quiz_extra_user_story), as bare ids. */
+export async function listQuizExtraUserStoryIds(supabase: SupabaseClient, quizId: string) {
+  const { data, error } = await supabase.from('assembled_quiz_extra_user_story').select('user_story_id').eq('assembled_quiz_id', quizId);
+  if (error) return { extraIds: null, error };
+  return { extraIds: ((data ?? []) as { user_story_id: string }[]).map((row) => row.user_story_id), error: null };
+}
+
+/**
+ * Hand-picks one user_story directly onto a quiz, independent of whether its catalog is one of
+ * the quiz's linked catalogs at all — the llm-graded counterpart of addExtraQuestionToQuiz. Never
+ * touches `user_story`, idempotent on a repeat pick (uq_assembled_quiz_extra_user_story, 23505).
+ */
+export async function addExtraUserStoryToQuiz(supabase: SupabaseClient, quizId: string, userStoryId: string) {
+  const { error } = await supabase.from('assembled_quiz_extra_user_story').insert({ assembled_quiz_id: quizId, user_story_id: userStoryId });
+  if (!error) return { alreadyPicked: false, error: null };
+  if (error.code === UNIQUE_VIOLATION) return { alreadyPicked: true, error: null };
+  return { alreadyPicked: false, error };
+}
+
+/**
+ * Removes a hand-picked user_story from a quiz — only the assembled_quiz_extra_user_story row.
+ * The original user_story row, its catalog, and every other quiz that references it are
+ * untouched. Idempotent, matching removeExtraQuestionFromQuiz.
+ */
+export async function removeExtraUserStoryFromQuiz(supabase: SupabaseClient, quizId: string, userStoryId: string) {
+  const { error } = await supabase.from('assembled_quiz_extra_user_story').delete().eq('assembled_quiz_id', quizId).eq('user_story_id', userStoryId);
+  return { error };
+}
+
+/**
  * Fetches one question's display summary (question text, level, source catalog) by id — used by
  * GitHub #380's create-and-hand-pick route to hand the freshly created, freshly hand-picked
  * question straight back to the caller in the same shape as getQuizComposition's `extraQuestions`,
@@ -400,6 +456,9 @@ export type QuizCatalogComposition = {
   activityType: string;
   name: string;
   description: string | null;
+  /** Which pool totalQuestions/activeCount are counted from — question rows for 'mcq', user_story
+   *  rows for 'llm-graded'. A catalog only ever fills one pool, same as QuizSummary's own field. */
+  gradingKind: GradingKind;
   totalQuestions: number;
   excludedCount: number;
   activeCount: number;
@@ -414,8 +473,12 @@ function buildLevelCoverage(availableQuestions: readonly { difficulty_level: num
   });
 }
 
-type LinkedCatalogRow = { activity_type: string; catalog: { quiz_name: string; description: string | null } | null };
+type LinkedCatalogRow = {
+  activity_type: string;
+  catalog: { quiz_name: string; description: string | null; grading_kind: string } | null;
+};
 type PoolQuestionRow = { question_id: string; activity_type: string; difficulty_level: number };
+type PoolUserStoryRow = { user_story_id: string; activity_type: string; difficulty_level: number };
 
 export type QuizExtraQuestionSummary = {
   questionId: string;
@@ -433,39 +496,91 @@ type ExtraQuestionRow = {
   catalog: { quiz_name: string } | null;
 };
 
+/** The llm-graded counterpart of QuizExtraQuestionSummary — one hand-picked prompt, with its source catalog for display. */
+export type QuizExtraUserStorySummary = {
+  userStoryId: string;
+  storyText: string;
+  level: 1 | 2 | 3;
+  catalogActivityType: string;
+  catalogName: string;
+};
+
+type ExtraUserStoryRow = {
+  user_story_id: string;
+  story_text: string;
+  difficulty_level: number;
+  activity_type: string;
+  catalog: { quiz_name: string } | null;
+};
+
+type GetQuizCompositionResult = {
+  catalogs: QuizCatalogComposition[] | null;
+  levelCoverage: QuizLevelCoverage[] | null;
+  extraQuestions: QuizExtraQuestionSummary[] | null;
+  extraUserStories: QuizExtraUserStorySummary[] | null;
+  activeCatalogQuestionIds: string[] | null;
+  activeCatalogUserStoryIds: string[] | null;
+  error: { message: string } | null;
+};
+
+function compositionFailure(error: { message: string }): GetQuizCompositionResult {
+  return {
+    catalogs: null,
+    levelCoverage: null,
+    extraQuestions: null,
+    extraUserStories: null,
+    activeCatalogQuestionIds: null,
+    activeCatalogUserStoryIds: null,
+    error,
+  };
+}
+
 /**
- * The quiz's full composition (GitHub #361 requirement 2, extended by GitHub #380): every linked
- * catalog with its genuinely-active question count (total minus this quiz's own exclusions —
- * never the catalog's or any other quiz's), every individually hand-picked question with its
- * source catalog for display, and per-level coverage against QUESTIONS_PER_SESSION so the detail
- * page can warn *before* a student ever hits a level with too few questions left to draw a round
- * (requirement 4) — now counting hand-picked questions toward that coverage too, since they are
- * genuinely drawable (see loadCatalogQuestionPool's own docblock for the identical pool formula).
+ * The quiz's full composition (GitHub #361 requirement 2, extended by GitHub #380 and by the
+ * llm-graded parity that added quiz_excluded_user_story/assembled_quiz_extra_user_story): every
+ * linked catalog with its genuinely-active question or prompt count (total minus this quiz's own
+ * exclusions — never the catalog's or any other quiz's), every individually hand-picked question
+ * or prompt with its source catalog for display, and per-level coverage against
+ * QUESTIONS_PER_SESSION so the detail page can warn *before* a student ever hits a level with too
+ * few questions left to draw a round (requirement 4) — counting hand-picked items toward that
+ * coverage too, since they are genuinely drawable (see loadCatalogQuestionPool's own docblock for
+ * the identical MCQ pool formula; no equivalent draw exists yet for llm-graded quizzes).
  *
- * Hand-picked questions are fetched and returned independent of whether the quiz has any linked
+ * mcq and llm-graded are handled by fully parallel code paths throughout — question/
+ * quiz_excluded_question/assembled_quiz_extra_question on one side, user_story/
+ * quiz_excluded_user_story/assembled_quiz_extra_user_story on the other — rather than one
+ * generalized path, because the two pools live in different tables with different FKs; a linked
+ * catalog is always exactly one kind (activity_type.grading_kind), never both.
+ *
+ * Hand-picked items are fetched and returned independent of whether the quiz has any linked
  * catalogs at all (AC: "Ein Catalog muss dafür NICHT als Ganzes mit dem Quiz verknüpft sein") —
- * the early return below only skips the *catalog*-derived question query, never the extra-question
- * one.
+ * the early return below only skips the *catalog*-derived queries, never the extra-item ones.
  *
- * activeCatalogQuestionIds is the bare ids behind `catalogs`' per-catalog counts — the "Add
- * individual questions" picker (AddQuizQuestionsModal) needs individual ids, not aggregate
- * numbers, to mark a catalog-sourced question as already in the quiz; reusing the same
- * already-fetched `catalogActive` array here avoids a second query just for that.
+ * activeCatalogQuestionIds/activeCatalogUserStoryIds are the bare ids behind `catalogs`'
+ * per-catalog counts — the "Add individual questions" picker (AddQuizQuestionsModal) needs
+ * individual ids, not aggregate numbers, to mark a catalog-sourced item as already in the quiz;
+ * reusing the already-fetched catalogActiveQuestions/catalogActiveUserStories arrays here avoids a
+ * second query just for that.
  */
-export async function getQuizComposition(supabase: SupabaseClient, quizId: string) {
+export async function getQuizComposition(supabase: SupabaseClient, quizId: string): Promise<GetQuizCompositionResult> {
   const { data: linkRows, error: linkError } = await supabase
     .from('assembled_quiz_catalog')
-    .select('activity_type, catalog:activity_type(quiz_name, description)')
+    .select('activity_type, catalog:activity_type(quiz_name, description, grading_kind)')
     .eq('assembled_quiz_id', quizId);
 
-  if (linkError) return { catalogs: null, levelCoverage: null, extraQuestions: null, activeCatalogQuestionIds: null, error: linkError };
+  if (linkError) return compositionFailure(linkError);
 
   const links = (linkRows ?? []) as unknown as LinkedCatalogRow[];
   const catalogActivityTypes = links.map((link) => link.activity_type);
+  const llmActivityTypes = links
+    .filter((link) => link.catalog?.grading_kind === 'llm-graded')
+    .map((link) => link.activity_type);
 
   let questions: PoolQuestionRow[] = [];
+  let userStories: PoolUserStoryRow[] = [];
   let catalogs: QuizCatalogComposition[] = [];
-  let excludedSet = new Set<string>();
+  let excludedQuestionSet = new Set<string>();
+  let excludedUserStorySet = new Set<string>();
 
   if (catalogActivityTypes.length > 0) {
     const { data: questionRows, error: questionError } = await supabase
@@ -473,22 +588,55 @@ export async function getQuizComposition(supabase: SupabaseClient, quizId: strin
       .select('question_id, activity_type, difficulty_level')
       .in('activity_type', catalogActivityTypes);
 
-    if (questionError) return { catalogs: null, levelCoverage: null, extraQuestions: null, activeCatalogQuestionIds: null, error: questionError };
+    if (questionError) return compositionFailure(questionError);
 
-    const { excludedIds, error: excludedError } = await listQuizExcludedQuestionIds(supabase, quizId);
-    if (excludedError) return { catalogs: null, levelCoverage: null, extraQuestions: null, activeCatalogQuestionIds: null, error: excludedError };
+    const { excludedIds: excludedQuestionIds, error: excludedQuestionError } = await listQuizExcludedQuestionIds(supabase, quizId);
+    if (excludedQuestionError) return compositionFailure(excludedQuestionError);
 
     questions = (questionRows ?? []) as PoolQuestionRow[];
-    excludedSet = new Set(excludedIds ?? []);
+    excludedQuestionSet = new Set(excludedQuestionIds ?? []);
+
+    if (llmActivityTypes.length > 0) {
+      const { data: userStoryRows, error: userStoryError } = await supabase
+        .from('user_story')
+        .select('user_story_id, activity_type, difficulty_level')
+        .in('activity_type', llmActivityTypes);
+
+      if (userStoryError) return compositionFailure(userStoryError);
+
+      const { excludedIds: excludedUserStoryIds, error: excludedUserStoryError } = await listQuizExcludedUserStoryIds(supabase, quizId);
+      if (excludedUserStoryError) return compositionFailure(excludedUserStoryError);
+
+      userStories = (userStoryRows ?? []) as PoolUserStoryRow[];
+      excludedUserStorySet = new Set(excludedUserStoryIds ?? []);
+    }
 
     catalogs = links.map((link) => {
+      const gradingKind: GradingKind = link.catalog?.grading_kind === 'llm-graded' ? 'llm-graded' : 'mcq';
+
+      if (gradingKind === 'llm-graded') {
+        const catalogStories = userStories.filter((s) => s.activity_type === link.activity_type);
+        const excludedCount = catalogStories.filter((s) => excludedUserStorySet.has(s.user_story_id)).length;
+
+        return {
+          activityType: link.activity_type,
+          name: link.catalog?.quiz_name ?? link.activity_type,
+          description: link.catalog?.description ?? null,
+          gradingKind,
+          totalQuestions: catalogStories.length,
+          excludedCount,
+          activeCount: catalogStories.length - excludedCount,
+        };
+      }
+
       const catalogQuestions = questions.filter((q) => q.activity_type === link.activity_type);
-      const excludedCount = catalogQuestions.filter((q) => excludedSet.has(q.question_id)).length;
+      const excludedCount = catalogQuestions.filter((q) => excludedQuestionSet.has(q.question_id)).length;
 
       return {
         activityType: link.activity_type,
         name: link.catalog?.quiz_name ?? link.activity_type,
         description: link.catalog?.description ?? null,
+        gradingKind,
         totalQuestions: catalogQuestions.length,
         excludedCount,
         activeCount: catalogQuestions.length - excludedCount,
@@ -496,17 +644,17 @@ export async function getQuizComposition(supabase: SupabaseClient, quizId: strin
     });
   }
 
-  const { extraIds, error: extraIdsError } = await listQuizExtraQuestionIds(supabase, quizId);
-  if (extraIdsError) return { catalogs: null, levelCoverage: null, extraQuestions: null, activeCatalogQuestionIds: null, error: extraIdsError };
+  const { extraIds: extraQuestionIds, error: extraQuestionIdsError } = await listQuizExtraQuestionIds(supabase, quizId);
+  if (extraQuestionIdsError) return compositionFailure(extraQuestionIdsError);
 
   let extraQuestions: QuizExtraQuestionSummary[] = [];
-  if ((extraIds ?? []).length > 0) {
+  if ((extraQuestionIds ?? []).length > 0) {
     const { data: extraRows, error: extraRowsError } = await supabase
       .from('question')
       .select('question_id, question_prompt, difficulty_level, activity_type, catalog:activity_type(quiz_name)')
-      .in('question_id', extraIds ?? []);
+      .in('question_id', extraQuestionIds ?? []);
 
-    if (extraRowsError) return { catalogs: null, levelCoverage: null, extraQuestions: null, activeCatalogQuestionIds: null, error: extraRowsError };
+    if (extraRowsError) return compositionFailure(extraRowsError);
 
     extraQuestions = ((extraRows ?? []) as unknown as ExtraQuestionRow[]).map((row) => ({
       questionId: row.question_id,
@@ -517,23 +665,65 @@ export async function getQuizComposition(supabase: SupabaseClient, quizId: strin
     }));
   }
 
+  const { extraIds: extraUserStoryIds, error: extraUserStoryIdsError } = await listQuizExtraUserStoryIds(supabase, quizId);
+  if (extraUserStoryIdsError) return compositionFailure(extraUserStoryIdsError);
+
+  let extraUserStories: QuizExtraUserStorySummary[] = [];
+  if ((extraUserStoryIds ?? []).length > 0) {
+    const { data: extraStoryRows, error: extraStoryRowsError } = await supabase
+      .from('user_story')
+      .select('user_story_id, story_text, difficulty_level, activity_type, catalog:activity_type(quiz_name)')
+      .in('user_story_id', extraUserStoryIds ?? []);
+
+    if (extraStoryRowsError) return compositionFailure(extraStoryRowsError);
+
+    extraUserStories = ((extraStoryRows ?? []) as unknown as ExtraUserStoryRow[]).map((row) => ({
+      userStoryId: row.user_story_id,
+      storyText: row.story_text,
+      level: row.difficulty_level as 1 | 2 | 3,
+      catalogActivityType: row.activity_type,
+      catalogName: row.catalog?.quiz_name ?? row.activity_type,
+    }));
+  }
+
   // The exact same union-and-dedupe formula loadCatalogQuestionPool uses for a real draw: the
   // catalog-derived set minus exclusions, plus hand-picked questions, deduplicated by
   // question_id — a question reachable both ways (linked catalog, not excluded, and also
   // hand-picked) must not double-count toward "available".
-  const catalogActive = questions.filter((q) => !excludedSet.has(q.question_id));
-  const activeIds = new Set(catalogActive.map((q) => q.question_id));
-  const combinedForCoverage: { difficulty_level: number }[] = [...catalogActive];
+  const catalogActiveQuestions = questions.filter((q) => !excludedQuestionSet.has(q.question_id));
+  const activeQuestionIds = new Set(catalogActiveQuestions.map((q) => q.question_id));
+  const combinedForCoverage: { difficulty_level: number }[] = [...catalogActiveQuestions];
   for (const extra of extraQuestions) {
-    if (!activeIds.has(extra.questionId)) {
-      activeIds.add(extra.questionId);
+    if (!activeQuestionIds.has(extra.questionId)) {
+      activeQuestionIds.add(extra.questionId);
+      combinedForCoverage.push({ difficulty_level: extra.level });
+    }
+  }
+
+  // Same formula, user_story side (a separate id namespace from question, so no cross-dedup
+  // needed between the two): catalog-derived minus this quiz's own exclusions, plus hand-picked
+  // prompts, deduplicated by user_story_id.
+  const catalogActiveUserStories = userStories.filter((s) => !excludedUserStorySet.has(s.user_story_id));
+  const activeUserStoryIds = new Set(catalogActiveUserStories.map((s) => s.user_story_id));
+  combinedForCoverage.push(...catalogActiveUserStories);
+  for (const extra of extraUserStories) {
+    if (!activeUserStoryIds.has(extra.userStoryId)) {
+      activeUserStoryIds.add(extra.userStoryId);
       combinedForCoverage.push({ difficulty_level: extra.level });
     }
   }
 
   const levelCoverage = buildLevelCoverage(combinedForCoverage);
 
-  return { catalogs, levelCoverage, extraQuestions, activeCatalogQuestionIds: catalogActive.map((q) => q.question_id), error: null };
+  return {
+    catalogs,
+    levelCoverage,
+    extraQuestions,
+    extraUserStories,
+    activeCatalogQuestionIds: catalogActiveQuestions.map((q) => q.question_id),
+    activeCatalogUserStoryIds: catalogActiveUserStories.map((s) => s.user_story_id),
+    error: null,
+  };
 }
 
 export type QuizScopedQuestion = CatalogQuestion & { excludedForQuiz: boolean };
@@ -556,6 +746,28 @@ export async function listQuizCatalogQuestions(supabase: SupabaseClient, quizId:
   const scoped: QuizScopedQuestion[] = questions.map((question) => ({ ...question, excludedForQuiz: excludedSet.has(question.id) }));
 
   return { questions: scoped, error: null };
+}
+
+export type QuizScopedUserStory = CatalogUserStory & { excludedForQuiz: boolean };
+
+/**
+ * One linked catalog's prompts, annotated per-prompt with whether *this quiz* currently excludes
+ * it — the llm-graded counterpart of listQuizCatalogQuestions, same "copy of the catalog, in the
+ * context of this quiz" role. Delegates the actual prompt read to lib/activityTypeQueries.ts's
+ * listCatalogUserStories so the two views (this one and the real catalog's own detail page) can
+ * never disagree about what a catalog's prompts look like.
+ */
+export async function listQuizCatalogUserStories(supabase: SupabaseClient, quizId: string, activityType: string) {
+  const { userStories, error: userStoriesError } = await listCatalogUserStories(supabase, activityType);
+  if (userStoriesError || !userStories) return { userStories: null, error: userStoriesError };
+
+  const { excludedIds, error: excludedError } = await listQuizExcludedUserStoryIds(supabase, quizId);
+  if (excludedError) return { userStories: null, error: excludedError };
+
+  const excludedSet = new Set(excludedIds ?? []);
+  const scoped: QuizScopedUserStory[] = userStories.map((story) => ({ ...story, excludedForQuiz: excludedSet.has(story.id) }));
+
+  return { userStories: scoped, error: null };
 }
 
 /**
@@ -644,22 +856,27 @@ export type PickableQuestion = {
 };
 
 /**
- * Every MCQ question in the system, any author, any catalog — the pool the "Add individual
- * questions" picker (GitHub #380, AddQuizQuestionsModal) searches/filters client-side, the same
- * "fetch the full list once, filter in the browser" choice GET /api/instructor/quizzes already
- * makes for browsing catalogs. Not quiz-scoped: which of these are already in a given quiz is
- * computed by the caller from that quiz's own composition (linked-catalog-active-questions +
- * extraQuestions, both already in hand from loadQuizDetail) rather than asked of this query, so
- * the same fetched list can back the picker for any quiz without re-fetching per quiz.
+ * Every MCQ question the calling instructor created, any of their own catalogs — the pool the
+ * "Add individual questions" picker (GitHub #380, AddQuizQuestionsModal) searches/filters
+ * client-side, the same "fetch the full list once, filter in the browser" choice
+ * GET /api/instructor/quizzes already makes for browsing catalogs. Scoped by creator_id the same
+ * "mine only" way that route's own listQuizzesWithAuthorAndCount is (GitHub #.. follow-up) — a
+ * colleague's or a built-in catalog's questions aren't this instructor's to hand-pick, matching
+ * GET /api/instructor/questions' existing `.eq('user_id', ...)` scoping. Not quiz-scoped otherwise:
+ * which of these are already in a given quiz is computed by the caller from that quiz's own
+ * composition (linked-catalog-active-questions + extraQuestions, both already in hand from
+ * loadQuizDetail) rather than asked of this query, so the same fetched list can back the picker
+ * for any quiz without re-fetching per quiz.
  *
  * llm-graded catalogs never appear here structurally, without needing a grading_kind filter:
  * their prompts live in `user_story`, not `question`, so a catalog with no MCQ questions simply
  * contributes no rows.
  */
-export async function listAllQuestionsForPicker(supabase: SupabaseClient) {
+export async function listAllQuestionsForPicker(supabase: SupabaseClient, instructorId: string) {
   const { data, error } = await supabase
     .from('question')
     .select('question_id, question_prompt, difficulty_level, activity_type, catalog:activity_type(quiz_name)')
+    .eq('user_id', instructorId)
     .order('question_prompt', { ascending: true });
 
   if (error) return { questions: null, error };
@@ -675,17 +892,55 @@ export async function listAllQuestionsForPicker(supabase: SupabaseClient) {
   return { questions, error: null };
 }
 
+export type PickableUserStory = {
+  id: string;
+  storyText: string;
+  level: 1 | 2 | 3;
+  catalogActivityType: string;
+  catalogName: string;
+};
+
+/**
+ * Every llm-graded prompt the calling instructor created, any of their own catalogs — the
+ * user_story counterpart of listAllQuestionsForPicker, same "mine only" scoping (creator_id, not
+ * user_id — user_story's owner column is named differently, see listCatalogUserStories) and same
+ * "fetch once, filter client-side" shape. mcq catalogs never appear here structurally: their
+ * questions live in `question`, not `user_story`, so a catalog with no prompts simply contributes
+ * no rows.
+ */
+export async function listAllUserStoriesForPicker(supabase: SupabaseClient, instructorId: string) {
+  const { data, error } = await supabase
+    .from('user_story')
+    .select('user_story_id, story_text, difficulty_level, activity_type, catalog:activity_type(quiz_name)')
+    .eq('creator_id', instructorId)
+    .order('story_text', { ascending: true });
+
+  if (error) return { userStories: null, error };
+
+  const userStories: PickableUserStory[] = ((data ?? []) as unknown as ExtraUserStoryRow[]).map((row) => ({
+    id: row.user_story_id,
+    storyText: row.story_text,
+    level: row.difficulty_level as 1 | 2 | 3,
+    catalogActivityType: row.activity_type,
+    catalogName: row.catalog?.quiz_name ?? row.activity_type,
+  }));
+
+  return { userStories, error: null };
+}
+
 /**
  * GitHub #362: copies every assembled_quiz belonging to `sourceCourseId` onto `targetCourseId` —
  * same quiz_name/description, the same linked catalogs (assembled_quiz_catalog), the same
- * per-quiz question exclusions (quiz_excluded_question), and the same individually hand-picked
- * questions (assembled_quiz_extra_question, GitHub #380), all re-pointed at freshly generated
- * assembled_quiz ids. Reuses createAssembledQuiz rather than inserting assembled_quiz/
+ * per-quiz question exclusions (quiz_excluded_question) and hand-picked questions
+ * (assembled_quiz_extra_question, GitHub #380), and the same llm-graded prompt exclusions/
+ * hand-picks (quiz_excluded_user_story/assembled_quiz_extra_user_story), all re-pointed at freshly
+ * generated assembled_quiz ids. Reuses createAssembledQuiz rather than inserting assembled_quiz/
  * assembled_quiz_catalog by hand, so a link-insert failure for one copied quiz already self-cleans
  * (see that function's own docblock) — the caller only has to roll back the quizzes that *did*
  * fully insert, which the route above does by deleting the new course itself: fk_assembled_quiz_course
  * cascades, taking every assembled_quiz/assembled_quiz_catalog/quiz_excluded_question/
- * assembled_quiz_extra_question row this function has written so far with it.
+ * assembled_quiz_extra_question/quiz_excluded_user_story/assembled_quiz_extra_user_story row this
+ * function has written so far with it.
  *
  * Deliberately never touches student_course, session_log, or any attempt/score table — those
  * aren't reachable from a course anywhere in this schema (see CLAUDE.md's Courses section), so
@@ -716,6 +971,12 @@ export async function duplicateQuizzesForCourse(
     const { extraIds, error: extraIdsError } = await listQuizExtraQuestionIds(supabase, sourceQuiz.assembled_quiz_id);
     if (extraIdsError) return { copiedCount, error: extraIdsError };
 
+    const { excludedIds: excludedUserStoryIds, error: excludedUserStoryError } = await listQuizExcludedUserStoryIds(supabase, sourceQuiz.assembled_quiz_id);
+    if (excludedUserStoryError) return { copiedCount, error: excludedUserStoryError };
+
+    const { extraIds: extraUserStoryIds, error: extraUserStoryIdsError } = await listQuizExtraUserStoryIds(supabase, sourceQuiz.assembled_quiz_id);
+    if (extraUserStoryIdsError) return { copiedCount, error: extraUserStoryIdsError };
+
     const { quiz: newQuiz, error: createError } = await createAssembledQuiz(supabase, {
       name: sourceQuiz.quiz_name,
       description: sourceQuiz.description,
@@ -735,6 +996,20 @@ export async function duplicateQuizzesForCourse(
     if ((extraIds ?? []).length > 0) {
       const { error: extraError } = await supabase.from('assembled_quiz_extra_question').insert(
         (extraIds ?? []).map((questionId) => ({ assembled_quiz_id: newQuiz.id, question_id: questionId })),
+      );
+      if (extraError) return { copiedCount, error: extraError };
+    }
+
+    if ((excludedUserStoryIds ?? []).length > 0) {
+      const { error: exclusionsError } = await supabase.from('quiz_excluded_user_story').insert(
+        (excludedUserStoryIds ?? []).map((userStoryId) => ({ assembled_quiz_id: newQuiz.id, user_story_id: userStoryId })),
+      );
+      if (exclusionsError) return { copiedCount, error: exclusionsError };
+    }
+
+    if ((extraUserStoryIds ?? []).length > 0) {
+      const { error: extraError } = await supabase.from('assembled_quiz_extra_user_story').insert(
+        (extraUserStoryIds ?? []).map((userStoryId) => ({ assembled_quiz_id: newQuiz.id, user_story_id: userStoryId })),
       );
       if (extraError) return { copiedCount, error: extraError };
     }

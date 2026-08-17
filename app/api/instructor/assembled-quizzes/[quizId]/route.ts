@@ -55,7 +55,7 @@ async function authorizeQuiz(request: Request, quizId: string) {
  * - 401 missing/invalid bearer token
  * - 403 caller isn't an instructor, or isn't this quiz's creator (no body either way)
  * - 404 quizId matches no quiz
- * - 200 { quiz: { id, name, description, courseId, courseName }, catalogs, levelCoverage, extraQuestions, activeCatalogQuestionIds }
+ * - 200 { quiz: { id, name, description, courseId, courseName }, catalogs, levelCoverage, extraQuestions, extraUserStories, activeCatalogQuestionIds, activeCatalogUserStoryIds }
  * - 500 Supabase not configured, or any of the composition queries fail
  */
 export async function GET(request: Request, { params }: { params: { quizId: string } }) {
@@ -71,10 +71,20 @@ export async function GET(request: Request, { params }: { params: { quizId: stri
     catalogs,
     levelCoverage,
     extraQuestions,
+    extraUserStories,
     activeCatalogQuestionIds,
+    activeCatalogUserStoryIds,
     error: compositionError,
   } = await getQuizComposition(supabase, quiz.assembled_quiz_id);
-  if (compositionError || !catalogs || !levelCoverage || !extraQuestions || !activeCatalogQuestionIds) {
+  if (
+    compositionError ||
+    !catalogs ||
+    !levelCoverage ||
+    !extraQuestions ||
+    !extraUserStories ||
+    !activeCatalogQuestionIds ||
+    !activeCatalogUserStoryIds
+  ) {
     return Response.json({ error: compositionError?.message ?? 'Could not load quiz composition.' }, { status: 500 });
   }
 
@@ -90,7 +100,9 @@ export async function GET(request: Request, { params }: { params: { quizId: stri
       catalogs,
       levelCoverage,
       extraQuestions,
+      extraUserStories,
       activeCatalogQuestionIds,
+      activeCatalogUserStoryIds,
     },
     { status: 200 },
   );

@@ -328,6 +328,33 @@ CREATE TABLE assembled_quiz_extra_question (
     question_id                       uuid   NOT NULL,
     PRIMARY KEY (assembled_quiz_extra_question_id));
 
+-- ---------------------------------------------------------------------
+-- Quiz Excluded User Story / Assembled Quiz Extra User Story
+--
+-- The llm-graded counterpart of quiz_excluded_question / assembled_quiz_extra_question above —
+-- same two-table split (exclude vs. hand-pick are different questions, per that pair's own header
+-- comment), same reasoning, just naming user_story instead of question because a linked
+-- llm-graded catalog's pool lives there, not in `question` (activity_type.grading_kind decides
+-- which one, see that column's own comment). Before these two tables, an llm-graded catalog's
+-- exclude/hand-pick support was silently absent: getQuizComposition only ever queried `question`,
+-- so a linked llm-graded catalog's prompt count and per-quiz exclusion state had no way to exist.
+--
+-- Both FKs cascade on both tables, same reasoning as their question-table counterparts: a row
+-- here means nothing once either the quiz or the user_story it names is gone, and there is no
+-- student attempt history tied to an assembled_quiz for a cascade to endanger.
+-- ---------------------------------------------------------------------
+CREATE TABLE quiz_excluded_user_story (
+    quiz_excluded_user_story_id SERIAL NOT NULL,
+    assembled_quiz_id           uuid   NOT NULL,
+    user_story_id                uuid   NOT NULL,
+    PRIMARY KEY (quiz_excluded_user_story_id));
+
+CREATE TABLE assembled_quiz_extra_user_story (
+    assembled_quiz_extra_user_story_id SERIAL NOT NULL,
+    assembled_quiz_id                   uuid   NOT NULL,
+    user_story_id                        uuid   NOT NULL,
+    PRIMARY KEY (assembled_quiz_extra_user_story_id));
+
 
 -- =====================================================================
 -- REQ-DL-3 / REQ-PL-2.1: Session Log
@@ -482,6 +509,14 @@ ALTER TABLE quiz_excluded_question ADD CONSTRAINT fk_quiz_excluded_question_ques
 ALTER TABLE assembled_quiz_extra_question ADD CONSTRAINT fk_assembled_quiz_extra_question_quiz FOREIGN KEY (assembled_quiz_id) REFERENCES assembled_quiz (assembled_quiz_id) ON DELETE CASCADE;
 ALTER TABLE assembled_quiz_extra_question ADD CONSTRAINT fk_assembled_quiz_extra_question_question FOREIGN KEY (question_id) REFERENCES question (question_id) ON DELETE CASCADE;
 
+-- Same cascade reasoning as fk_quiz_excluded_question_quiz/_question — see
+-- quiz_excluded_user_story's own header comment.
+ALTER TABLE quiz_excluded_user_story ADD CONSTRAINT fk_quiz_excluded_user_story_quiz FOREIGN KEY (assembled_quiz_id) REFERENCES assembled_quiz (assembled_quiz_id) ON DELETE CASCADE;
+ALTER TABLE quiz_excluded_user_story ADD CONSTRAINT fk_quiz_excluded_user_story_user_story FOREIGN KEY (user_story_id) REFERENCES user_story (user_story_id) ON DELETE CASCADE;
+
+ALTER TABLE assembled_quiz_extra_user_story ADD CONSTRAINT fk_assembled_quiz_extra_user_story_quiz FOREIGN KEY (assembled_quiz_id) REFERENCES assembled_quiz (assembled_quiz_id) ON DELETE CASCADE;
+ALTER TABLE assembled_quiz_extra_user_story ADD CONSTRAINT fk_assembled_quiz_extra_user_story_user_story FOREIGN KEY (user_story_id) REFERENCES user_story (user_story_id) ON DELETE CASCADE;
+
 ALTER TABLE title_definition ADD CONSTRAINT fk_title_definition_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
 -- Who authored the story, for attribution/moderation.
 ALTER TABLE user_story ADD CONSTRAINT fk_user_story_user FOREIGN KEY (creator_id) REFERENCES "user" (user_id);
@@ -611,6 +646,14 @@ CREATE INDEX ix_quiz_excluded_question_quiz_id ON quiz_excluded_question (assemb
 ALTER TABLE assembled_quiz_extra_question ADD CONSTRAINT uq_assembled_quiz_extra_question UNIQUE (assembled_quiz_id, question_id);
 CREATE INDEX ix_assembled_quiz_extra_question_quiz_id ON assembled_quiz_extra_question (assembled_quiz_id);
 
+-- Same two guarantees as uq_quiz_excluded_question/uq_assembled_quiz_extra_question, mirrored for
+-- user_story.
+ALTER TABLE quiz_excluded_user_story ADD CONSTRAINT uq_quiz_excluded_user_story UNIQUE (assembled_quiz_id, user_story_id);
+CREATE INDEX ix_quiz_excluded_user_story_quiz_id ON quiz_excluded_user_story (assembled_quiz_id);
+
+ALTER TABLE assembled_quiz_extra_user_story ADD CONSTRAINT uq_assembled_quiz_extra_user_story UNIQUE (assembled_quiz_id, user_story_id);
+CREATE INDEX ix_assembled_quiz_extra_user_story_quiz_id ON assembled_quiz_extra_user_story (assembled_quiz_id);
+
 -- At most one running session per student and activity type. This is what
 -- makes POST /api/sessions idempotent: "start" and "resume" are the same
 -- call, and two devices cannot build up independent state.
@@ -729,6 +772,8 @@ ALTER TABLE assembled_quiz ENABLE ROW LEVEL SECURITY;
 ALTER TABLE assembled_quiz_catalog ENABLE ROW LEVEL SECURITY;
 ALTER TABLE quiz_excluded_question ENABLE ROW LEVEL SECURITY;
 ALTER TABLE assembled_quiz_extra_question ENABLE ROW LEVEL SECURITY;
+ALTER TABLE quiz_excluded_user_story ENABLE ROW LEVEL SECURITY;
+ALTER TABLE assembled_quiz_extra_user_story ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE session_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE answered_question_log ENABLE ROW LEVEL SECURITY;
@@ -1078,3 +1123,28 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 -- database:
 --
 --   CREATE INDEX IF NOT EXISTS ix_student_course_course_id ON student_course (course_id);
+
+-- Quiz Excluded User Story / Assembled Quiz Extra User Story: the llm-graded counterpart of
+-- quiz_excluded_question/assembled_quiz_extra_question (GitHub #361/#380) — an assembled quiz's
+-- llm-graded catalogs previously had no per-quiz exclude or hand-pick support at all, since both
+-- of those tables only ever FK'd to `question`. Two brand new tables, same no-rename/no-backfill
+-- path as their question-table counterparts — run each CREATE TABLE statement, its two FKs, its
+-- unique constraint and index, and its ENABLE ROW LEVEL SECURITY:
+--
+--   CREATE TABLE quiz_excluded_user_story (...);
+--   ALTER TABLE quiz_excluded_user_story ADD CONSTRAINT fk_quiz_excluded_user_story_quiz ...;
+--   ALTER TABLE quiz_excluded_user_story ADD CONSTRAINT fk_quiz_excluded_user_story_user_story ...;
+--   ALTER TABLE quiz_excluded_user_story ADD CONSTRAINT uq_quiz_excluded_user_story ...;
+--   CREATE INDEX ix_quiz_excluded_user_story_quiz_id ...;
+--   ALTER TABLE quiz_excluded_user_story ENABLE ROW LEVEL SECURITY;
+--
+--   CREATE TABLE assembled_quiz_extra_user_story (...);
+--   ALTER TABLE assembled_quiz_extra_user_story ADD CONSTRAINT fk_assembled_quiz_extra_user_story_quiz ...;
+--   ALTER TABLE assembled_quiz_extra_user_story ADD CONSTRAINT fk_assembled_quiz_extra_user_story_user_story ...;
+--   ALTER TABLE assembled_quiz_extra_user_story ADD CONSTRAINT uq_assembled_quiz_extra_user_story ...;
+--   CREATE INDEX ix_assembled_quiz_extra_user_story_quiz_id ...;
+--   ALTER TABLE assembled_quiz_extra_user_story ENABLE ROW LEVEL SECURITY;
+--
+-- No existing table's shape changes, and every quiz created before this migration keeps drawing
+-- exactly the pool it already had — both tables start empty, which is the correct "nothing
+-- excluded or hand-picked yet" state, not a gap to backfill.
