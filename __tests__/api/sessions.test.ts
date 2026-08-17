@@ -116,7 +116,9 @@ function req(body?: object, token: string | null = 'valid-token') {
 function queueEnrolled() {
   queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
   queue('assembled_quiz_catalog', {
-    data: [{ assembled_quiz: { course_id: 'course-1', course: { course_name: 'Software Requirements' } } }],
+    data: [{
+      assembled_quiz: { assembled_quiz_id: 'quiz-1', course_id: 'course-1', course: { course_name: 'Software Requirements' } },
+    }],
     error: null,
   });
 }
@@ -219,6 +221,43 @@ describe('POST /api/sessions', () => {
     const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES' }));
 
     expect(response.status).toBe(400);
+    expect(h.state.inserts).toHaveLength(0);
+  });
+
+  // Regression: the draw used to query `question` straight from the catalog with no awareness of
+  // any assembled quiz's quiz_excluded_question rows, so an excluded question kept getting drawn
+  // (and counted toward AC 5's minimum) even after an instructor excluded it (GitHub #361).
+  it('never draws a question the granting quiz has excluded', async () => {
+    queueFreshSessionStart();
+    queue('question', { data: pool, error: null }); // 6 in the catalog
+    queue('quiz_excluded_question', { data: [{ question_id: 'q-5' }, { question_id: 'q-6' }], error: null });
+    queue('session_log', { data: sessionRow, error: null });
+    queue('session_to_question', { data: null, error: null });
+    queue('session_to_question', { data: drawnQuestions, error: null });
+
+    const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES' }));
+
+    expect(response.status).toBe(201);
+    const [{ payload }] = h.state.inserts.filter((i) => i.table === 'session_to_question');
+    const drawnIds = (payload as { question_id: string }[]).map((row) => row.question_id);
+    expect(drawnIds).not.toContain('q-5');
+    expect(drawnIds).not.toContain('q-6');
+  });
+
+  it('returns 400 when exclusions push the catalog below the minimum, even though it has 4+ questions total', async () => {
+    queueFreshSessionStart();
+    queue('question', { data: pool, error: null }); // 6 in the catalog
+    // Only 3 remain once the granting quiz's exclusions are applied.
+    queue('quiz_excluded_question', {
+      data: [{ question_id: 'q-1' }, { question_id: 'q-2' }, { question_id: 'q-3' }],
+      error: null,
+    });
+
+    const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toMatch(/at least \d+ questions/i);
     expect(h.state.inserts).toHaveLength(0);
   });
 
