@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { computeCourseClassStats, computeAllOwnedCoursesClassStats } from '../../lib/courseQueries';
+import {
+  computeCourseClassStats,
+  computeAllOwnedCoursesClassStats,
+  computeStudentCourseQuizProgress,
+  computeMyCoursesQuizProgress,
+} from '../../lib/courseQueries';
 
 type Result = { data?: unknown; error?: unknown };
 
@@ -177,5 +182,104 @@ describe('computeAllOwnedCoursesClassStats', () => {
 
     expect(result).toEqual({ stats: [], error: null });
     expect(state.tables).toEqual(['course']);
+  });
+});
+
+describe('computeStudentCourseQuizProgress', () => {
+  it('counts this student\'s own passed activity_types out of the course\'s distinct catalog, deduped', async () => {
+    queue('assembled_quiz', {
+      data: [
+        { assembled_quiz_id: 'quiz-1', assembled_quiz_catalog: [{ activity_type: 'TYPE_A' }, { activity_type: 'TYPE_B' }] },
+        { assembled_quiz_id: 'quiz-2', assembled_quiz_catalog: [{ activity_type: 'TYPE_B' }] }, // TYPE_B shared across quizzes
+      ],
+      error: null,
+    });
+    queue('session_log', { data: [{ activity_type: 'TYPE_B' }], error: null });
+
+    const result = await computeStudentCourseQuizProgress(makeSupabase(), 'course-1', 'student-1');
+
+    expect(result).toEqual({
+      progress: { hasQuizzes: true, totalQuizzes: 2, passedQuizzes: 1, progressPercent: 50 },
+      error: null,
+    });
+  });
+
+  it('scopes the session_log query to this student and this course\'s activity_types, filtered to passed=true', async () => {
+    queue('assembled_quiz', { data: [{ assembled_quiz_id: 'quiz-1', assembled_quiz_catalog: [{ activity_type: 'TYPE_A' }] }], error: null });
+    queue('session_log', { data: [], error: null });
+
+    await computeStudentCourseQuizProgress(makeSupabase(), 'course-1', 'student-1');
+
+    expect(state.filters).toContainEqual({ table: 'session_log', column: 'user_id', value: 'student-1' });
+    expect(state.filters).toContainEqual({ table: 'session_log', column: 'passed', value: true });
+    expect(state.filters).toContainEqual({ table: 'session_log', column: 'activity_type', value: ['TYPE_A'] });
+  });
+
+  it('returns hasQuizzes: false and a null percent, skipping session_log, when the course has no quizzes', async () => {
+    queue('assembled_quiz', { data: [], error: null });
+
+    const result = await computeStudentCourseQuizProgress(makeSupabase(), 'course-1', 'student-1');
+
+    expect(result).toEqual({
+      progress: { hasQuizzes: false, totalQuizzes: 0, passedQuizzes: 0, progressPercent: null },
+      error: null,
+    });
+    expect(state.tables).not.toContain('session_log');
+  });
+
+  it('returns hasQuizzes: true but a real 0 percent (not null) when a quiz exists with no catalog linked yet', async () => {
+    queue('assembled_quiz', { data: [{ assembled_quiz_id: 'quiz-1', assembled_quiz_catalog: [] }], error: null });
+
+    const result = await computeStudentCourseQuizProgress(makeSupabase(), 'course-1', 'student-1');
+
+    expect(result).toEqual({
+      progress: { hasQuizzes: true, totalQuizzes: 0, passedQuizzes: 0, progressPercent: 0 },
+      error: null,
+    });
+    expect(state.tables).not.toContain('session_log');
+  });
+
+  it('surfaces a query error', async () => {
+    queue('assembled_quiz', { data: null, error: { message: 'db down' } });
+
+    const result = await computeStudentCourseQuizProgress(makeSupabase(), 'course-1', 'student-1');
+
+    expect(result).toEqual({ progress: null, error: { message: 'db down' } });
+  });
+});
+
+describe('computeMyCoursesQuizProgress', () => {
+  it('scopes each enrolled course independently, for the same student', async () => {
+    queue('student_course', { data: [{ course_id: 'course-A' }, { course_id: 'course-B' }], error: null });
+    queue('assembled_quiz', { data: [], error: null }); // course-A: no quizzes
+    queue('assembled_quiz', { data: [{ assembled_quiz_id: 'quiz-1', assembled_quiz_catalog: [{ activity_type: 'TYPE_X' }] }], error: null }); // course-B
+    queue('session_log', { data: [{ activity_type: 'TYPE_X' }], error: null }); // course-B: passed it
+
+    const result = await computeMyCoursesQuizProgress(makeSupabase(), 'student-1');
+
+    expect(result).toEqual({
+      progress: [
+        { courseId: 'course-A', hasQuizzes: false, totalQuizzes: 0, passedQuizzes: 0, progressPercent: null },
+        { courseId: 'course-B', hasQuizzes: true, totalQuizzes: 1, passedQuizzes: 1, progressPercent: 100 },
+      ],
+      error: null,
+    });
+  });
+
+  it('returns an empty list without querying assembled_quiz/session_log when the student is enrolled in nothing', async () => {
+    queue('student_course', { data: [], error: null });
+
+    const result = await computeMyCoursesQuizProgress(makeSupabase(), 'student-1');
+
+    expect(result).toEqual({ progress: [], error: null });
+    expect(state.tables).toEqual(['student_course']);
+  });
+
+  it('surfaces a query error from the enrollment lookup', async () => {
+    queue('student_course', { data: null, error: { message: 'db down' } });
+
+    const result = await computeMyCoursesQuizProgress(makeSupabase(), 'student-1');
+
+    expect(result).toEqual({ progress: null, error: { message: 'db down' } });
   });
 });
