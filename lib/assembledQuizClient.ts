@@ -8,7 +8,7 @@
 // rather than /api/instructor/quizzes/{id}/… (GitHub #359's catalog detail route already owns
 // that path with a differently-named dynamic segment; Next.js can't have both).
 
-import type { CatalogQuestion } from './quizQuestionTypes';
+import type { CatalogQuestion, QuizQuestion } from './quizQuestionTypes';
 
 export type AssembledQuizSummary = {
   id: string;
@@ -41,6 +41,24 @@ export type QuizLevelCoverage = { level: 1 | 2 | 3; available: number; required:
 
 /** One question in a quiz-scoped catalog view (GitHub #361) — a CatalogQuestion plus whether *this quiz* currently excludes it. */
 export type QuizScopedQuestion = CatalogQuestion & { excludedForQuiz: boolean };
+
+/** One individually hand-picked question on a quiz (GitHub #380), with its source catalog for display. */
+export type QuizExtraQuestionSummary = {
+  questionId: string;
+  questionText: string;
+  level: 1 | 2 | 3;
+  catalogActivityType: string;
+  catalogName: string;
+};
+
+/** One question as the "Add individual questions" picker (GitHub #380) lists it, any catalog. */
+export type PickableQuestion = {
+  id: string;
+  questionText: string;
+  level: 1 | 2 | 3;
+  catalogActivityType: string;
+  catalogName: string;
+};
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number; error: string };
 
@@ -100,19 +118,30 @@ function quizPath(quizId: string, suffix = ''): string {
 }
 
 /**
- * One quiz's full composition (GET /api/instructor/assembled-quizzes/{quizId}, GitHub #361) —
- * meta, every linked catalog with its genuinely-active question count, and per-level coverage
- * against the round size.
+ * One quiz's full composition (GET /api/instructor/assembled-quizzes/{quizId}, GitHub #361,
+ * extended by GitHub #380) — meta, every linked catalog with its genuinely-active question count,
+ * every individually hand-picked question, and per-level coverage against the round size.
  */
 export function loadQuizDetail(
   token: string,
   quizId: string,
-): Promise<ApiResult<{ quiz: AssembledQuizDetail; catalogs: QuizCatalogComposition[]; levelCoverage: QuizLevelCoverage[] }>> {
-  return request<{ quiz: AssembledQuizDetail; catalogs: QuizCatalogComposition[]; levelCoverage: QuizLevelCoverage[] }>(
-    quizPath(quizId),
-    { method: 'GET' },
-    token,
-  );
+): Promise<
+  ApiResult<{
+    quiz: AssembledQuizDetail;
+    catalogs: QuizCatalogComposition[];
+    levelCoverage: QuizLevelCoverage[];
+    extraQuestions: QuizExtraQuestionSummary[];
+    /** Bare ids behind `catalogs`' per-catalog counts — what AddQuizQuestionsModal marks as already in the quiz. */
+    activeCatalogQuestionIds: string[];
+  }>
+> {
+  return request<{
+    quiz: AssembledQuizDetail;
+    catalogs: QuizCatalogComposition[];
+    levelCoverage: QuizLevelCoverage[];
+    extraQuestions: QuizExtraQuestionSummary[];
+    activeCatalogQuestionIds: string[];
+  }>(quizPath(quizId), { method: 'GET' }, token);
 }
 
 /** Deletes the quiz (DELETE /api/instructor/assembled-quizzes/{quizId}, GitHub #361). The catalogs and their questions are untouched. */
@@ -173,6 +202,70 @@ export function includeQuestionInQuiz(token: string, quizId: string, questionId:
   return request<{ questionId: string }>(
     quizPath(quizId, `/excluded-questions/${encodeURIComponent(questionId)}`),
     { method: 'DELETE' },
+    token,
+  );
+}
+
+/**
+ * Hand-picks one or more questions directly onto this quiz
+ * (POST /api/instructor/assembled-quizzes/{quizId}/extra-questions, GitHub #380) — independent of
+ * whether their catalogs are linked to the quiz at all. Returns the ids actually newly added
+ * (already-picked ones are silently omitted, not an error).
+ */
+export function addExtraQuestionsToQuiz(token: string, quizId: string, questionIds: string[]): Promise<ApiResult<{ questionIds: string[] }>> {
+  return request<{ questionIds: string[] }>(quizPath(quizId, '/extra-questions'), postJson({ questionIds }), token);
+}
+
+/**
+ * Removes a hand-picked question from this quiz
+ * (DELETE /api/instructor/assembled-quizzes/{quizId}/extra-questions/{questionId}, GitHub #380).
+ * The original question row, its catalog, and every other quiz are untouched.
+ */
+export function removeExtraQuestionFromQuiz(token: string, quizId: string, questionId: string): Promise<ApiResult<{ questionId: string }>> {
+  return request<{ questionId: string }>(
+    quizPath(quizId, `/extra-questions/${encodeURIComponent(questionId)}`),
+    { method: 'DELETE' },
+    token,
+  );
+}
+
+/**
+ * Every MCQ question in the system, any author, any catalog
+ * (GET /api/instructor/assembled-quizzes/questions, GitHub #380) — the pool the "Add individual
+ * questions" picker (AddQuizQuestionsModal) searches/filters client-side. Not quiz-scoped; the
+ * caller cross-references against a specific quiz's own already-loaded composition to mark rows
+ * as already included.
+ */
+export function loadAllQuestionsForPicker(token: string): Promise<ApiResult<{ questions: PickableQuestion[] }>> {
+  return request<{ questions: PickableQuestion[] }>('/api/instructor/assembled-quizzes/questions', { method: 'GET' }, token);
+}
+
+/**
+ * Creates a brand-new question AND hand-picks it onto this quiz in one atomic request
+ * (POST /api/instructor/assembled-quizzes/{quizId}/questions, GitHub #380's "create new question"
+ * extension) — the same body shape lib/sessionClient.ts's createQuestion sends, since both routes
+ * share the same server-side validation (lib/questionAuthoringQueries.ts). question.explanation
+ * only has anywhere to go on the correct answer, the same limitation createQuestion's own
+ * answersPayload notes. Returns extraQuestion so the composition page can append it to local state
+ * directly, without a full refetch.
+ */
+export function createAndPickQuestionForQuiz(
+  token: string,
+  quizId: string,
+  question: QuizQuestion,
+): Promise<ApiResult<{ questionId: string; answerIds: string[]; extraQuestion: QuizExtraQuestionSummary }>> {
+  return request<{ questionId: string; answerIds: string[]; extraQuestion: QuizExtraQuestionSummary }>(
+    quizPath(quizId, '/questions'),
+    postJson({
+      questionPrompt: question.questionText,
+      activityType: question.quizType,
+      difficultyLevel: question.level,
+      answers: question.answerOptions.map((option) => ({
+        optionText: option.text,
+        isCorrect: option.isCorrect,
+        ...(option.isCorrect ? { explanation: question.explanation } : {}),
+      })),
+    }),
     token,
   );
 }

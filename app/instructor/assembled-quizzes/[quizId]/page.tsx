@@ -4,18 +4,33 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../../../components/AppShell';
+import { AddQuizQuestionsModal } from '../../../../components/AddQuizQuestionsModal';
 import { ConfirmModal } from '../../../../components/ConfirmModal';
+import { QuestionFormModal } from '../../../../components/QuestionFormModal';
 import {
+  createAndPickQuestionForQuiz,
   deleteAssembledQuiz,
   linkCatalogToQuiz,
   loadQuizDetail,
+  removeExtraQuestionFromQuiz,
   unlinkCatalogFromQuiz,
   type AssembledQuizDetail,
   type QuizCatalogComposition,
+  type QuizExtraQuestionSummary,
   type QuizLevelCoverage,
 } from '../../../../lib/assembledQuizClient';
 import { loadQuizzes, type QuizSummary } from '../../../../lib/quizClient';
+import type { ActivityType } from '../../../../lib/activityTypes';
+import type { QuizQuestion } from '../../../../lib/quizQuestionTypes';
 import { useRequireRole } from '../../../../lib/useRequireRole';
+
+function RemoveIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 6 6 18M6 6l12 12" />
+    </svg>
+  );
+}
 
 const LEVEL_LABEL: Record<1 | 2 | 3, string> = { 1: 'Easy', 2: 'Medium', 3: 'Hard' };
 
@@ -34,6 +49,8 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
   const [quiz, setQuiz] = useState<AssembledQuizDetail | null>(null);
   const [catalogs, setCatalogs] = useState<QuizCatalogComposition[] | null>(null);
   const [levelCoverage, setLevelCoverage] = useState<QuizLevelCoverage[] | null>(null);
+  const [extraQuestions, setExtraQuestions] = useState<QuizExtraQuestionSummary[] | null>(null);
+  const [activeCatalogQuestionIds, setActiveCatalogQuestionIds] = useState<string[] | null>(null);
   const [allCatalogs, setAllCatalogs] = useState<QuizSummary[] | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -44,6 +61,8 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
   const [addError, setAddError] = useState('');
   const [catalogToRemove, setCatalogToRemove] = useState<QuizCatalogComposition | null>(null);
   const [showDeleteQuiz, setShowDeleteQuiz] = useState(false);
+  const [showAddQuestionsModal, setShowAddQuestionsModal] = useState(false);
+  const [showCreateQuestionModal, setShowCreateQuestionModal] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -69,6 +88,8 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
       setQuiz(detailResult.data.quiz);
       setCatalogs(detailResult.data.catalogs);
       setLevelCoverage(detailResult.data.levelCoverage);
+      setExtraQuestions(detailResult.data.extraQuestions);
+      setActiveCatalogQuestionIds(detailResult.data.activeCatalogQuestionIds);
       setAllCatalogs(catalogsResult.data.quizzes);
     });
 
@@ -119,6 +140,43 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
     setRetryCount((count) => count + 1); // re-fetch level coverage, which the optimistic insert above can't compute correctly
   }
 
+  async function handleRemoveExtraQuestion(question: QuizExtraQuestionSummary) {
+    if (!token) return;
+    if (!confirm(`Remove "${question.questionText}" from this quiz?`)) return;
+
+    const result = await removeExtraQuestionFromQuiz(token, params.quizId, question.questionId);
+    if (!result.ok) {
+      showToast(result.error);
+      return;
+    }
+
+    setExtraQuestions((current) => (current ?? []).filter((q) => q.questionId !== question.questionId));
+    showToast('Question removed from this quiz.');
+    setRetryCount((count) => count + 1); // re-fetch level coverage now that a hand-picked question is gone from the pool
+  }
+
+  // GitHub #380 extension: catalog choices offered by the reused QuestionFormModal when creating
+  // a brand-new question from this page — the quiz's own linked catalogs when it has any (so the
+  // instructor's most likely target is already selected), falling back to every catalog in the
+  // system when it has none (a question must always belong to a catalog, so this choice can never
+  // be skipped, only defaulted).
+  const catalogOptionsForCreate: { value: ActivityType; label: string }[] =
+    catalogs && catalogs.length > 0
+      ? catalogs.map((catalog) => ({ value: catalog.activityType as ActivityType, label: catalog.name }))
+      : (allCatalogs ?? []).map((catalog) => ({ value: catalog.activityType as ActivityType, label: catalog.name }));
+
+  async function handleCreateAndPickQuestion(question: QuizQuestion): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (!token) return { ok: false, error: 'Your session has expired. Please sign in again.' };
+
+    const result = await createAndPickQuestionForQuiz(token, params.quizId, question);
+    if (!result.ok) return { ok: false, error: result.error };
+
+    setExtraQuestions((current) => [...(current ?? []), result.data.extraQuestion]);
+    showToast(`"${result.data.extraQuestion.questionText}" created and added to this quiz.`);
+    setRetryCount((count) => count + 1); // re-fetch level coverage now that a new question is in the pool
+    return { ok: true };
+  }
+
   return (
     <AppShell active="instructor-assembled-quizzes">
       <div className="mx-auto max-w-3xl">
@@ -141,7 +199,7 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
               Retry
             </button>
           </div>
-        ) : !quiz || !catalogs || !levelCoverage || !allCatalogs ? (
+        ) : !quiz || !catalogs || !levelCoverage || !extraQuestions || !activeCatalogQuestionIds || !allCatalogs ? (
           <p className="mt-6 text-sm font-semibold text-gray-500">Loading…</p>
         ) : (
           <>
@@ -197,7 +255,7 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
             ) : null}
 
             <div className="mb-3 mt-6 flex items-center justify-between">
-              <p className="text-xs font-extrabold uppercase tracking-wide text-gray-400">Catalogs in this quiz</p>
+              <p className="text-xs font-extrabold uppercase tracking-wide text-gray-400">From catalogs</p>
             </div>
             <p className="mb-4 text-xs font-semibold text-gray-500">
               Each catalog below is shown as it applies to this quiz only — excluding a question here never changes
@@ -264,6 +322,65 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
               </button>
             </div>
             {addError ? <p className="mt-2 text-xs font-bold text-brand-danger">{addError}</p> : null}
+
+            <div className="mb-3 mt-8 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-extrabold uppercase tracking-wide text-gray-400">Individually added questions</p>
+              <div className="flex flex-none flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateQuestionModal(true)}
+                  disabled={catalogOptionsForCreate.length === 0}
+                  title={catalogOptionsForCreate.length === 0 ? 'No catalogs exist yet to file a new question under.' : undefined}
+                  className="flex-none rounded-full border border-brand-purple/40 px-4 py-1.5 text-xs font-extrabold text-brand-purple transition hover:bg-brand-purple/10 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Create new question
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAddQuestionsModal(true)}
+                  className="flex-none rounded-full border border-brand-purple/40 px-4 py-1.5 text-xs font-extrabold text-brand-purple transition hover:bg-brand-purple/10"
+                >
+                  Add individual questions
+                </button>
+              </div>
+            </div>
+            <p className="mb-4 text-xs font-semibold text-gray-500">
+              Questions picked here count toward this quiz&apos;s pool regardless of whether their own catalog is
+              linked above. Removing one only drops it from this quiz — the original question, its catalog, and
+              every other quiz are unaffected.
+            </p>
+
+            <div className="space-y-3">
+              {extraQuestions.length === 0 ? (
+                <p className="rounded-brand-lg border border-gray-100 bg-gray-50 p-6 text-center text-sm font-semibold text-gray-500">
+                  No individually added questions yet.
+                </p>
+              ) : (
+                extraQuestions.map((question) => (
+                  <div
+                    key={question.questionId}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-brand-lg border border-gray-100 bg-gray-50 p-4"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold text-brand-navy">{question.questionText}</p>
+                      <p className="mt-1 flex flex-wrap items-center gap-2 text-xs font-bold text-gray-500">
+                        <span className="rounded-full bg-white px-2 py-0.5">{question.catalogName}</span>
+                        <span className="rounded-full bg-white px-2 py-0.5">{LEVEL_LABEL[question.level]}</span>
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveExtraQuestion(question)}
+                      aria-label={`Remove "${question.questionText}" from this quiz`}
+                      title="Remove from this quiz"
+                      className="flex h-9 w-9 flex-none items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 transition hover:border-brand-danger hover:text-brand-danger"
+                    >
+                      <RemoveIcon />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
           </>
         )}
       </div>
@@ -315,6 +432,40 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
             router.push('/instructor/assembled-quizzes');
             return { ok: true as const };
           }}
+        />
+      ) : null}
+
+      {showAddQuestionsModal && token ? (
+        <AddQuizQuestionsModal
+          token={token}
+          quizId={params.quizId}
+          // Already-included regardless of source: every question currently active through a
+          // linked catalog (not excluded) plus every question already hand-picked — see
+          // getQuizComposition's own docblock for why activeCatalogQuestionIds exists.
+          alreadyIncludedIds={new Set([...(activeCatalogQuestionIds ?? []), ...(extraQuestions ?? []).map((q) => q.questionId)])}
+          onClose={() => setShowAddQuestionsModal(false)}
+          onAdded={(questionIds) => {
+            showToast(`${questionIds.length} question${questionIds.length === 1 ? '' : 's'} added to this quiz.`);
+            setRetryCount((count) => count + 1); // re-fetch composition + level coverage with the new hand-picks included
+          }}
+          onCreateNew={
+            catalogOptionsForCreate.length > 0
+              ? () => {
+                  setShowAddQuestionsModal(false);
+                  setShowCreateQuestionModal(true);
+                }
+              : undefined
+          }
+        />
+      ) : null}
+
+      {showCreateQuestionModal && catalogOptionsForCreate.length > 0 ? (
+        <QuestionFormModal
+          mode="add"
+          defaultQuizType={catalogOptionsForCreate[0].value}
+          quizOptions={catalogOptionsForCreate}
+          onClose={() => setShowCreateQuestionModal(false)}
+          onSave={handleCreateAndPickQuestion}
         />
       ) : null}
     </AppShell>

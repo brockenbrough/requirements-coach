@@ -46,15 +46,16 @@ async function authorizeQuiz(request: Request, quizId: string) {
 }
 
 /**
- * GET /api/instructor/assembled-quizzes/{quizId} — one quiz's full composition (GitHub #361):
- * meta, every linked catalog with its genuinely-active question count (total minus this quiz's
- * own exclusions), and per-level coverage against the round size so the detail page can warn
- * before a level runs short.
+ * GET /api/instructor/assembled-quizzes/{quizId} — one quiz's full composition (GitHub #361,
+ * extended by GitHub #380): meta, every linked catalog with its genuinely-active question count
+ * (total minus this quiz's own exclusions), every individually hand-picked question with its
+ * source catalog, and per-level coverage against the round size — now counting hand-picked
+ * questions too — so the detail page can warn before a level runs short.
  *
  * - 401 missing/invalid bearer token
  * - 403 caller isn't an instructor, or isn't this quiz's creator (no body either way)
  * - 404 quizId matches no quiz
- * - 200 { quiz: { id, name, description, courseId, courseName }, catalogs, levelCoverage }
+ * - 200 { quiz: { id, name, description, courseId, courseName }, catalogs, levelCoverage, extraQuestions, activeCatalogQuestionIds }
  * - 500 Supabase not configured, or any of the composition queries fail
  */
 export async function GET(request: Request, { params }: { params: { quizId: string } }) {
@@ -66,8 +67,14 @@ export async function GET(request: Request, { params }: { params: { quizId: stri
   const { courseName, error: courseError } = await getCourseName(supabase, quiz.course_id);
   if (courseError) return Response.json({ error: courseError.message }, { status: 500 });
 
-  const { catalogs, levelCoverage, error: compositionError } = await getQuizComposition(supabase, quiz.assembled_quiz_id);
-  if (compositionError || !catalogs || !levelCoverage) {
+  const {
+    catalogs,
+    levelCoverage,
+    extraQuestions,
+    activeCatalogQuestionIds,
+    error: compositionError,
+  } = await getQuizComposition(supabase, quiz.assembled_quiz_id);
+  if (compositionError || !catalogs || !levelCoverage || !extraQuestions || !activeCatalogQuestionIds) {
     return Response.json({ error: compositionError?.message ?? 'Could not load quiz composition.' }, { status: 500 });
   }
 
@@ -82,6 +89,8 @@ export async function GET(request: Request, { params }: { params: { quizId: stri
       },
       catalogs,
       levelCoverage,
+      extraQuestions,
+      activeCatalogQuestionIds,
     },
     { status: 200 },
   );
