@@ -17,7 +17,7 @@ There is no lint or typecheck script; `npm run build` is the type check.
 
 ## Environment setup
 
-Copy `.env.example` to `.env.local` and fill in your Supabase credentials. Then, in the Supabase SQL editor, run `supabase/schema.sql` followed by `supabase/seed.sql` (the question bank — without it every session start returns 400), and create a **public** Storage bucket named `avatars` for profile images. (README.md's mention of a `myapp_profile` table is stale — the profile table is `"user"`.)
+Copy `.env.example` to `.env.local` and fill in your Supabase credentials. Then, in the Supabase SQL editor, run `supabase/schema.sql` followed by `supabase/seed.sql` (the question bank — without it every session start returns 400), and create two **public** Storage buckets: `avatars` for profile images, and `course-covers` (GitHub #363 follow-up) for instructor-uploaded course cover images. (README.md's mention of a `myapp_profile` table is stale — the profile table is `"user"`.)
 
 `INSTRUCTOR_SIGNUP_CODE` (the invite code that grants the instructor role at registration, see "Auth flow" below) must be set to a real, random, per-deployment value — generate one yourself (e.g. `openssl rand -base64 24`) and set it only in each deployment's own environment (`.env.local` locally, Vercel Environment Variables in production, etc.). It must never be committed to the repo, in `.env.example` or anywhere else.
 

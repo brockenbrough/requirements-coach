@@ -1,6 +1,6 @@
 import { getSupabaseClient } from '../../../../../lib/supabase';
 import { requireInstructor } from '../../../../../lib/instructorAuth';
-import { deleteCourse, findOwnedCourse, loadEnrolledStudents, updateCourseName } from '../../../../../lib/courseQueries';
+import { deleteCourse, findOwnedCourse, loadEnrolledStudents, updateCourseMeta } from '../../../../../lib/courseQueries';
 import { loadStudentActivityForIds } from '../../../../../lib/sessionQueries';
 import { summarizeStudents, toStudentActivitySummary } from '../../../../../lib/activityLogTypes';
 
@@ -54,7 +54,7 @@ async function authorizeCourse(request: Request, courseId: string) {
  * silently vanish from the roster instead of appearing with zeros.
  *
  * - 401/403/404/403(not owner) — see authorizeCourse
- * - 200 { course: { id, name, code, createdAt }, students: [...] }
+ * - 200 { course: { id, name, code, createdAt, semester, coverImageUrl }, students: [...] }
  * - 500 on any query failure
  */
 export async function GET(request: Request, { params }: { params: { id: string } }) {
@@ -93,7 +93,14 @@ export async function GET(request: Request, { params }: { params: { id: string }
 
   return Response.json(
     {
-      course: { id: course.course_id, name: course.course_name, code: course.course_code, createdAt: course.created_at },
+      course: {
+        id: course.course_id,
+        name: course.course_name,
+        code: course.course_code,
+        createdAt: course.created_at,
+        semester: course.semester,
+        coverImageUrl: course.cover_image_url,
+      },
       students,
     },
     { status: 200 },
@@ -101,12 +108,15 @@ export async function GET(request: Request, { params }: { params: { id: string }
 }
 
 /**
- * PATCH /api/instructor/courses/{id} — renames a course.
+ * PATCH /api/instructor/courses/{id} — renames a course and/or updates its semester/term label
+ * and/or its cover image (GitHub #363, #363 follow-up).
  *
- * Body: { name }.
+ * Body: { name, semester?, coverImageUrl? }. Omitting a key entirely leaves that stored value
+ * untouched; passing null or "" clears it. A non-string, non-null semester/coverImageUrl is
+ * rejected, same as POST.
  * - 401/403/404/403(not owner) — see authorizeCourse
- * - 400 invalid JSON, or missing/blank name
- * - 200 { course: { id, name, code, createdAt } }
+ * - 400 invalid JSON, missing/blank name, or a non-string semester/coverImageUrl
+ * - 200 { course: { id, name, code, createdAt, semester, coverImageUrl } }
  * - 500 on an update failure
  */
 export async function PATCH(request: Request, { params }: { params: { id: string } }) {
@@ -121,18 +131,39 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     return Response.json({ error: 'Invalid JSON body.' }, { status: 400 });
   }
 
-  const { name } = (body ?? {}) as { name?: unknown };
+  const { name, semester, coverImageUrl } = (body ?? {}) as { name?: unknown; semester?: unknown; coverImageUrl?: unknown };
   if (typeof name !== 'string' || name.trim() === '') {
     return Response.json({ error: 'name is required.' }, { status: 400 });
   }
+  if (semester !== undefined && semester !== null && typeof semester !== 'string') {
+    return Response.json({ error: 'semester must be a string.' }, { status: 400 });
+  }
+  if (coverImageUrl !== undefined && coverImageUrl !== null && typeof coverImageUrl !== 'string') {
+    return Response.json({ error: 'coverImageUrl must be a string.' }, { status: 400 });
+  }
 
-  const { course: updated, error } = await updateCourseName(supabase, { courseId: params.id, name: name.trim() });
+  const { course: updated, error } = await updateCourseMeta(supabase, {
+    courseId: params.id,
+    name: name.trim(),
+    semester: semester === undefined ? undefined : typeof semester === 'string' ? semester.trim() || null : null,
+    coverImageUrl:
+      coverImageUrl === undefined ? undefined : typeof coverImageUrl === 'string' ? coverImageUrl.trim() || null : null,
+  });
   if (error || !updated) {
     return Response.json({ error: error?.message ?? 'Could not update course.' }, { status: 500 });
   }
 
   return Response.json(
-    { course: { id: updated.course_id, name: updated.course_name, code: updated.course_code, createdAt: updated.created_at } },
+    {
+      course: {
+        id: updated.course_id,
+        name: updated.course_name,
+        code: updated.course_code,
+        createdAt: updated.created_at,
+        semester: updated.semester,
+        coverImageUrl: updated.cover_image_url,
+      },
+    },
     { status: 200 },
   );
 }

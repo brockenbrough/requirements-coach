@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 240" role="img" aria-hidden="true">
+  <defs>
+    <linearGradient id="g3" x1="0" y1="0" x2="480" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1b1642"/>
+      <stop offset="1" stop-color="#8a6100"/>
+    </linearGradient>
+  </defs>
+  <rect width="480" height="240" fill="url(#g3)"/>
+  <g opacity="0.28" fill="#ffd666">
+    <polygon points="40,220 120,140 160,220"/>
+    <polygon points="160,220 120,140 220,150"/>
+    <polygon points="300,240 380,150 440,240"/>
+  </g>
+  <g opacity="0.18" fill="#7c4dff">
+    <polygon points="360,20 420,80 320,90"/>
+    <polygon points="200,10 260,60 170,70"/>
+  </g>
+  <circle cx="80" cy="50" r="3" fill="#ffffff" opacity="0.4"/>
+  <circle cx="420" cy="40" r="2.5" fill="#ffffff" opacity="0.4"/>
+</svg>

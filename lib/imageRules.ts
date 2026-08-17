@@ -1,15 +1,19 @@
-// Avatar upload rules (GitHub #278). The `avatars` bucket is public, so whatever lands in it is
-// served straight back from the Supabase domain — an .svg or .html carrying a <script> would be
-// stored XSS. Two consequences shape this module:
+// Image upload rules — originally just avatars (GitHub #278), now also backing course covers
+// (GitHub #363 follow-up, POST /api/instructor/course-covers). Both public buckets serve
+// whatever lands in them straight back from the Supabase domain — an .svg or .html carrying a
+// <script> would be stored XSS. Two consequences shape this module:
 //
 //   1. The *sniffed* magic bytes are the only source of truth. `File.name` and `File.type` are
-//      client input and are never read by the upload route: the storage key's extension and the
-//      upload's contentType both come from `sniffAvatarMime` instead.
-//   2. There is a hard byte cap, since the bucket is billed storage anyone with an account can
-//      write to.
+//      client input and are never read by either upload route: the storage key's extension and
+//      the upload's contentType both come from `sniffAvatarMime` instead.
+//   2. There is a hard byte cap per use case, since both buckets are billed storage anyone with
+//      an account (avatars) or instructor role (course covers) can write to.
 //
-// Shared between the route and the profile form so client and server can't drift on what "valid"
-// means, the same way lib/passwordRules.ts anchors the password rule.
+// Shared between the routes and their forms so client and server can't drift on what "valid"
+// means, the same way lib/passwordRules.ts anchors the password rule. The format whitelist/sniff
+// function is genuinely shared (nothing about magic-byte sniffing is avatar-specific) — only the
+// size cap differs per use case, so course-cover code should import sniffAvatarMime/
+// AVATAR_MIME_EXTENSIONS/AVATAR_HEADER_BYTES directly rather than duplicating them.
 
 export type AvatarMime = 'image/png' | 'image/jpeg' | 'image/webp';
 
@@ -34,6 +38,21 @@ export const AVATAR_HEADER_BYTES = 12;
 export function avatarSizeError(size: number): string | null {
   if (size <= 0) return 'The image file is empty.';
   if (size > MAX_AVATAR_BYTES) return `Image must be ${MAX_AVATAR_MB} MB or smaller.`;
+  return null;
+}
+
+// Course covers are a wide banner, not a small circle — a bit more headroom than an avatar, but
+// still a hard cap for the same billed-storage reason.
+export const MAX_COURSE_COVER_BYTES = 4 * 1024 * 1024;
+const MAX_COURSE_COVER_MB = MAX_COURSE_COVER_BYTES / (1024 * 1024);
+
+/** Same format whitelist as avatars — no separate accept attribute/error copy needed. */
+export const COURSE_COVER_ACCEPT_ATTRIBUTE = AVATAR_ACCEPT_ATTRIBUTE;
+export const COURSE_COVER_TYPE_ERROR = AVATAR_TYPE_ERROR;
+
+export function courseCoverSizeError(size: number): string | null {
+  if (size <= 0) return 'The image file is empty.';
+  if (size > MAX_COURSE_COVER_BYTES) return `Image must be ${MAX_COURSE_COVER_MB} MB or smaller.`;
   return null;
 }
 

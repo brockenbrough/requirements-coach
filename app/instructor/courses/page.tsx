@@ -4,8 +4,10 @@ import { useEffect, useState } from 'react';
 import { AppShell } from '../../../components/AppShell';
 import { CourseCard } from '../../../components/CourseCard';
 import { CreateCourseModal } from '../../../components/CreateCourseModal';
+import { DeleteCourseModal } from '../../../components/DeleteCourseModal';
 import { DuplicateCourseModal } from '../../../components/DuplicateCourseModal';
-import { loadCourses, type CourseSummary } from '../../../lib/courseClient';
+import { EditCourseModal } from '../../../components/EditCourseModal';
+import { loadCourses, loadAllCourseClassStats, type CourseSummary, type CourseClassStats } from '../../../lib/courseClient';
 import { useRequireRole } from '../../../lib/useRequireRole';
 
 /**
@@ -26,8 +28,11 @@ export default function InstructorCoursesPage() {
   const [courses, setCourses] = useState<CourseSummary[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
+  const [classStatsById, setClassStatsById] = useState<Record<string, CourseClassStats> | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [duplicateSource, setDuplicateSource] = useState<CourseSummary | null>(null);
+  const [editSource, setEditSource] = useState<CourseSummary | null>(null);
+  const [deleteSource, setDeleteSource] = useState<CourseSummary | null>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -39,6 +44,12 @@ export default function InstructorCoursesPage() {
       if (cancelled) return;
       if (result.ok) setCourses(result.data.courses);
       else setLoadFailed(true);
+    });
+
+    loadAllCourseClassStats(token).then((result) => {
+      if (!cancelled && result.ok) {
+        setClassStatsById(Object.fromEntries(result.data.stats.map((s) => [s.courseId, s])));
+      }
     });
 
     return () => {
@@ -93,7 +104,14 @@ export default function InstructorCoursesPage() {
         ) : (
           <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
             {courses.map((course) => (
-              <CourseCard key={course.id} course={course} onDuplicate={setDuplicateSource} />
+              <CourseCard
+                key={course.id}
+                course={course}
+                classStats={classStatsById?.[course.id] ?? null}
+                onDuplicate={setDuplicateSource}
+                onEdit={setEditSource}
+                onDelete={setDeleteSource}
+              />
             ))}
           </div>
         )}
@@ -113,6 +131,33 @@ export default function InstructorCoursesPage() {
           token={token}
           onClose={() => setDuplicateSource(null)}
           onCreated={(course) => setCourses((current) => [course, ...(current ?? [])])}
+        />
+      ) : null}
+
+      {editSource ? (
+        <EditCourseModal
+          course={editSource}
+          token={token}
+          onClose={() => setEditSource(null)}
+          onSaved={(updated) =>
+            setCourses((current) =>
+              (current ?? []).map((c) =>
+                c.id === updated.id ? { ...c, name: updated.name, semester: updated.semester, coverImageUrl: updated.coverImageUrl } : c,
+              ),
+            )
+          }
+        />
+      ) : null}
+
+      {deleteSource ? (
+        <DeleteCourseModal
+          course={{ id: deleteSource.id, name: deleteSource.name, studentCount: deleteSource.studentCount }}
+          token={token}
+          onClose={() => setDeleteSource(null)}
+          onDeleted={() => {
+            setCourses((current) => (current ?? []).filter((c) => c.id !== deleteSource.id));
+            setDeleteSource(null);
+          }}
         />
       ) : null}
     </AppShell>
