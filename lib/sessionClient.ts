@@ -308,33 +308,7 @@ export function loadCompletedAttempts(
   return fetchCompletedAttempts(token, studentId, activityType);
 }
 
-/**
- * The student's cumulative score: the sum of their best score at each completed difficulty
- * level of each activity type (REQ-GAM-DL-1 — completed, not passed; see computeStudentScore's
- * own comment). Cached in localStorage (lib/scoreStore.ts) keyed by studentId, since it
- * otherwise gets refetched on every AppShell mount i.e. every navigation. A plain call is
- * served from the cache when present; pass forceRefresh to bypass it and re-cache the server's
- * answer — the play flow does this once a session completes, since that's the only thing that
- * actually changes the score.
- *
- * sessionsCompleted (GitHub #39) rides along with score in both the network response and the
- * cache — the profile page's completed-sessions summary reads it off the same call rather than
- * a second request.
- *
- * studentId has to be the authenticated student; the route answers 403 for anyone else.
- */
-export function loadStudentScore(
-  token: string,
-  studentId: string,
-  options: { forceRefresh?: boolean } = {},
-) {
-  if (!options.forceRefresh) {
-    const cached = getCachedScore(studentId);
-    if (cached !== null) {
-      return Promise.resolve<ApiResult<{ score: number; sessionsCompleted: number }>>({ ok: true, data: cached });
-    }
-  }
-
+function fetchStudentScore(token: string, studentId: string) {
   return request<{ score: number; sessionsCompleted: number }>(
     `/api/students/${encodeURIComponent(studentId)}/score`,
     { method: 'GET' },
@@ -345,6 +319,52 @@ export function loadStudentScore(
     }
     return result;
   });
+}
+
+/**
+ * The student's cumulative score: the sum of their best score at each completed difficulty
+ * level of each activity type (REQ-GAM-DL-1 — completed, not passed; see computeStudentScore's
+ * own comment). Cached in localStorage (lib/scoreStore.ts) keyed by studentId, since it
+ * otherwise gets refetched on every AppShell mount i.e. every navigation. A plain call is
+ * served from the cache when present; pass forceRefresh to bypass it and re-cache the server's
+ * answer — the play flow does this once a session completes, since that's the only thing that
+ * actually changes the score *on this device*.
+ *
+ * onRevalidate mirrors loadCompletedAttempts's own (GitHub #333): a cache hit still resolves
+ * immediately, but a real request fires in parallel underneath, and onRevalidate only fires if
+ * the server's answer actually differs from the cached one. Without this, a stale localStorage
+ * entry — left behind by, say, a session completed in a different tab/device, or a score that
+ * went stale before a client-side bug was fixed — would never self-correct on this device short
+ * of finishing another session or logging out; a private/incognito window (no localStorage to
+ * hit) would show the right number while a normal tab kept showing the wrong one indefinitely.
+ *
+ * sessionsCompleted (GitHub #39) rides along with score in both the network response and the
+ * cache — the profile page's completed-sessions summary reads it off the same call rather than
+ * a second request.
+ *
+ * studentId has to be the authenticated student; the route answers 403 for anyone else.
+ */
+export function loadStudentScore(
+  token: string,
+  studentId: string,
+  options: { forceRefresh?: boolean; onRevalidate?: (score: { score: number; sessionsCompleted: number }) => void } = {},
+) {
+  if (!options.forceRefresh) {
+    const cached = getCachedScore(studentId);
+    if (cached !== null) {
+      if (options.onRevalidate) {
+        const onRevalidate = options.onRevalidate;
+        fetchStudentScore(token, studentId).then((result) => {
+          if (result.ok && JSON.stringify(result.data) !== JSON.stringify(cached)) {
+            onRevalidate(result.data);
+          }
+        });
+      }
+      return Promise.resolve<ApiResult<{ score: number; sessionsCompleted: number }>>({ ok: true, data: cached });
+    }
+  }
+
+  return fetchStudentScore(token, studentId);
 }
 
 /**

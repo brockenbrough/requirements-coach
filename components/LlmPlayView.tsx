@@ -18,6 +18,7 @@ import {
 import type { ActivityDefinition } from '../lib/activityContent';
 import { PROMPT_PASS_SCORE } from '../lib/llmActivityRules';
 import type { LlmGradingResult } from '../lib/llmActivityTypes';
+import { clearCachedLeaderboard } from '../lib/leaderboardStore';
 import { loadActivityLog, loadCompletedAttempts } from '../lib/sessionClient';
 import { deriveStoryTitle } from '../lib/storyMarkdown';
 import { useRequireRole } from '../lib/useRequireRole';
@@ -239,6 +240,11 @@ export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
         loadActivityLog(token, profile.user_id, { forceRefresh: true }),
       ]);
     }
+    // An LLM-graded session writes an ordinary session_log row too, so it counts toward the same
+    // cumulative score every course leaderboard ranks by — the same reasoning as
+    // PlayActivityPage's own handleFinishSummary, which already clears this cache. Missing here
+    // until now, so the leaderboard kept showing the pre-session rank after an LLM-graded pass.
+    clearCachedLeaderboard();
     router.push(`/activities/${activity.slug}`);
   }
 

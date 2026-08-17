@@ -76,7 +76,14 @@ function StudentProfileContent({ studentId }: { studentId: string }) {
     let cancelled = false;
 
     Promise.all([
-      loadStudentScore(token, ownProfile.user_id),
+      // onRevalidate (GitHub #392 follow-up, same as UserProvider's own score load): corrects a
+      // stale cached score in the background if the server disagrees, rather than leaving this
+      // page stuck on a wrong number until the student finishes another session or logs out.
+      loadStudentScore(token, ownProfile.user_id, {
+        onRevalidate: (fresh) => {
+          if (!cancelled) setOwnScore(fresh.score);
+        },
+      }),
       loadStudentTitles(token, ownProfile.user_id),
       loadAvailableTitles(token, ownProfile.user_id),
     ]).then(([scoreResult, titlesResult, availableResult]) => {

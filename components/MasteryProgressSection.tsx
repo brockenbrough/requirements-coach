@@ -30,7 +30,16 @@ export function MasteryProgressSection({ token, studentId }: { token: string; st
     setError(null);
 
     Promise.all([
-      loadStudentScore(token, studentId),
+      // onRevalidate (GitHub #392 follow-up, same as UserProvider's own score load): corrects a
+      // stale cached score in the background if the server disagrees, rather than leaving this
+      // section stuck on a wrong number until the student finishes another session or logs out.
+      loadStudentScore(token, studentId, {
+        onRevalidate: (fresh) => {
+          if (cancelled) return;
+          setCumulativeScore(fresh.score);
+          setSessionsCompleted(fresh.sessionsCompleted);
+        },
+      }),
       loadStudentTitles(token, studentId),
       loadAvailableTitles(token, studentId),
     ]).then(([scoreResult, titlesResult, availableResult]) => {
