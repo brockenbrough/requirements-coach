@@ -36,7 +36,7 @@ type NavKey =
 const STUDENT_NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
   { key: 'dashboard', label: 'Dashboard', href: '/dashboard' },
   { key: 'activities', label: 'My Courses', href: '/activities' },
-  { key: 'courses', label: 'Courses', href: '/courses' },
+  { key: 'courses', label: 'Course Browser', href: '/courses' },
   { key: 'leaderboard', label: 'Leaderboard', href: '/leaderboard' },
   { key: 'profile', label: 'Profile', href: '/profile' },
 ];
