@@ -15,6 +15,11 @@ export type ActivityCourseLink = {
   name: string;
   description: string | null;
   assembledQuizId: string;
+  /** GitHub #416: this quiz's own per-level draw size — see assembled_quiz.questions_per_level's
+   *  own comment in supabase/schema.sql. NOT NULL in the schema, same as assembledQuizId above;
+   *  callers still fall back to QUESTIONS_PER_SESSION via `??` for the rare case this comes back
+   *  missing. */
+  questionsPerLevel: number;
 };
 
 type GrantingQuizRow = {
@@ -23,6 +28,7 @@ type GrantingQuizRow = {
     course_id: string;
     quiz_name: string;
     description: string | null;
+    questions_per_level: number;
     course: { course_name: string } | null;
   } | null;
   catalog: { quiz_name: string; description: string | null } | null;
@@ -46,7 +52,9 @@ type GrantingQuizRow = {
  * and GET /api/activities/{activityType}/questions both need it to know which quiz's
  * quiz_excluded_question/assembled_quiz_extra_question rows apply to the draw pool they build —
  * "which course grants access" and "which quiz's composition governs the draw" are answered by
- * the same row, so there is no reason to make either caller resolve it a second time.
+ * the same row, so there is no reason to make either caller resolve it a second time. GitHub
+ * #416's questionsPerLevel rides along for the same reason: POST /api/sessions needs the granting
+ * quiz's own draw size, not a second lookup for it.
  *
  * Two queries (enrolled course ids, then the quiz-catalog join filtered to them) rather than one
  * three-way join, matching the shape getCourseForActivityType + isEnrolledInAnyCourse used to
@@ -64,7 +72,7 @@ export async function getAccessibleCourseForActivity(
   const { data, error } = await supabase
     .from('assembled_quiz_catalog')
     .select(
-      'assembled_quiz:assembled_quiz_id!inner(assembled_quiz_id, course_id, quiz_name, description, course:course_id(course_name)), catalog:activity_type(quiz_name, description)',
+      'assembled_quiz:assembled_quiz_id!inner(assembled_quiz_id, course_id, quiz_name, description, questions_per_level, course:course_id(course_name)), catalog:activity_type(quiz_name, description)',
     )
     .eq('activity_type', activityType)
     .in('assembled_quiz.course_id', courseIds)
@@ -82,6 +90,7 @@ export async function getAccessibleCourseForActivity(
       name: row.assembled_quiz.quiz_name ?? row.catalog?.quiz_name ?? activityType,
       description: row.assembled_quiz.description ?? row.catalog?.description ?? null,
       assembledQuizId: row.assembled_quiz.assembled_quiz_id,
+      questionsPerLevel: row.assembled_quiz.questions_per_level,
     },
     error: null,
   };
