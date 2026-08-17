@@ -168,6 +168,14 @@ CREATE TABLE submission (
     llm_score      int4,
     llm_feedback   text,
     llm_provider   text,
+    -- Task-type-and-difficulty gamification points (lib/llmActivityRules.ts's
+    -- awardedScoreForRating), scaled from llm_score's raw 1-10 rating onto this prompt's
+    -- difficulty-based point scale. Deliberately a separate column rather than repurposing
+    -- llm_score itself: llm_score stays the raw 1-10 rating so per-prompt feedback, the
+    -- PROMPT_PASS_SCORE bar, and lib/llmActivityStatisticsQueries.ts's 1-10 histogram keep
+    -- reading an unscaled number. Nullable for the same write-before-disclose reason as
+    -- llm_score — filled in by the same grading UPDATE.
+    awarded_score  int4,
     submitted_at   timestamp   NOT NULL DEFAULT now(),
     graded_at      timestamp,
     PRIMARY KEY (submission_id));
@@ -270,12 +278,19 @@ CREATE TABLE student_course (
 -- existing difficulty-level scheme (1-3) is reused as-is; no new level
 -- column or table.
 -- ---------------------------------------------------------------------
+-- grading_kind (added alongside the "type-safe hand-picking" fix, mirroring
+-- activity_type.grading_kind exactly): which single kind of catalog this quiz may ever
+-- compose/hand-pick from, chosen once at creation and never changed afterward, same
+-- "locked forever" convention activity_type.grading_kind already uses. Before this, a quiz
+-- could link catalogs of both kinds at once with nothing to say which one its "Create new
+-- question"/"Add prompt" composition actions should offer.
 CREATE TABLE assembled_quiz (
     assembled_quiz_id uuid      NOT NULL,
     quiz_name         text      NOT NULL,
     description       text,
     course_id         uuid      NOT NULL,
     creator_id        uuid      NOT NULL,
+    grading_kind      text      NOT NULL DEFAULT 'mcq',
     created_at        timestamp NOT NULL DEFAULT now(),
     PRIMARY KEY (assembled_quiz_id));
 
@@ -583,6 +598,10 @@ ALTER TABLE question ADD CONSTRAINT ck_question_difficulty_level CHECK (difficul
 -- can't silently create a third one the app has no route/dispatch logic for.
 ALTER TABLE activity_type ADD CONSTRAINT ck_activity_type_grading_kind CHECK (grading_kind IN ('mcq', 'llm-graded'));
 
+-- Same reasoning as ck_activity_type_grading_kind directly above, for assembled_quiz's own
+-- grading_kind column.
+ALTER TABLE assembled_quiz ADD CONSTRAINT ck_assembled_quiz_grading_kind CHECK (grading_kind IN ('mcq', 'llm-graded'));
+
 -- REQ-GAM-DL-2.1: one title per (activity_type, difficulty_level) pair so the BL-1 lookup is
 -- unambiguous. activity_type itself is restricted to the known set via fk_title_definition_activity_type
 -- above, not a CHECK here — a hardcoded list of literals would drift from the activity_type table.
@@ -736,16 +755,18 @@ CREATE TRIGGER trg_answered_question_log_score
   AFTER INSERT ON answered_question_log
   FOR EACH ROW EXECUTE FUNCTION bump_session_score();
 
--- submission is write-before-disclose (llm_score starts NULL, a later UPDATE fills it in once
+-- submission is write-before-disclose (awarded_score starts NULL, a later UPDATE fills it in once
 -- grading finishes — see submission's own header comment), so the roll-up fires on that UPDATE
--- instead of on INSERT the way answered_question_log's does. The OLD.llm_score IS NULL guard
+-- instead of on INSERT the way answered_question_log's does. The OLD.awarded_score IS NULL guard
 -- keeps a later, unrelated UPDATE of an already-graded row (there isn't one today, but nothing
--- stops a future one) from double-counting the score.
+-- stops a future one) from double-counting the score. Reads awarded_score, not llm_score: the
+-- points that roll up into cumulative_score are the difficulty-scaled award, not the raw 1-10
+-- rating (see the column's own comment above).
 CREATE FUNCTION bump_session_score_from_submission() RETURNS trigger AS $$
 BEGIN
-  IF NEW.session_id IS NOT NULL AND NEW.llm_score IS NOT NULL AND OLD.llm_score IS NULL THEN
+  IF NEW.session_id IS NOT NULL AND NEW.awarded_score IS NOT NULL AND OLD.awarded_score IS NULL THEN
     UPDATE session_log
-       SET cumulative_score = cumulative_score + NEW.llm_score
+       SET cumulative_score = cumulative_score + NEW.awarded_score
      WHERE session_id = NEW.session_id;
   END IF;
   RETURN NEW;
@@ -753,7 +774,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trg_submission_score
-  AFTER UPDATE OF llm_score ON submission
+  AFTER UPDATE OF awarded_score ON submission
   FOR EACH ROW EXECUTE FUNCTION bump_session_score_from_submission();
 
 
@@ -1179,3 +1200,52 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 -- SQL) for POST /api/instructor/course-covers to upload into. No RLS policy is added for it: like
 -- `avatars`, every write goes through a service-role route (lib/supabase.ts's
 -- getSupabaseClient()), never a client-side Supabase call.
+
+-- Task-type-and-difficulty gamification points: MCQ questions already had a max_score column
+-- (nothing to migrate there — createQuestionWithAnswers just writes a different value now), but
+-- LLM-graded submissions had no column to hold a difficulty-scaled award separately from the raw
+-- 1-10 rating. submission.awarded_score is a brand new nullable int4 column, and
+-- bump_session_score_from_submission()/trg_submission_score are redefined to read it instead of
+-- llm_score. If your database predates this:
+--
+--   ALTER TABLE submission ADD COLUMN IF NOT EXISTS awarded_score int4;
+--   DROP TRIGGER IF EXISTS trg_submission_score ON submission;
+--   -- then re-run the bump_session_score_from_submission() CREATE FUNCTION and
+--   -- trg_submission_score CREATE TRIGGER statements above, which now reference awarded_score.
+--
+-- No backfill: every submission graded before this migration keeps its llm_score (still shown in
+-- feedback/statistics) but has awarded_score NULL, so it never contributed to cumulative_score —
+-- same as it never did before this column existed. Only submissions graded after the migration
+-- earn points toward the total.
+
+-- assembled_quiz.grading_kind (locks each quiz to one catalog kind, closing the gap where
+-- "Create new question"/"Add individual items" had no way to know which kind a quiz wanted):
+-- add the column, backfill each existing quiz from its first-linked catalog's own grading_kind
+-- (falling back to 'mcq' for a quiz with no catalogs linked yet), then add the CHECK constraint —
+-- same add-then-backfill-then-constrain order activity_type.grading_kind's own migration used.
+--
+--   ALTER TABLE assembled_quiz ADD COLUMN IF NOT EXISTS grading_kind text NOT NULL DEFAULT 'mcq';
+--
+--   UPDATE assembled_quiz aq SET grading_kind = COALESCE((
+--     SELECT at.grading_kind FROM assembled_quiz_catalog aqc
+--     JOIN activity_type at ON at.activity_type = aqc.activity_type
+--     WHERE aqc.assembled_quiz_id = aq.assembled_quiz_id
+--     ORDER BY aqc.assembled_quiz_catalog_id LIMIT 1
+--   ), 'mcq');
+--
+--   ALTER TABLE assembled_quiz ADD CONSTRAINT ck_assembled_quiz_grading_kind
+--     CHECK (grading_kind IN ('mcq', 'llm-graded'));
+--
+-- A quiz whose linked catalogs were already genuinely mixed-kind before this migration simply
+-- keeps whichever kind its first-linked catalog has (link insertion order, via the surrogate
+-- assembled_quiz_catalog_id) — the app refuses to link any *further* mismatched catalog to it
+-- going forward, but this backfill does not retroactively unlink any pre-existing mismatched
+-- link. If that matters for a given deployment, find such quizzes first with:
+--
+--   SELECT aq.assembled_quiz_id, aq.grading_kind, at.grading_kind AS catalog_grading_kind
+--     FROM assembled_quiz aq
+--     JOIN assembled_quiz_catalog aqc ON aqc.assembled_quiz_id = aq.assembled_quiz_id
+--     JOIN activity_type at ON at.activity_type = aqc.activity_type
+--     WHERE at.grading_kind <> aq.grading_kind;
+--
+-- and unlink (DELETE FROM assembled_quiz_catalog ...) the mismatched rows by hand.

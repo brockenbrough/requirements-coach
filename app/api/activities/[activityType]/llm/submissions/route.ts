@@ -2,6 +2,7 @@ import { getSupabaseClient } from "../../../../../../lib/supabase";
 import { getGradingKind } from "../../../../../../lib/activityTypes";
 import { getLLMProvider, isLLMProviderName } from "../../../../../../lib/llm/factory";
 import { SESSION_COLUMNS, isPassing } from "../../../../../../lib/sessionRules";
+import { awardedScoreForRating } from "../../../../../../lib/llmActivityRules";
 import {
   loadSessionStories,
   loadSessionSubmissions,
@@ -10,7 +11,7 @@ import {
 } from "../../../../../../lib/llmActivityQueries";
 import type { SupabaseClient } from "../../../../../../lib/sessionQueries";
 
-type UserStoryRow = { user_story_id: string; story_text: string; creator_id: string };
+type UserStoryRow = { user_story_id: string; story_text: string; creator_id: string; difficulty_level: 1 | 2 | 3 };
 type LLMConfigRow = { provider: string; api_key: string; model: string };
 type SessionRow = { session_id: string; status: string; cumulative_score: number; max_score: number };
 
@@ -158,7 +159,7 @@ export async function POST(request: Request, { params }: { params: { activityTyp
 
   const { data: story, error: storyError } = await supabase
     .from("user_story")
-    .select("user_story_id, story_text, creator_id")
+    .select("user_story_id, story_text, creator_id, difficulty_level")
     .eq("user_story_id", userStoryId)
     .maybeSingle();
 
@@ -226,10 +227,17 @@ export async function POST(request: Request, { params }: { params: { activityTyp
 
   const gradedAt = new Date().toISOString();
 
+  // Gamification points, scaled from the raw 1-10 rating onto this prompt's difficulty (REQ-GAM):
+  // a Medium (level 2) prompt rated 7/10 earns round(7/10 * 40) = 28 points. Stored separately
+  // from llm_score so the raw rating keeps driving feedback/statistics unchanged — see
+  // submission.awarded_score's own comment in supabase/schema.sql.
+  const awardedScore = awardedScoreForRating(rating.score, (story as UserStoryRow).difficulty_level);
+
   const { error: updateError } = await supabase
     .from("submission")
     .update({
       llm_score: rating.score,
+      awarded_score: awardedScore,
       llm_feedback: rating.feedback,
       llm_provider: providerName,
       graded_at: gradedAt,

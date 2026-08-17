@@ -71,6 +71,7 @@ function quizRow(overrides: Partial<Record<string, unknown>> = {}) {
     description: 'Covers weak stories.',
     course_id: 'course-1',
     creator_id: 'instructor-1',
+    grading_kind: 'mcq',
     created_at: '2026-08-14T10:00:00',
     ...overrides,
   };
@@ -159,6 +160,7 @@ describe('GET /api/instructor/assembled-quizzes/[quizId]', () => {
       description: 'Covers weak stories.',
       courseId: 'course-1',
       courseName: 'Software Requirements',
+      gradingKind: 'mcq',
     });
 
     expect(body.catalogs).toEqual([

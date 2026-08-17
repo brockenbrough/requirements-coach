@@ -98,6 +98,7 @@ const STORY = {
   user_story_id: 'story-1',
   story_text: 'As a user, I want to log in with email.',
   creator_id: 'instructor-1',
+  difficulty_level: 1,
 };
 
 const CONFIG = { provider: 'CLAUDE', api_key: 'sk-test', model: 'claude-opus-5' };
@@ -339,7 +340,28 @@ describe('POST /api/activities/[activityType]/llm/submissions', () => {
 
     const updatedSubmission = h.state.updates.find((u) => u.table === 'submission')!
       .payload as Record<string, unknown>;
-    expect(updatedSubmission).toMatchObject({ llm_score: 8, llm_feedback: 'Clear and testable.', llm_provider: 'CLAUDE' });
+    expect(updatedSubmission).toMatchObject({
+      llm_score: 8,
+      // Easy (level 1): llmPointsForDifficulty(1) = 20, so an 8/10 rating scales to
+      // round(8/10 * 20) = 16 gamification points.
+      awarded_score: 16,
+      llm_feedback: 'Clear and testable.',
+      llm_provider: 'CLAUDE',
+    });
+  });
+
+  it('scales the awarded score to a Medium/Hard prompt\'s higher point ceiling', async () => {
+    queueUpToLLM({ story: { ...STORY, difficulty_level: 3 } });
+    queueSuccessfulWrite(submissionRow('story-1'));
+    rateAcceptanceCriteria.mockResolvedValue({ score: 9, feedback: 'Strong answer.' });
+
+    await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
+
+    const updatedSubmission = h.state.updates.find((u) => u.table === 'submission')!
+      .payload as Record<string, unknown>;
+    // Hard (level 3): llmPointsForDifficulty(3) = 60, so a 9/10 rating scales to
+    // round(9/10 * 60) = 54 gamification points — the raw llm_score stays the unscaled 9.
+    expect(updatedSubmission).toMatchObject({ llm_score: 9, awarded_score: 54 });
   });
 
   // Write-before-disclose: the row is committed before grading, and the score/feedback columns
@@ -353,6 +375,7 @@ describe('POST /api/activities/[activityType]/llm/submissions', () => {
     const insertedSubmission = h.state.inserts.find((i) => i.table === 'submission')!
       .payload as Record<string, unknown>;
     expect(insertedSubmission).not.toHaveProperty('llm_score');
+    expect(insertedSubmission).not.toHaveProperty('awarded_score');
     expect(insertedSubmission).not.toHaveProperty('llm_feedback');
   });
 
