@@ -232,7 +232,7 @@ describe('POST /api/activities/[activityType]/llm/sessions', () => {
       difficulty_level: 1,
       status: 'in-progress',
       cumulative_score: 0,
-      max_score: 40,
+      max_score: 80,
       passed: false,
     });
 
