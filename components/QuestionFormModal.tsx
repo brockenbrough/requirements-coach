@@ -37,6 +37,7 @@ export function QuestionFormModal({
   mode,
   initialData,
   defaultQuizType,
+  defaultLevel,
   quizOptions,
   onClose,
   onSave,
@@ -46,6 +47,12 @@ export function QuestionFormModal({
   initialData?: QuizQuestion;
   /** Which quiz's tab/filter the page currently has active — the starting value in 'add' mode. */
   defaultQuizType: ActivityType;
+  /**
+   * Which difficulty the page's level filter currently has active — the starting value in 'add'
+   * mode (GitHub #417). A caller with no level filter, or one sitting on "All levels", omits it
+   * and gets the old Level 1 default. Ignored in 'edit' mode, where the question's own level wins.
+   */
+  defaultLevel?: 1 | 2 | 3;
   /**
    * The choices the "Quiz" dropdown offers (GitHub #359). A catalog's detail page passes its own
    * single catalog here, effectively locking the field to "this catalog" without special-casing
@@ -58,7 +65,7 @@ export function QuestionFormModal({
   onSave: (question: QuizQuestion) => Promise<{ ok: true } | { ok: false; error: string }>;
 }) {
   const [quizType, setQuizType] = useState<ActivityType>(initialData?.quizType ?? defaultQuizType);
-  const [level, setLevel] = useState<1 | 2 | 3>(initialData?.level ?? 1);
+  const [level, setLevel] = useState<1 | 2 | 3>(initialData?.level ?? defaultLevel ?? 1);
   const [questionText, setQuestionText] = useState(initialData?.questionText ?? '');
   const [optionTexts, setOptionTexts] = useState<string[]>(
     initialData ? initialData.answerOptions.map((option) => option.text) : EMPTY_OPTIONS,
