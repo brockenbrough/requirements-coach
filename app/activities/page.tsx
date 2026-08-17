@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { JoinedCourseCard } from '../../components/JoinedCourseCard';
-import { loadMyCourses } from '../../lib/studentCourseClient';
+import { loadMyCourses, loadMyCoursesProgress, type CourseQuizProgress } from '../../lib/studentCourseClient';
 import type { JoinableCourse } from '../../lib/courseTypes';
 import { useRequireRole } from '../../lib/useRequireRole';
 
@@ -20,11 +20,17 @@ import { useRequireRole } from '../../lib/useRequireRole';
  * Uses GET /api/courses/mine (lib/studentCourseClient.ts's loadMyCourses), not
  * loadJoinableCourses filtered by alreadyMember — see that route's own docblock for why a
  * codeless, instructor-assigned enrollment would otherwise go missing here.
+ *
+ * Each card's "Quiz progress" bar (GitHub #435) is a second, independent fetch —
+ * loadMyCoursesProgress (GET /api/courses/my-progress) — the same "two unrelated fetches, each
+ * setting its own state" shape app/instructor/page.tsx uses for courses + classStats, so a failed
+ * or slow progress fetch never blocks the course list itself from rendering.
  */
 export default function MyCoursesPage() {
   const { token, profile, loading, authorized } = useRequireRole('student');
 
   const [courses, setCourses] = useState<JoinableCourse[] | null>(null);
+  const [progressByCourseId, setProgressByCourseId] = useState<Record<string, CourseQuizProgress> | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
 
@@ -38,6 +44,11 @@ export default function MyCoursesPage() {
       if (cancelled) return;
       if (result.ok) setCourses(result.data.courses);
       else setLoadFailed(true);
+    });
+
+    loadMyCoursesProgress(token).then((result) => {
+      if (cancelled || !result.ok) return;
+      setProgressByCourseId(Object.fromEntries(result.data.progress.map((p) => [p.courseId, p])));
     });
 
     return () => {
@@ -79,7 +90,7 @@ export default function MyCoursesPage() {
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {courses.map((course) => (
-            <JoinedCourseCard key={course.id} course={course} />
+            <JoinedCourseCard key={course.id} course={course} quizProgress={progressByCourseId?.[course.id] ?? null} />
           ))}
         </div>
       )}

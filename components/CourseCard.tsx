@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { CourseSummary, CourseClassStats as CourseClassStatsData, CourseActivityStats } from '../lib/courseClient';
 import { resolveCourseCoverSrc } from '../lib/courseCovers';
 import { CourseCardMenu } from './CourseCardMenu';
+import { QuizProgressBar } from './QuizProgressBar';
 
 /**
  * One course, styled after a Moodle course card (GitHub #363): a cover image on top, a kebab
@@ -95,15 +96,7 @@ export function CourseCard({
             <div className="mt-1.5 h-1.5 w-full animate-pulse rounded-full bg-gray-100" />
           </div>
         ) : progressPercent !== null ? (
-          <div className="mt-3">
-            <div className="flex items-center justify-between text-xs font-bold text-gray-500">
-              <span>Quiz progress</span>
-              <span className="tabular-nums text-brand-navy">{progressPercent}%</span>
-            </div>
-            <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
-              <span className="block h-full rounded-full bg-brand-teal" style={{ width: `${progressPercent}%` }} />
-            </div>
-          </div>
+          <QuizProgressBar percent={progressPercent} />
         ) : null}
 
         <p className="mt-2.5 text-xs font-semibold text-gray-500">
