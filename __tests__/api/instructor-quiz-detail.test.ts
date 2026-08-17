@@ -122,9 +122,15 @@ describe('GET /api/instructor/quizzes/[activityType]', () => {
     expect(h.state.tables).not.toContain('question');
   });
 
-  it('returns the catalog metadata and every question in it, any author, ordered by level then order_number', async () => {
+  it('returns the catalog metadata and every question in it, any question author, ordered by level then order_number', async () => {
     queueRole('instructor');
-    queue('activity_type', { data: quizRow(), error: null });
+    queue('activity_type', {
+      data: quizRow({
+        creator_id: 'instructor-1',
+        creator: { first_name: 'Ada', last_name: 'Brockenbrough', username: 'abrock' },
+      }),
+      error: null,
+    });
     queue('question', {
       data: [
         questionRow(),
@@ -141,7 +147,7 @@ describe('GET /api/instructor/quizzes/[activityType]', () => {
       activityType: 'IDENTIFY_WEAK_USER_STORIES',
       name: 'Identify Weak User Stories',
       description: null,
-      authorName: 'Built-in',
+      authorName: 'Ada Brockenbrough',
       gradingKind: 'mcq',
     });
 
@@ -165,7 +171,7 @@ describe('GET /api/instructor/quizzes/[activityType]', () => {
     expect(h.state.filters).toContainEqual({ table: 'question', column: 'activity_type', value: 'IDENTIFY_WEAK_USER_STORIES' });
   });
 
-  it("reports the creating instructor's name instead of 'Built-in' when creator_id is set", async () => {
+  it('returns 403 with an empty body when the catalog was created by another instructor', async () => {
     queueRole('instructor');
     queue('activity_type', {
       data: quizRow({
@@ -176,12 +182,22 @@ describe('GET /api/instructor/quizzes/[activityType]', () => {
       }),
       error: null,
     });
-    queue('question', { data: [], error: null });
 
     const res = await req('MY_CUSTOM_QUIZ');
-    const body = await res.json();
-    expect(body.quiz.authorName).toBe('Ada Brockenbrough');
-    expect(body.questions).toEqual([]);
+    expect(res.status).toBe(403);
+    expect(await res.text()).toBe('');
+    expect(h.state.tables).not.toContain('question');
+  });
+
+  it('returns 403 with an empty body for a built-in catalog (creator_id is null)', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow(), error: null }); // default creator_id: null
+
+    const res = await req();
+    expect(res.status).toBe(403);
+    expect(await res.text()).toBe('');
+    expect(h.state.tables).not.toContain('question');
+    expect(h.state.tables).not.toContain('user_story');
   });
 
   it('returns 500 when the catalog lookup fails', async () => {
@@ -196,7 +212,7 @@ describe('GET /api/instructor/quizzes/[activityType]', () => {
 
   it('returns 500 when the question query fails', async () => {
     queueRole('instructor');
-    queue('activity_type', { data: quizRow(), error: null });
+    queue('activity_type', { data: quizRow({ creator_id: 'instructor-1' }), error: null });
     queue('question', { data: null, error: { message: 'question query failed' } });
 
     const res = await req();
@@ -216,6 +232,7 @@ describe('GET /api/instructor/quizzes/[activityType] — llm-graded catalogs', (
         activity_type: 'WRITE_ACCEPTANCE_CRITERIA',
         quiz_name: 'Write Acceptance Criteria',
         grading_kind: 'llm-graded',
+        creator_id: 'instructor-1',
       }),
       error: null,
     });
@@ -255,7 +272,7 @@ describe('GET /api/instructor/quizzes/[activityType] — llm-graded catalogs', (
 
   it('returns 500 when the prompt query fails', async () => {
     queueRole('instructor');
-    queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded' }), error: null });
+    queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'instructor-1' }), error: null });
     queue('user_story', { data: null, error: { message: 'DB down' } });
 
     const res = await req('WRITE_ACCEPTANCE_CRITERIA');

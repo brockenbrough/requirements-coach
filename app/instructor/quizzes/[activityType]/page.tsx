@@ -67,9 +67,10 @@ function shortLevels(prompts: CatalogUserStory[]): (1 | 2 | 3)[] {
 
 /**
  * GitHub #359: one question catalog's detail view — read-only by default (every question in the
- * catalog, any author, per GET /api/instructor/quizzes/{activityType}), an "Edit" toggle away
- * from add/edit/delete on the caller's own questions. Replaces the retired flat Question Bank
- * page; see CLAUDE.md for how this relates to the "quiz" plumbing from GitHub #347 it's built on.
+ * catalog, per GET /api/instructor/quizzes/{activityType}, which now 403s unless the caller
+ * created this catalog), an "Edit" toggle away from add/edit/delete on the caller's own questions.
+ * Replaces the retired flat Question Bank page; see CLAUDE.md for how this relates to the "quiz"
+ * plumbing from GitHub #347 it's built on.
  *
  * A question has exactly one activity_type column (no join table), so every mutation here is
  * naturally scoped to this catalog alone — there's no cross-catalog side effect to guard against.
@@ -81,6 +82,7 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
   const [questions, setQuestions] = useState<CatalogQuestion[] | null>(null);
   const [prompts, setPrompts] = useState<CatalogUserStory[] | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [forbidden, setForbidden] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
 
@@ -99,6 +101,7 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
 
     setLoadFailed(false);
     setNotFound(false);
+    setForbidden(false);
 
     loadQuizDetail(token, params.activityType).then((result) => {
       if (cancelled) return;
@@ -108,6 +111,8 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
         setPrompts(result.data.userStories);
       } else if (result.status === 404) {
         setNotFound(true);
+      } else if (result.status === 403) {
+        setForbidden(true);
       } else {
         setLoadFailed(true);
       }
@@ -240,6 +245,10 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
         {notFound ? (
           <p className="mt-6 rounded-brand-lg border border-brand-danger/40 bg-brand-danger/10 p-4 text-sm font-semibold text-brand-danger-light">
             This catalog doesn&apos;t exist.
+          </p>
+        ) : forbidden ? (
+          <p className="mt-6 rounded-brand-lg border border-brand-danger/40 bg-brand-danger/10 p-4 text-sm font-semibold text-brand-danger-light">
+            You don&apos;t have access to this catalog.
           </p>
         ) : loadFailed ? (
           <div className="mb-6 rounded-brand-lg border border-brand-danger/40 bg-brand-danger/10 p-6 text-center">

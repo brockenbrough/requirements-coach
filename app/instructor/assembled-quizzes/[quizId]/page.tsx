@@ -157,9 +157,9 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
 
   // GitHub #380 extension: catalog choices offered by the reused QuestionFormModal when creating
   // a brand-new question from this page — the quiz's own linked catalogs when it has any (so the
-  // instructor's most likely target is already selected), falling back to every catalog in the
-  // system when it has none (a question must always belong to a catalog, so this choice can never
-  // be skipped, only defaulted).
+  // instructor's most likely target is already selected), falling back to every catalog the
+  // instructor owns when it has none (a question must always belong to a catalog, so this choice
+  // can never be skipped, only defaulted).
   const catalogOptionsForCreate: { value: ActivityType; label: string }[] =
     catalogs && catalogs.length > 0
       ? catalogs.map((catalog) => ({ value: catalog.activityType as ActivityType, label: catalog.name }))

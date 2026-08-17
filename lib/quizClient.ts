@@ -50,7 +50,7 @@ async function request<T>(url: string, init: RequestInit, token: string): Promis
   return { ok: true, data: body as T };
 }
 
-/** Every quiz in the system, built-in or instructor-created (GET /api/instructor/quizzes). */
+/** Every catalog the calling instructor created (GET /api/instructor/quizzes). */
 export function loadQuizzes(token: string): Promise<ApiResult<{ quizzes: QuizSummary[] }>> {
   return request<{ quizzes: QuizSummary[] }>('/api/instructor/quizzes', { method: 'GET' }, token);
 }
@@ -89,9 +89,8 @@ export function createQuiz(
 
 /**
  * One catalog's metadata plus its contents (GET /api/instructor/quizzes/{activityType},
- * GitHub #359) — not cached, same reasoning as loadPublicStudentProfile: the data is shared across
- * authors, so a per-instructor client cache would only make it easier to show a colleague's stale
- * edit.
+ * GitHub #359) — not cached: the content changes any time the instructor edits it, so a client
+ * cache would only make it easier to show a stale edit right after saving one.
  *
  * GitHub #379: both pools always come back, one of them empty — read quiz.gradingKind to know
  * which one is the real content.
