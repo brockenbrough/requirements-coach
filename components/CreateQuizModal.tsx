@@ -61,7 +61,7 @@ export function CreateQuizModal({
     description: string | null;
     courseId: string;
     gradingKind: GradingKind;
-    catalogs: { activityType: string; name: string }[];
+    catalogs: { activityType: string; name: string; gradingKind: QuizSummary['gradingKind'] }[];
     catalogNames: string[];
   }) => void;
 }) {
@@ -121,9 +121,9 @@ export function CreateQuizModal({
     const resolvedCatalogs = selectedCatalogs
       .map((activityType) => {
         const found = catalogs.find((c) => c.activityType === activityType);
-        return found ? { activityType, name: found.name } : null;
+        return found ? { activityType, name: found.name, gradingKind: found.gradingKind } : null;
       })
-      .filter((c): c is { activityType: string; name: string } => c !== null);
+      .filter((c): c is { activityType: string; name: string; gradingKind: QuizSummary['gradingKind'] } => c !== null);
 
     onCreated({ ...result.data.quiz, catalogs: resolvedCatalogs, catalogNames: resolvedCatalogs.map((c) => c.name) });
     requestClose();

@@ -376,6 +376,104 @@ export async function computeAllOwnedCoursesClassStats(
   };
 }
 
+export type CourseQuizProgress = {
+  hasQuizzes: boolean;
+  totalQuizzes: number;
+  passedQuizzes: number;
+  progressPercent: number | null;
+};
+
+/**
+ * One student's own quiz-completion progress for one course (GitHub #435) — the individual
+ * counterpart to computeCourseClassStats above (which measures the whole roster's coverage, not
+ * any one student's). "Quizzes" is the same resolution: the distinct activity_types this course's
+ * assembled_quiz rows compose. "Passed" is session_log.passed = true for this student on one of
+ * those activity_types — the same "passed, not merely started" metric CourseCard.tsx's own comment
+ * already documents for the instructor-facing bar, kept identical so the two bars mean the same
+ * underlying thing, just scoped to a roster vs. to one student.
+ *
+ * progressPercent is null only when the course truly has nothing to divide by (hasQuizzes false,
+ * or a quiz exists with no catalog linked yet — 0 activity_types either way); once at least one
+ * activity_type is composed, an unattempted course is a real 0%, not null, the same
+ * real-0-vs-null distinction computeCourseClassStats draws for its own percent fields. Unlike that
+ * function there's no "0 enrolled" case to produce a null — the student calling this is enrolled
+ * by construction (their own course_id list is where the caller gets a courseId to pass in).
+ *
+ * Shares computeCourseClassStats' known limitation: session_log has no course_id, so the same
+ * catalog linked into two different courses counts one passing attempt toward both.
+ */
+export async function computeStudentCourseQuizProgress(
+  supabase: SupabaseClient,
+  courseId: string,
+  studentId: string,
+): Promise<{ progress: CourseQuizProgress | null; error: { message: string } | null }> {
+  const { data: quizzesData, error: quizzesError } = await supabase
+    .from('assembled_quiz')
+    .select('assembled_quiz_id, assembled_quiz_catalog(activity_type)')
+    .eq('course_id', courseId);
+
+  if (quizzesError) return { progress: null, error: quizzesError };
+
+  const quizzes = (quizzesData ?? []) as unknown as QuizWithCatalogRow[];
+  const activityTypes = [...new Set(quizzes.flatMap((q) => (q.assembled_quiz_catalog ?? []).map((c) => c.activity_type)))];
+  const hasQuizzes = quizzes.length > 0;
+
+  if (activityTypes.length === 0) {
+    return { progress: { hasQuizzes, totalQuizzes: 0, passedQuizzes: 0, progressPercent: hasQuizzes ? 0 : null }, error: null };
+  }
+
+  const { data: sessions, error: sessionsError } = await supabase
+    .from('session_log')
+    .select('activity_type')
+    .eq('user_id', studentId)
+    .eq('passed', true)
+    .in('activity_type', activityTypes);
+
+  if (sessionsError) return { progress: null, error: sessionsError };
+
+  const passedTypes = new Set(((sessions ?? []) as { activity_type: string }[]).map((r) => r.activity_type));
+  const passedQuizzes = activityTypes.filter((t) => passedTypes.has(t)).length;
+
+  return {
+    progress: {
+      hasQuizzes,
+      totalQuizzes: activityTypes.length,
+      passedQuizzes,
+      progressPercent: Math.round((passedQuizzes / activityTypes.length) * 100),
+    },
+    error: null,
+  };
+}
+
+/**
+ * computeStudentCourseQuizProgress for every course the student is enrolled in, in one call — the
+ * student-facing counterpart to computeAllOwnedCoursesClassStats, same reasoning: the "My Courses"
+ * page renders one card per enrolled course and shouldn't issue one request per card. Same
+ * per-course Promise.all shape (and the same O(3·C)-round-trips tradeoff) as that function, not a
+ * hand-merged broad query.
+ */
+export async function computeMyCoursesQuizProgress(
+  supabase: SupabaseClient,
+  studentId: string,
+): Promise<{ progress: (CourseQuizProgress & { courseId: string })[] | null; error: { message: string } | null }> {
+  const { data, error } = await supabase.from('student_course').select('course_id').eq('user_id', studentId);
+  if (error) return { progress: null, error };
+
+  const courseIds = ((data ?? []) as { course_id: string }[]).map((r) => r.course_id);
+
+  const results = await Promise.all(
+    courseIds.map(async (courseId) => {
+      const { progress, error: progressError } = await computeStudentCourseQuizProgress(supabase, courseId, studentId);
+      return { courseId, progress, error: progressError };
+    }),
+  );
+
+  const failed = results.find((r) => r.error || !r.progress);
+  if (failed) return { progress: null, error: failed.error ?? { message: 'Could not compute quiz progress.' } };
+
+  return { progress: results.map((r) => ({ courseId: r.courseId, ...r.progress! })), error: null };
+}
+
 /**
  * Unenrolls a student. Idempotent by design: deleting a link that doesn't exist is still a
  * success (error stays null either way) — the end state ("not enrolled") is identical, and the

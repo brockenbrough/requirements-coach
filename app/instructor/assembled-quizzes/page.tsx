@@ -8,6 +8,7 @@ import { loadAssembledQuizzes, type AssembledQuizSummary } from '../../../lib/as
 import { loadCourses, type CourseSummary } from '../../../lib/courseClient';
 import { loadQuizzes, type QuizSummary } from '../../../lib/quizClient';
 import { useRequireRole } from '../../../lib/useRequireRole';
+import type { GradingKind } from '../../../lib/activityTypes';
 
 const TOAST_MS = 3200;
 
@@ -68,7 +69,7 @@ export default function InstructorAssembledQuizzesPage() {
     description: string | null;
     courseId: string;
     gradingKind: AssembledQuizSummary['gradingKind'];
-    catalogs: { activityType: string; name: string }[];
+    catalogs: { activityType: string; name: string; gradingKind: GradingKind }[];
     catalogNames: string[];
   }) {
     const course = (courses ?? []).find((c) => c.id === quiz.courseId);

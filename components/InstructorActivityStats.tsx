@@ -1,6 +1,5 @@
 import type { OwnedActivityTypeSummary } from '../lib/activityTypeQueries';
 import type { StudentActivitySummary } from '../lib/activityLogTypes';
-import type { CourseActivityStats } from '../lib/courseClient';
 
 /**
  * Class-wide average score and pass rate per activity type — the baseline an instructor reads
@@ -20,61 +19,22 @@ import type { CourseActivityStats } from '../lib/courseClient';
  * choose 'llm-graded' at creation, so this branch is reachable in practice, not just kept for
  * later — acParticipation is computeLlmActivityStatistics' own studentsAttempted/roster-size pair
  * (lib/llmActivityStatisticsQueries.ts), scoped the same way the cards themselves are.
+ *
+ * This used to also have a course-scoped mode (one card per quiz assigned to a course, shown
+ * below the "My Courses" grid when a card was selected) — GitHub #423 moved that inline into
+ * components/CourseCard.tsx itself, since a page-level block headed only by quiz name had no
+ * visual tie back to the course card it described. This component now only ever renders the
+ * class-wide, all-owned-catalogs view.
  */
 export function InstructorActivityStats({
   entries,
   ownedActivityTypes,
   acParticipation,
-  courseStats,
 }: {
   entries: StudentActivitySummary[];
   ownedActivityTypes: OwnedActivityTypeSummary[];
   acParticipation: { attempted: number; total: number } | null;
-  courseStats?: CourseActivityStats[] | null;
 }) {
-  // Course-scoped mode: only show catalogs assigned to this course (via assembled_quiz)
-  if (courseStats !== undefined && courseStats !== null) {
-    if (courseStats.length === 0) {
-      return (
-        <div className="mb-6 rounded-brand-lg border border-gray-100 bg-gray-50 p-5 text-sm font-semibold text-gray-400">
-          No quizzes assigned to this course yet.
-        </div>
-      );
-    }
-    return (
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {courseStats.map((stat) => {
-          return (
-            <div key={stat.quizId} className="rounded-brand-lg border border-gray-100 bg-gray-50 p-5">
-              <p className="text-sm font-extrabold text-brand-navy">{stat.quizName}</p>
-              <div className="mt-3 flex gap-8">
-                <div>
-                  <div className="text-xl font-extrabold tabular-nums text-brand-navy">
-                    {stat.classAverage > 0 ? `${stat.classAverage}%` : '—'}
-                  </div>
-                  <div className="mt-0.5 text-xs font-bold uppercase tracking-wide text-gray-400">Class average</div>
-                </div>
-                <div>
-                  <div className="text-xl font-extrabold tabular-nums text-brand-teal-dark">
-                    {stat.passRate > 0 ? `${stat.passRate}%` : '—'}
-                  </div>
-                  <div className="mt-0.5 text-xs font-bold uppercase tracking-wide text-gray-400">Pass rate</div>
-                </div>
-                <div>
-                  <div className="text-xl font-extrabold tabular-nums text-brand-navy">
-                    {stat.completionCount} / {stat.enrolledCount}
-                  </div>
-                  <div className="mt-0.5 text-xs font-bold uppercase tracking-wide text-gray-400">Attempted</div>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
-  // Class-wide mode: show instructor's own catalogs
   return (
     <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
       {ownedActivityTypes.map((activity) => {

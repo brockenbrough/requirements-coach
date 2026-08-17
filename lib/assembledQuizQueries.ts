@@ -30,7 +30,7 @@ export type AssembledQuizSummary = {
   courseName: string;
   /** GitHub: the single catalog kind this quiz may ever compose/hand-pick from — see assembled_quiz.grading_kind's own comment in supabase/schema.sql. */
   gradingKind: GradingKind;
-  catalogs: { activityType: string; name: string }[];
+  catalogs: { activityType: string; name: string; gradingKind: GradingKind }[];
   catalogNames: string[];
   createdAt: string;
 };
@@ -43,16 +43,17 @@ type AssembledQuizRow = {
   grading_kind: string;
   created_at: string;
   course: { course_name: string } | null;
-  assembled_quiz_catalog: { activity_type: string; catalog: { quiz_name: string } | null }[] | null;
+  assembled_quiz_catalog: { activity_type: string; catalog: { quiz_name: string; grading_kind: string } | null }[] | null;
 };
 
 const ASSEMBLED_QUIZ_SUMMARY_SELECT =
-  'assembled_quiz_id, quiz_name, description, course_id, grading_kind, created_at, course:course_id(course_name), assembled_quiz_catalog(activity_type, catalog:activity_type(quiz_name))';
+  'assembled_quiz_id, quiz_name, description, course_id, grading_kind, created_at, course:course_id(course_name), assembled_quiz_catalog(activity_type, catalog:activity_type(quiz_name, grading_kind))';
 
 function mapAssembledQuizRow(row: AssembledQuizRow): AssembledQuizSummary {
   const catalogs = (row.assembled_quiz_catalog ?? []).map((link) => ({
     activityType: link.activity_type,
     name: link.catalog?.quiz_name ?? 'Unknown catalog',
+    gradingKind: (link.catalog?.grading_kind === 'llm-graded' ? 'llm-graded' : 'mcq') as GradingKind,
   }));
   return {
     id: row.assembled_quiz_id,

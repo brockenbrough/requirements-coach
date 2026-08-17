@@ -65,11 +65,17 @@ export default function BrowseCoursesPage() {
   if (!token || !profile) return null;
 
   function handleJoined(courseId: string) {
-    setCourses((current) => current?.map((c) => (c.id === courseId ? { ...c, alreadyMember: true } : c)) ?? current);
+    setCourses(
+      (current) =>
+        current?.map((c) => (c.id === courseId ? { ...c, alreadyMember: true, studentCount: c.studentCount + 1 } : c)) ?? current,
+    );
   }
 
   function handleLeft(courseId: string) {
-    setCourses((current) => current?.map((c) => (c.id === courseId ? { ...c, alreadyMember: false } : c)) ?? current);
+    setCourses(
+      (current) =>
+        current?.map((c) => (c.id === courseId ? { ...c, alreadyMember: false, studentCount: c.studentCount - 1 } : c)) ?? current,
+    );
   }
 
   return (

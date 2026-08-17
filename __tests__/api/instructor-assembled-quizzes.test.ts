@@ -161,8 +161,8 @@ describe('GET /api/instructor/assembled-quizzes', () => {
           created_at: '2026-08-14T10:00:00',
           course: { course_name: 'Software Requirements' },
           assembled_quiz_catalog: [
-            { activity_type: 'IDENTIFY_WEAK_USER_STORIES', catalog: { quiz_name: 'Identify Weak User Stories' } },
-            { activity_type: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', catalog: { quiz_name: 'Identify Weak Acceptance Criteria' } },
+            { activity_type: 'IDENTIFY_WEAK_USER_STORIES', catalog: { quiz_name: 'Identify Weak User Stories', grading_kind: 'mcq' } },
+            { activity_type: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', catalog: { quiz_name: 'Identify Weak Acceptance Criteria', grading_kind: 'mcq' } },
           ],
         },
       ],
@@ -182,8 +182,8 @@ describe('GET /api/instructor/assembled-quizzes', () => {
         courseName: 'Software Requirements',
         gradingKind: 'mcq',
         catalogs: [
-          { activityType: 'IDENTIFY_WEAK_USER_STORIES', name: 'Identify Weak User Stories' },
-          { activityType: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', name: 'Identify Weak Acceptance Criteria' },
+          { activityType: 'IDENTIFY_WEAK_USER_STORIES', name: 'Identify Weak User Stories', gradingKind: 'mcq' },
+          { activityType: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', name: 'Identify Weak Acceptance Criteria', gradingKind: 'mcq' },
         ],
         catalogNames: ['Identify Weak User Stories', 'Identify Weak Acceptance Criteria'],
         createdAt: '2026-08-14T10:00:00',

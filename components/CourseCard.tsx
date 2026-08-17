@@ -1,7 +1,8 @@
 import Link from 'next/link';
-import type { CourseSummary, CourseClassStats as CourseClassStatsData } from '../lib/courseClient';
+import type { CourseSummary, CourseClassStats as CourseClassStatsData, CourseActivityStats } from '../lib/courseClient';
 import { resolveCourseCoverSrc } from '../lib/courseCovers';
 import { CourseCardMenu } from './CourseCardMenu';
+import { QuizProgressBar } from './QuizProgressBar';
 
 /**
  * One course, styled after a Moodle course card (GitHub #363): a cover image on top, a kebab
@@ -24,14 +25,17 @@ import { CourseCardMenu } from './CourseCardMenu';
  * - No onSelect (app/instructor/courses/page.tsx): a plain Link straight to the course detail
  *   page, like Moodle's own card.
  * - onSelect (the instructor dashboard's "My Courses"): the area becomes a toggle button instead
- *   — clicking it shows/hides that course's quiz-stats table inline on the same page, a
- *   pre-existing dashboard behavior this restyle preserves rather than removes. The kebab menu's
- *   own "View course" item still provides real navigation in this mode, since the card itself no
- *   longer does.
+ *   — clicking it expands/collapses this course's per-quiz Class Average / Pass Rate / Attempted
+ *   stats inline, inside the card itself (GitHub #423; these used to render in a separate
+ *   InstructorActivityStats block below the whole card grid, one course's worth of numbers
+ *   headed only by quiz name with no visual tie back to its card — moving them into the card they
+ *   describe is the entire fix). The kebab menu's own "View course" item still provides real
+ *   navigation in this mode, since the card itself no longer does.
  */
 export function CourseCard({
   course,
   classStats,
+  activityStats,
   onDuplicate,
   onEdit,
   onDelete,
@@ -40,6 +44,13 @@ export function CourseCard({
 }: {
   course: CourseSummary;
   classStats?: CourseClassStatsData | null;
+  /**
+   * Per-quiz Class Average / Pass Rate / Attempted for this course, GitHub #423. `undefined`
+   * renders nothing (matches classStats' convention above) — the caller passes this only for the
+   * currently-selected card, since the data is fetched on demand per course, not batched for the
+   * whole grid the way classStats is. `null` is "fetch in flight," `[]` is "no quizzes assigned."
+   */
+  activityStats?: CourseActivityStats[] | null;
   onDuplicate?: (course: CourseSummary) => void;
   onEdit?: (course: CourseSummary) => void;
   onDelete?: (course: CourseSummary) => void;
@@ -85,20 +96,50 @@ export function CourseCard({
             <div className="mt-1.5 h-1.5 w-full animate-pulse rounded-full bg-gray-100" />
           </div>
         ) : progressPercent !== null ? (
-          <div className="mt-3">
-            <div className="flex items-center justify-between text-xs font-bold text-gray-500">
-              <span>Quiz progress</span>
-              <span className="tabular-nums text-brand-navy">{progressPercent}%</span>
-            </div>
-            <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
-              <span className="block h-full rounded-full bg-brand-teal" style={{ width: `${progressPercent}%` }} />
-            </div>
-          </div>
+          <QuizProgressBar percent={progressPercent} />
         ) : null}
 
         <p className="mt-2.5 text-xs font-semibold text-gray-500">
           {course.studentCount} student{course.studentCount === 1 ? '' : 's'}
         </p>
+
+        {activityStats !== undefined ? (
+          <div className="mt-3 border-t border-gray-100 pt-3">
+            {activityStats === null ? (
+              <div className="h-12 animate-pulse rounded-brand-lg bg-gray-100" aria-hidden="true" />
+            ) : activityStats.length === 0 ? (
+              <p className="text-xs font-semibold text-gray-400">No quizzes assigned to this course yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {activityStats.map((stat) => (
+                  <div key={stat.quizId} className="rounded-brand-lg border border-gray-100 bg-gray-50 p-3">
+                    <p className="line-clamp-1 text-xs font-extrabold text-brand-navy">{stat.quizName}</p>
+                    <div className="mt-1.5 flex gap-4">
+                      <div>
+                        <div className="text-sm font-extrabold tabular-nums text-brand-navy">
+                          {stat.classAverage > 0 ? `${stat.classAverage}%` : '—'}
+                        </div>
+                        <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Class avg</div>
+                      </div>
+                      <div>
+                        <div className="text-sm font-extrabold tabular-nums text-brand-teal-dark">
+                          {stat.passRate > 0 ? `${stat.passRate}%` : '—'}
+                        </div>
+                        <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Pass rate</div>
+                      </div>
+                      <div>
+                        <div className="text-sm font-extrabold tabular-nums text-brand-navy">
+                          {stat.completionCount} / {stat.enrolledCount}
+                        </div>
+                        <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Attempted</div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : null}
       </div>
     </>
   );

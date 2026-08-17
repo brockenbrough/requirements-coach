@@ -1,6 +1,6 @@
 import { getSupabaseClient } from '../../../../../../lib/supabase';
 import { SESSION_COLUMNS } from '../../../../../../lib/sessionRules';
-import { SESSION_MAX_SCORE, STORIES_PER_SESSION } from '../../../../../../lib/llmActivityRules';
+import { STORIES_PER_SESSION, sessionMaxScoreForDifficulty } from '../../../../../../lib/llmActivityRules';
 import { loadSessionStories, loadUserStoryPool } from '../../../../../../lib/llmActivityQueries';
 import { findInProgressSession, findStartDifficultyLevel } from '../../../../../../lib/sessionQueries';
 import { getAccessibleCourseForActivity } from '../../../../../../lib/activityCourseQueries';
@@ -141,7 +141,7 @@ export async function POST(request: Request, { params }: { params: { activityTyp
       difficulty_level: startLevel,
       status: 'in-progress',
       cumulative_score: 0,
-      max_score: SESSION_MAX_SCORE,
+      max_score: sessionMaxScoreForDifficulty(startLevel as 1 | 2 | 3),
       passed: false,
     })
     .select(SESSION_COLUMNS)

@@ -21,7 +21,7 @@ export type AssembledQuizSummary = {
   courseName: string;
   /** The single catalog kind this quiz may ever compose/hand-pick from — locked at creation. */
   gradingKind: GradingKind;
-  catalogs: { activityType: string; name: string }[];
+  catalogs: { activityType: string; name: string; gradingKind: GradingKind }[];
   catalogNames: string[];
   createdAt: string;
 };
