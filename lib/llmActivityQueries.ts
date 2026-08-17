@@ -1,7 +1,14 @@
-// Queries for the Write Acceptance Criteria activity's real backend session, mirroring
-// lib/sessionQueries.ts's role for Type A. Built on session_log + session_to_user_story +
-// submission.session_id (supabase/schema.sql's own documented direction for this activity) —
-// not the abandoned ac_session/ac_session_story tables, which never existed in the schema.
+// Queries for an LLM-graded activity's real backend session, mirroring lib/sessionQueries.ts's
+// role for the MCQ flow. Built on session_log + session_to_user_story + submission.session_id
+// (supabase/schema.sql's own documented direction for this activity) — not the abandoned
+// ac_session/ac_session_story tables, which never existed in the schema.
+//
+// GitHub #379 renamed this file from acceptanceCriteria* to llmActivity*: nothing here was ever
+// specific to acceptance criteria, and it is about to serve every instructor-created LLM-graded
+// activity, not just the one seeded example. lib/acceptanceCriteriaSubmissionsStore.ts and the
+// /api/instructor/acceptance-criteria/* route paths deliberately keep their old names — those are
+// instructor-dashboard surfaces this issue does not restructure, and renaming a route path is a
+// separate, riskier change.
 
 import {
   findInProgressSession,
@@ -9,7 +16,7 @@ import {
   type SessionPosition,
   type SupabaseClient,
 } from './sessionQueries';
-import type { UserStoryPrompt } from './acceptanceCriteriaTypes';
+import type { UserStoryPrompt } from './llmActivityTypes';
 
 export type SessionStorySlot = { position: number } & UserStoryPrompt;
 
@@ -106,8 +113,29 @@ export function nextUnansweredStoryPosition(
   return nextUnansweredPosition(positions, submittedUserStoryIds);
 }
 
-/** The student's running Write Acceptance Criteria session, or null — thin wrapper so callers
- * don't repeat the activity_type literal. */
-export function findInProgressAcSession(supabase: SupabaseClient, userId: string) {
-  return findInProgressSession(supabase, userId, 'WRITE_ACCEPTANCE_CRITERIA');
+/**
+ * The prompts an LLM-graded session may draw from: one activity_type, one difficulty level.
+ *
+ * GitHub #379 made this level-scoped. Before it, the draw ignored user_story.difficulty_level
+ * entirely and picked from the whole table — the column existed, was CHECK-constrained and
+ * indexed, and was read by nothing. An LLM-graded activity now progresses through levels exactly
+ * the way an MCQ one does, so the pool that matters is the per-level one.
+ *
+ * Deliberately a plain .eq on activity_type rather than the !inner join against activity_type
+ * that the MCQ draw uses: that join predates fk_user_story_activity_type and exists to enforce a
+ * relationship the foreign key now enforces at the database.
+ */
+export async function loadUserStoryPool(
+  supabase: SupabaseClient,
+  activityType: string,
+  difficultyLevel: number,
+): Promise<{ pool: { user_story_id: string }[] | null; error: { message: string } | null }> {
+  const { data, error } = await supabase
+    .from('user_story')
+    .select('user_story_id')
+    .eq('activity_type', activityType)
+    .eq('difficulty_level', difficultyLevel);
+
+  if (error) return { pool: null, error };
+  return { pool: (data ?? []) as { user_story_id: string }[], error: null };
 }

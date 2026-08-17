@@ -1,8 +1,28 @@
 'use client';
 
 import { useState } from 'react';
-import { createQuiz } from '../lib/quizClient';
+import { createQuiz, type CreatedQuiz } from '../lib/quizClient';
+import type { GradingKind } from '../lib/activityTypes';
 import { useModalDismiss } from './useModalDismiss';
+
+/**
+ * GitHub #379: the two kinds of catalog an instructor can create. Rendered as radio cards rather
+ * than a <select> on purpose — this is a two-way choice that decides what the catalog can ever
+ * hold and cannot be changed afterwards, so the trade-off belongs on screen rather than collapsed
+ * behind a dropdown.
+ */
+const KIND_OPTIONS: { value: GradingKind; label: string; hint: string }[] = [
+  {
+    value: 'mcq',
+    label: 'Multiple-Choice Quiz',
+    hint: 'Students pick one of four answers. Scored automatically.',
+  },
+  {
+    value: 'llm-graded',
+    label: 'LLM-Graded Task',
+    hint: 'Students write a free-text answer to a prompt. Scored 1-10 by your configured AI provider.',
+  },
+];
 
 /**
  * The popup that creates a question catalog (GitHub #359 follow-up), replacing the permanently
@@ -26,10 +46,13 @@ export function CreateCatalogModal({
 }: {
   token: string;
   onClose: () => void;
-  onCreated: (quiz: { activityType: string; name: string; description: string | null }) => void;
+  onCreated: (quiz: CreatedQuiz) => void;
 }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  // Starts null with no pre-selection: "creation cannot proceed without this choice" only holds
+  // if there is no kind the instructor can accept by simply not looking at the field.
+  const [gradingKind, setGradingKind] = useState<GradingKind | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -38,7 +61,7 @@ export function CreateCatalogModal({
     isBlocked: submitting,
   });
 
-  const canSubmit = Boolean(name.trim()) && !submitting;
+  const canSubmit = Boolean(name.trim()) && gradingKind !== null && !submitting;
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -49,6 +72,7 @@ export function CreateCatalogModal({
 
     const result = await createQuiz(token, {
       name: name.trim(),
+      gradingKind: gradingKind!,
       description: description.trim() || undefined,
     });
 
@@ -123,6 +147,40 @@ export function CreateCatalogModal({
               className="mt-1.5 block w-full resize-none rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none transition focus:border-brand-purple"
             />
           </label>
+
+          <fieldset className="mt-4">
+            <legend className="mb-1.5 text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted">
+              Activity type
+            </legend>
+            <div className="grid gap-2">
+              {KIND_OPTIONS.map((option) => (
+                <label
+                  key={option.value}
+                  className={`flex cursor-pointer gap-3 rounded-brand-md border px-3.5 py-3 transition ${
+                    gradingKind === option.value
+                      ? 'border-brand-purple bg-brand-purple/10'
+                      : 'border-brand-navy-border bg-brand-navy-2 hover:border-brand-purple/50'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="gradingKind"
+                    value={option.value}
+                    checked={gradingKind === option.value}
+                    onChange={() => setGradingKind(option.value)}
+                    className="mt-0.5 h-4 w-4 flex-none accent-brand-purple"
+                  />
+                  <span className="block">
+                    <span className="block text-sm font-extrabold text-brand-ink">{option.label}</span>
+                    <span className="mt-0.5 block text-xs font-semibold text-brand-ink-muted">{option.hint}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            <p className="mt-1.5 text-xs font-semibold text-brand-ink-muted/70">
+              This cannot be changed after the catalog is created.
+            </p>
+          </fieldset>
 
           {error ? <p className="mt-3 text-xs font-bold text-brand-danger">{error}</p> : null}
 

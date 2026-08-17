@@ -53,15 +53,17 @@ function queueRole(role: string) {
   queue('user', { data: { role }, error: null });
 }
 
-/** An activity_type row as GET's creator + question(count) + assembled_quiz_catalog(count) embed actually returns it. */
+/** An activity_type row as GET's creator + question/user_story(count) + assembled_quiz_catalog(count) embed actually returns it. */
 function quizRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     activity_type: 'IDENTIFY_WEAK_USER_STORIES',
     quiz_name: 'Identify Weak User Stories',
     description: null,
+    grading_kind: 'mcq',
     creator_id: null,
     creator: null,
     question: [{ count: 36 }],
+    user_story: [{ count: 0 }],
     assembled_quiz_catalog: [{ count: 0 }],
     ...overrides,
   };
@@ -117,6 +119,7 @@ describe('GET /api/instructor/quizzes', () => {
         name: 'Identify Weak User Stories',
         description: null,
         authorName: 'Built-in',
+        gradingKind: 'mcq',
         questionCount: 36,
         quizCount: 0,
       },
@@ -161,6 +164,7 @@ describe('GET /api/instructor/quizzes', () => {
         name: 'My Custom Quiz',
         description: 'A quiz about things',
         authorName: 'Ada Brockenbrough',
+        gradingKind: 'mcq',
         questionCount: 0,
         quizCount: 0,
       },
@@ -203,6 +207,29 @@ describe('GET /api/instructor/quizzes', () => {
     const res = await GET(req());
     const body = await res.json();
     expect(body.quizzes[0].questionCount).toBe(0);
+  });
+
+  // questionCount is one field for both pools: an llm-graded catalog counts its prompts, and its
+  // (always empty) question embed must not win.
+  it('counts user_story rows instead of questions for an llm-graded catalog', async () => {
+    queueRole('instructor');
+    queue('activity_type', {
+      data: [
+        quizRow({
+          activity_type: 'WRITE_ACCEPTANCE_CRITERIA',
+          quiz_name: 'Write Acceptance Criteria',
+          grading_kind: 'llm-graded',
+          question: [{ count: 0 }],
+          user_story: [{ count: 24 }],
+        }),
+      ],
+      error: null,
+    });
+
+    const res = await GET(req());
+    const body = await res.json();
+
+    expect(body.quizzes[0]).toMatchObject({ gradingKind: 'llm-graded', questionCount: 24 });
   });
 
   it('orders by quiz_name ascending', async () => {

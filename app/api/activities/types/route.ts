@@ -1,6 +1,6 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { requireInstructor } from '../../../../lib/instructorAuth';
-import { slugifyQuizName } from '../../../../lib/activityTypes';
+import { isGradingKind, slugifyQuizName } from '../../../../lib/activityTypes';
 
 // Matches activity_type.activity_type varchar(50) in supabase/schema.sql.
 const MAX_KEY_LENGTH = 50;
@@ -21,10 +21,19 @@ function getToken(request: Request): string | null {
  * references it — see lib/activityCourseQueries.ts's checkActivityAccess for the derived access
  * check this now backs.
  *
- * Body: { name: string, description?: string }. The stored key (activity_type) is *derived* from
- * name via slugifyQuizName — upper-cased, non-alphanumeric runs collapsed to one underscore, the
- * same format the three built-in keys already have — never client-supplied directly, so an
- * instructor names their catalog the same way they'd name anything else in the app.
+ * Body: { name: string, gradingKind: 'mcq' | 'llm-graded', description?: string }.
+ *
+ * GitHub #379: gradingKind decides which pool the new activity draws from — question/answer rows
+ * for 'mcq', free-text user_story prompts graded by the instructor's configured LLM provider for
+ * 'llm-graded'. It is required with no default even though the column has one: enforcing the
+ * choice only in the create modal would let the route quietly fall back to 'mcq' for any other
+ * caller, and the kind is not editable afterwards, so a silent default is a wrong catalog rather
+ * than a fixable one.
+ *
+ * The stored key (activity_type) is *derived* from name via slugifyQuizName — upper-cased,
+ * non-alphanumeric runs collapsed to one underscore, the same format the three built-in keys
+ * already have — never client-supplied directly, so an instructor names their catalog the same
+ * way they'd name anything else in the app.
  *
  * The key must be unique. A collision is reported as 409, not silently resolved with a suffix —
  * the instructor picks a different name themselves, same as a duplicate username or course code
@@ -32,7 +41,7 @@ function getToken(request: Request): string | null {
  *
  * creator_id comes from the authenticated instructor (guard.user_id), never the request body.
  *
- * Returns: { quiz: { activityType, name, description } }
+ * Returns: { quiz: { activityType, name, description, gradingKind } }
  */
 export async function POST(request: Request) {
   const supabase = getSupabaseClient();
@@ -52,10 +61,18 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Invalid JSON body.' }, { status: 400 });
   }
 
-  const { name, description } = (body ?? {}) as { name?: unknown; description?: unknown };
+  const { name, description, gradingKind } = (body ?? {}) as {
+    name?: unknown;
+    description?: unknown;
+    gradingKind?: unknown;
+  };
 
   if (typeof name !== 'string' || name.trim() === '') {
     return Response.json({ error: 'name is required.' }, { status: 400 });
+  }
+
+  if (!isGradingKind(gradingKind)) {
+    return Response.json({ error: 'gradingKind must be "mcq" or "llm-graded".' }, { status: 400 });
   }
 
   if (description !== undefined && description !== null && typeof description !== 'string') {
@@ -82,9 +99,10 @@ export async function POST(request: Request) {
       activity_type: key,
       quiz_name: name.trim(),
       description: trimmedDescription,
+      grading_kind: gradingKind,
       creator_id: guard.user_id,
     })
-    .select('activity_type, quiz_name, description')
+    .select('activity_type, quiz_name, description, grading_kind')
     .maybeSingle();
 
   if (error) {
@@ -94,10 +112,17 @@ export async function POST(request: Request) {
     return Response.json({ error: error.message }, { status: 500 });
   }
 
-  const row = data as { activity_type: string; quiz_name: string; description: string | null };
+  const row = data as { activity_type: string; quiz_name: string; description: string | null; grading_kind: string };
 
   return Response.json(
-    { quiz: { activityType: row.activity_type, name: row.quiz_name, description: row.description } },
+    {
+      quiz: {
+        activityType: row.activity_type,
+        name: row.quiz_name,
+        description: row.description,
+        gradingKind: row.grading_kind,
+      },
+    },
     { status: 201 },
   );
 }

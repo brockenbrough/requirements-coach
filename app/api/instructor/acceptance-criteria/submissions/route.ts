@@ -27,10 +27,12 @@ function studentDisplayName(student: SubmissionRow['student']): string {
 /**
  * GET /api/instructor/acceptance-criteria/submissions — AC submissions on the llm-graded activity
  * types this instructor created, optionally filtered to one student via ?studentId= (GitHub
- * #154). Scoped the same way computeAcceptanceCriteriaStatistics is: listOwnedActivityTypes(...,
- * 'llm-graded') first, short-circuiting to an empty list when the instructor owns none — see that
- * function's docstring (lib/acceptanceCriteriaStatisticsQueries.ts) for why this reads empty for
- * every instructor today (WRITE_ACCEPTANCE_CRITERIA is a built-in, creator_id IS NULL).
+ * #154). Scoped the same way GET .../acceptance-criteria/statistics resolves its default scope:
+ * listOwnedActivityTypes(..., 'llm-graded') first, short-circuiting to an empty list when the
+ * instructor owns none. WRITE_ACCEPTANCE_CRITERIA is a built-in (creator_id IS NULL) and never
+ * counts as owned; since GitHub #379 an instructor can create their own llm-graded catalog via
+ * CreateCatalogModal, so this is empty only for an instructor who genuinely has none yet, not for
+ * everyone by construction.
  *
  * Gated by requireInstructor; uses the service-role client to bypass RLS. The own_submissions_select
  * policy restricts students to their own rows, so a student cannot reach this route at all — but
@@ -90,6 +92,7 @@ export async function GET(request: Request) {
       studentId: r.student.user_id,
       studentName: studentDisplayName(r.student),
       userStoryDescription: r.story.story_text,
+      activityType: r.story.activity_type,
       difficultyLevel: r.story.difficulty_level,
       submittedText: r.submitted_text,
       llmScore: r.llm_score,

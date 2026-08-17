@@ -18,10 +18,10 @@ import { InstructorRoster } from '../../components/InstructorRoster';
 import { Pagination } from '../../components/Pagination';
 import { QuizAttemptDetails } from '../../components/QuizAttemptDetails';
 import {
-  loadAcceptanceCriteriaStatistics,
+  loadLlmActivityStatistics,
   loadInstructorACSubmissions,
-  type AcceptanceCriteriaStatistics,
-} from '../../lib/acceptanceCriteriaClient';
+  type LlmActivityStatistics,
+} from '../../lib/llmActivityClient';
 import { summarizeStudents, toAcSubmissionRow, toQuizAttemptRow, type ActivityRow } from '../../lib/activityLogTypes';
 import {
   loadInstructorActivities,
@@ -52,7 +52,7 @@ function InstructorDashboardContent() {
   const [entries, setEntries] = useState<ActivityRow[] | null>(null);
   const [ownedActivityTypes, setOwnedActivityTypes] = useState<OwnedActivityTypeSummary[]>([]);
   const [allStudents, setAllStudents] = useState<StudentSummary[] | null>(null);
-  const [acStatistics, setAcStatistics] = useState<AcceptanceCriteriaStatistics | null>(null);
+  const [acStatistics, setAcStatistics] = useState<LlmActivityStatistics | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -80,7 +80,7 @@ function InstructorDashboardContent() {
     Promise.all([
       loadInstructorActivities(token, profile.user_id),
       loadInstructorACSubmissions(token),
-      loadAcceptanceCriteriaStatistics(token),
+      loadLlmActivityStatistics(token),
     ]).then(([activitiesResult, submissionsResult, statisticsResult]) => {
       if (cancelled) return;
       if (!activitiesResult.ok) {
@@ -112,7 +112,7 @@ function InstructorDashboardContent() {
     Promise.all([
       loadInstructorActivities(token, profile.user_id, { forceRefresh: true }),
       loadInstructorACSubmissions(token),
-      loadAcceptanceCriteriaStatistics(token),
+      loadLlmActivityStatistics(token),
     ]).then(([activitiesResult, submissionsResult, statisticsResult]) => {
       setRefreshing(false);
       if (!activitiesResult.ok) {

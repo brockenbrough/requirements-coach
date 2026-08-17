@@ -1,6 +1,7 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { requireInstructor } from '../../../../lib/instructorAuth';
-import type { InstructorUserStoryEntry } from '../../../../lib/acceptanceCriteriaTypes';
+import { validateUserStoryInput } from '../../../../lib/userStoryInput';
+import type { InstructorUserStoryEntry } from '../../../../lib/llmActivityTypes';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -56,4 +57,77 @@ export async function GET(request: Request) {
   }));
 
   return Response.json({ stories }, { status: 200 });
+}
+
+/**
+ * POST /api/instructor/user-stories — adds a prompt to an LLM-graded catalog (GitHub #379), the
+ * counterpart to POST /api/instructor/questions for the other half of the activity_type table.
+ * Until this existed, user_story rows could only arrive through supabase/seed.sql, which is why an
+ * instructor-created LLM-graded activity had no way to be given any content.
+ *
+ * Body: { storyText, activityType, difficultyLevel }
+ * - activityType must be an existing key whose grading_kind is 'llm-graded'. A prompt on an MCQ
+ *   catalog would be invisible to every code path (the MCQ draw reads `question`), so it is
+ *   refused rather than silently stored — the invariant schema.sql notes Postgres can't express,
+ *   enforced here instead.
+ * - difficultyLevel is required and is a real pool selector, not decoration: the LLM session draw
+ *   filters user_story by it exactly the way the MCQ draw filters question.
+ * - creator_id is taken from the authenticated instructor, never the body. It also decides which
+ *   instructor_llm_config grades submissions against this prompt, which is why the seeded
+ *   (creator_id NULL) set is ungradable.
+ *
+ * Two deliberate differences from the questions route, both because user_story is a leaf table:
+ * there is no order_number to auto-assign (the column doesn't exist — prompts are ordered by level
+ * then text), and there is no rollbackAndFail, because a prompt has no answer/question_to_answer
+ * children that a partial write could orphan. One insert, one outcome.
+ *
+ * Returns 201 with { userStoryId }.
+ */
+export async function POST(request: Request) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
+
+  const token = getToken(request);
+  const guard = await requireInstructor(supabase, token);
+  if (!guard.ok) {
+    return guard.status === 403
+      ? new Response(null, { status: 403 })
+      : Response.json(
+          { error: guard.status === 401 ? 'Unauthorized' : 'Supabase credentials are not configured.' },
+          { status: guard.status },
+        );
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return Response.json({ error: 'Invalid JSON body.' }, { status: 400 });
+  }
+
+  const { storyText, activityType, difficultyLevel } = (body ?? {}) as {
+    storyText?: unknown;
+    activityType?: unknown;
+    difficultyLevel?: unknown;
+  };
+
+  const validation = await validateUserStoryInput(supabase, { storyText, activityType, difficultyLevel });
+  if (!validation.ok) return validation.response;
+
+  const { data: { user }, error: authError } = await supabase.auth.getUser(token!);
+  if (authError || !user) return Response.json({ error: 'Invalid or expired token.' }, { status: 401 });
+
+  const userStoryId = crypto.randomUUID();
+
+  const { error: insertError } = await supabase.from('user_story').insert({
+    user_story_id: userStoryId,
+    story_text: validation.storyText,
+    activity_type: validation.activityType,
+    difficulty_level: validation.difficultyLevel,
+    creator_id: user.id,
+  });
+
+  if (insertError) return Response.json({ error: insertError.message }, { status: 500 });
+
+  return Response.json({ userStoryId }, { status: 201 });
 }

@@ -7,10 +7,14 @@
 // (lib/activityCourseQueries.ts), and these two routes are how a student finds out which ones
 // their own enrolled courses actually offer.
 
+import type { GradingKind } from './activityTypes';
+
 export type CourseActivity = {
   activityType: string;
   name: string;
   description: string | null;
+  /** GitHub #379: 'mcq' or 'llm-graded' — which play flow this activity enters. */
+  gradingKind: GradingKind;
   courseId: string;
   courseName: string;
 };

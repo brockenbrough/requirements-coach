@@ -64,7 +64,15 @@ vi.mock('../../lib/llm/factory', async (importOriginal) => {
 });
 
 import { getLLMProvider } from '../../lib/llm/factory';
-import { POST } from '../../app/api/activities/write-acceptance-criteria/submissions/route';
+import { POST } from '../../app/api/activities/[activityType]/llm/submissions/route';
+
+const ACTIVITY = 'WRITE_ACCEPTANCE_CRITERIA';
+const PARAMS = (activityType: string = ACTIVITY) => ({ params: { activityType } });
+
+/** activity_type as getGradingKind's .select('grading_kind').maybeSingle() returns it. */
+function queueGradingKind(gradingKind: string | null) {
+  queue('activity_type', { data: gradingKind === null ? null : { grading_kind: gradingKind }, error: null });
+}
 
 const SESSION_ID = 'ac-session-1';
 
@@ -138,6 +146,9 @@ const rateAcceptanceCriteria = vi.fn();
 
 beforeEach(() => {
   h.state.queues = {};
+  // Every test here targets a real llm-graded activity, so the route's grading-kind guard is
+  // satisfied by default; the tests that exercise the guard itself re-queue this table.
+  queueGradingKind('llm-graded');
   h.state.inserts = [];
   h.state.updates = [];
   h.state.tables = [];
@@ -147,32 +158,34 @@ beforeEach(() => {
   vi.mocked(getLLMProvider).mockReturnValue({ rateAcceptanceCriteria } as never);
 });
 
-describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
+describe('POST /api/activities/[activityType]/llm/submissions', () => {
   it('returns 401 without a token', async () => {
-    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }, null));
+    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }, null), PARAMS());
     expect(response.status).toBe(401);
   });
 
   it('returns 401 for an invalid token', async () => {
     const response = await POST(
       req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }, 'bad-token'),
+      PARAMS(),
     );
     expect(response.status).toBe(401);
   });
 
   it('returns 400 when userStoryId is missing', async () => {
-    const response = await POST(req({ submittedText: 'x', sessionId: SESSION_ID }));
+    const response = await POST(req({ submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
     expect(response.status).toBe(400);
   });
 
   it('returns 400 when submittedText is missing', async () => {
-    const response = await POST(req({ userStoryId: 'story-1', sessionId: SESSION_ID }));
+    const response = await POST(req({ userStoryId: 'story-1', sessionId: SESSION_ID }), PARAMS());
     expect(response.status).toBe(400);
   });
 
   it('returns 400 when submittedText exceeds the length cap', async () => {
     const response = await POST(
       req({ userStoryId: 'story-1', submittedText: 'x'.repeat(5001), sessionId: SESSION_ID }),
+      PARAMS(),
     );
     expect(response.status).toBe(400);
     expect((await response.json()).error).toMatch(/5000/);
@@ -181,7 +194,7 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
   // GitHub #256 cost/abuse fix: sessionId is required, and it must be real — no more "auth check
   // + unthrottled LLM call".
   it('returns 400 when sessionId is missing', async () => {
-    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'x' }));
+    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'x' }), PARAMS());
     expect(response.status).toBe(400);
     expect((await response.json()).error).toMatch(/sessionId/);
   });
@@ -189,7 +202,7 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
   it('returns 404 when the session does not exist, belongs to another student, or is a different activity type', async () => {
     queue('session_log', { data: null, error: null });
 
-    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }));
+    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
 
     expect(response.status).toBe(404);
     expect(h.state.tables).not.toContain('session_to_user_story');
@@ -198,7 +211,7 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
   it('returns 409 when the session is already completed', async () => {
     queue('session_log', { data: { ...sessionRow, status: 'completed' }, error: null });
 
-    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }));
+    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
 
     expect(response.status).toBe(409);
   });
@@ -206,7 +219,7 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
   it('returns 409 when the session is abandoned', async () => {
     queue('session_log', { data: { ...sessionRow, status: 'abandoned' }, error: null });
 
-    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }));
+    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
 
     expect(response.status).toBe(409);
   });
@@ -218,6 +231,7 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
 
     const response = await POST(
       req({ userStoryId: 'not-in-this-session', submittedText: 'x', sessionId: SESSION_ID }),
+      PARAMS(),
     );
 
     expect(response.status).toBe(400);
@@ -229,7 +243,7 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
     queue('session_to_user_story', { data: drawnStories, error: null });
     queue('submission', { data: [], error: null }); // nothing submitted yet — next is story-1
 
-    const response = await POST(req({ userStoryId: 'story-2', submittedText: 'x', sessionId: SESSION_ID }));
+    const response = await POST(req({ userStoryId: 'story-2', submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
 
     expect(response.status).toBe(409);
     expect((await response.json()).error).toMatch(/story 1/i);
@@ -243,7 +257,7 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
       error: null,
     });
 
-    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }));
+    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
 
     expect(response.status).toBe(409);
   });
@@ -253,7 +267,7 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
     // Overwrite the queued user_story result with "not found".
     h.state.queues['user_story'] = [{ data: null, error: null }];
 
-    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }));
+    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
 
     expect(response.status).toBe(404);
   });
@@ -262,7 +276,7 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
     queueUpToLLM();
     h.state.queues['instructor_llm_config'] = [{ data: null, error: null }];
 
-    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }));
+    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
 
     expect(response.status).toBe(500);
     expect((await response.json()).error).toMatch(/LLM provider/i);
@@ -272,7 +286,7 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
     queueUpToLLM();
     vi.mocked(getLLMProvider).mockReturnValue(null);
 
-    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }));
+    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
 
     expect(response.status).toBe(500);
   });
@@ -281,7 +295,7 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
     queueUpToLLM();
     rateAcceptanceCriteria.mockRejectedValue(new Error('provider timeout'));
 
-    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }));
+    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
 
     expect(response.status).toBe(502);
   });
@@ -290,7 +304,7 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
     queueUpToLLM();
     queue('submission', { data: null, error: { code: '23505', message: 'duplicate key' } }); // insert races
 
-    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }));
+    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
 
     expect(response.status).toBe(409);
     expect((await response.json()).error).toMatch(/already been submitted/i);
@@ -300,7 +314,7 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
     queueUpToLLM();
     queueSuccessfulWrite(submissionRow('story-1'));
 
-    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'Given ... when ... then ...', sessionId: SESSION_ID }));
+    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'Given ... when ... then ...', sessionId: SESSION_ID }), PARAMS());
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -334,7 +348,7 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
     queueUpToLLM();
     queueSuccessfulWrite(submissionRow('story-1'));
 
-    await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }));
+    await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
 
     const insertedSubmission = h.state.inserts.find((i) => i.table === 'submission')!
       .payload as Record<string, unknown>;
@@ -359,7 +373,7 @@ describe('POST /api/activities/write-acceptance-criteria/submissions', () => {
       error: null,
     }); // completeAcSession's update
 
-    const response = await POST(req({ userStoryId: 'story-4', submittedText: 'x', sessionId: SESSION_ID }));
+    const response = await POST(req({ userStoryId: 'story-4', submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
     const body = await response.json();
 
     expect(response.status).toBe(200);

@@ -25,6 +25,7 @@ import {
 } from "../../../../lib/sessionClient";
 import { useRequireRole } from "../../../../lib/useRequireRole";
 import { useResolvedActivity } from "../../../../lib/useResolvedActivity";
+import { LlmPlayView } from "../../../../components/LlmPlayView";
 
 /** What the last submitted answer earned, alongside the explanations for it. */
 type AnswerOutcome = {
@@ -34,7 +35,12 @@ type AnswerOutcome = {
   completed: boolean;
 };
 
-export default function PlayActivityPage({
+/**
+ * The multiple-choice play flow. Unchanged by GitHub #379 apart from no longer being the default
+ * export — it now only ever mounts once the wrapper below has confirmed the activity is 'mcq',
+ * which is what lets its body stay untouched instead of growing a second set of branches.
+ */
+function QuizPlayView({
   params,
 }: {
   params: { slug: string };
@@ -337,7 +343,7 @@ export default function PlayActivityPage({
 
   // GitHub #263: SessionSummaryScreen is generic (score/message/items) — this page maps its
   // own points-and-correctness session into that shape, the same division of responsibility as
-  // write-acceptance-criteria/page.tsx does for its 1-10 LLM scores. isPassing (lib/sessionRules.ts)
+  // components/LlmPlayView.tsx does for its 1-10 LLM scores. isPassing (lib/sessionRules.ts)
   // is the same formula the server uses for session_log.passed, so the two can't disagree.
   const maxScore = session.session.max_score;
   const correctCount = session.answers.filter((answer) => answer.correct).length;
@@ -418,5 +424,51 @@ export default function PlayActivityPage({
         ) : null}
       </div>
     </AppShell>
+  );
+}
+
+/**
+ * GitHub #379: resolves the slug once and hands off to the play flow its grading kind calls for.
+ *
+ * The branch lives here, above both views, rather than inside one of them, for two reasons: hooks
+ * cannot be called conditionally, and mounting the MCQ view for an LLM-graded activity — even for
+ * a single render — would fire its loadCurrentSession against the wrong session model. So neither
+ * view mounts until the kind is actually known.
+ *
+ * QuizPlayView resolves the slug a second time internally. That is deliberate: for the built-in
+ * slugs useResolvedActivity answers synchronously from the static ACTIVITIES array at zero network
+ * cost, and paying one extra fetch in the custom-catalog case is cheaper than threading the
+ * resolved activity through a body this issue is otherwise not touching at all.
+ */
+export default function PlayActivityPage({
+  params,
+}: {
+  params: { slug: string };
+}) {
+  const { token, loading, authorized } = useRequireRole("student");
+  const { activity, status: activityStatus } = useResolvedActivity(token, params.slug);
+
+  if (loading || !authorized) return null;
+  if (activityStatus === 'loading') return null;
+
+  if (!activity) {
+    return (
+      <AppShell active="activities">
+        <div className="mx-auto max-w-xl rounded-brand-lg border border-brand-danger/40 bg-brand-danger/10 p-6 text-sm font-semibold text-brand-danger-light">
+          {activityStatus === 'forbidden'
+            ? "You're not enrolled in a course that offers this activity."
+            : "This activity doesn't exist."}
+          <Link href="/activities" className="ml-1 underline hover:text-white">
+            Back to Activities
+          </Link>
+        </div>
+      </AppShell>
+    );
+  }
+
+  return activity.gradingKind === 'llm-graded' ? (
+    <LlmPlayView activity={activity} />
+  ) : (
+    <QuizPlayView params={params} />
   );
 }

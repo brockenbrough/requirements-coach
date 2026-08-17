@@ -89,13 +89,12 @@ function queueHappyPath(options: { targetCourseIds?: string[]; sharedCourseIds?:
     error: null,
   });
   // availableTitles: the target's own course-scoped activity list, plus its full ladder.
-  queue('activity_type_course', {
+  queue('assembled_quiz_catalog', {
     data: [
       {
         activity_type: 'IDENTIFY_WEAK_USER_STORIES',
-        course_id: 'course-1',
-        course: { course_name: 'Course 1' },
         catalog: { quiz_name: 'Identify Weak User Stories', description: null },
+        assembled_quiz: { course_id: 'course-1', course: { course_name: 'Course 1' } },
       },
     ],
     error: null,

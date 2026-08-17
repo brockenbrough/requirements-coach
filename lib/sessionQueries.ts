@@ -472,9 +472,14 @@ function studentDisplayName(student: EmbeddedStudent): string {
  * rows too, so including them here as well would show every AC attempt twice — once (correctly)
  * as a submission row, once (redundantly, and mislabeled as a quiz) as a session row. The mcq-only
  * contract is what keeps that true even once an instructor's own llm-graded catalog has real
- * session_log rows, not just for the one hardcoded built-in type.
+ * session_log rows, not just for the one hardcoded built-in type. (GitHub #379 also fixed this
+ * exclusion elsewhere, in the class-wide, ownership-blind form of this query, by filtering on the
+ * catalog's grading_kind through a !inner embed rather than a hardcoded name — not needed here,
+ * since ownedMcqTypes is already pre-filtered to mcq-kind keys the caller owns before it ever
+ * reaches this function.)
+ *
  * loadStudentActivityForIds has no such second source to double against — the course CSV export
- * is the only thing that reads it, and there's no separate AC-submissions merge there — so it
+ * is the only thing that reads it, and there's no separate submissions merge there — so it
  * deliberately keeps including every activity type.
  */
 export async function loadAllStudentActivity(supabase: SupabaseClient, ownedMcqTypes: string[]) {
@@ -503,8 +508,8 @@ export async function loadAllStudentActivity(supabase: SupabaseClient, ownedMcqT
 
   if (progressError) return { activities: null, error: progressError };
 
-  // The embed is destructured off rather than spread along: it carries role and username,
-  // which are inputs to this query, not part of what the endpoint discloses.
+  // The embed is destructured off rather than spread along: it carries role and username, which
+  // are inputs to this query, not part of what the endpoint discloses.
   const activities: InstructorActivityEntry[] = rows.map(({ student, ...session }) => {
     const sessionProgress = progress!.get(session.session_id);
 

@@ -89,25 +89,24 @@ describe('GET /api/students/{studentId}/available-titles', () => {
     expect(h.state.tables).toEqual([]);
   });
 
-  it('returns an empty list without querying activity_type_course when enrolled in no course', async () => {
+  it('returns an empty list without querying assembled_quiz_catalog when enrolled in no course', async () => {
     queue('student_course', { data: [], error: null });
 
     const res = await GET(req(), ctx);
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.activities).toEqual([]);
-    expect(h.state.tables).not.toContain('activity_type_course');
+    expect(h.state.tables).not.toContain('assembled_quiz_catalog');
   });
 
   it('returns every linked activity with its full title ladder, including a null title for a missing level', async () => {
     queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
-    queue('activity_type_course', {
+    queue('assembled_quiz_catalog', {
       data: [
         {
           activity_type: 'IDENTIFY_WEAK_USER_STORIES',
-          course_id: 'course-1',
-          course: { course_name: 'Software Requirements' },
           catalog: { quiz_name: 'Identify Weak User Stories', description: null },
+          assembled_quiz: { course_id: 'course-1', course: { course_name: 'Software Requirements' } },
         },
       ],
       error: null,
@@ -155,7 +154,7 @@ describe('GET /api/students/{studentId}/available-titles', () => {
 
   it('returns 500 when the activity lookup fails', async () => {
     queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
-    queue('activity_type_course', { data: null, error: { message: 'DB down' } });
+    queue('assembled_quiz_catalog', { data: null, error: { message: 'DB down' } });
 
     const res = await GET(req(), ctx);
     expect(res.status).toBe(500);
@@ -163,13 +162,12 @@ describe('GET /api/students/{studentId}/available-titles', () => {
 
   it('returns 500 when the title_definition lookup fails', async () => {
     queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
-    queue('activity_type_course', {
+    queue('assembled_quiz_catalog', {
       data: [
         {
           activity_type: 'IDENTIFY_WEAK_USER_STORIES',
-          course_id: 'course-1',
-          course: { course_name: 'Software Requirements' },
           catalog: { quiz_name: 'Identify Weak User Stories', description: null },
+          assembled_quiz: { course_id: 'course-1', course: { course_name: 'Software Requirements' } },
         },
       ],
       error: null,

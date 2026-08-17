@@ -10,6 +10,7 @@ type Result = { data?: unknown; error?: unknown };
 // filters).
 const h = vi.hoisted(() => {
   const state = {
+    selects: [] as { table: string; columns: string }[],
     queues: {} as Record<string, Result[]>,
     tables: [] as string[],
     filters: [] as { table: string; column: string; value: unknown }[],
@@ -18,7 +19,10 @@ const h = vi.hoisted(() => {
 
   function makeBuilder(table: string, result: Result) {
     const builder: Record<string, unknown> = {
-      select: () => builder,
+      select: (columns: string) => {
+        state.selects.push({ table, columns });
+        return builder;
+      },
       eq: (column: string, value: unknown) => {
         state.filters.push({ table, column, value });
         return builder;
@@ -116,6 +120,7 @@ beforeEach(() => {
   h.state.queues = {};
   h.state.tables = [];
   h.state.filters = [];
+  h.state.selects = [];
   h.state.orders = [];
 });
 
@@ -265,6 +270,10 @@ describe('GET /api/instructor/activities', () => {
       column: 'activity_type (in)',
       value: ['IDENTIFY_WEAK_USER_STORIES', 'WRITE_STRONG_USER_STORIES'],
     });
+
+    expect(h.state.filters).not.toContainEqual(
+      expect.objectContaining({ column: 'activity_type (neq)' }),
+    );
   });
 
   it('answers 200 with sessions: [], without ever querying session_log, when the instructor owns only llm-graded types — but still reports them in ownedActivityTypes', async () => {

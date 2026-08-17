@@ -47,7 +47,15 @@ vi.mock('../../lib/supabase', () => ({
   }),
 }));
 
-import { GET } from '../../app/api/activities/write-acceptance-criteria/sessions/current/route';
+import { GET } from '../../app/api/activities/[activityType]/llm/sessions/current/route';
+
+const ACTIVITY = 'WRITE_ACCEPTANCE_CRITERIA';
+const PARAMS = (activityType: string = ACTIVITY) => ({ params: { activityType } });
+
+/** activity_type as getGradingKind's .select('grading_kind').maybeSingle() returns it. */
+function queueGradingKind(gradingKind: string | null) {
+  queue('activity_type', { data: gradingKind === null ? null : { grading_kind: gradingKind }, error: null });
+}
 
 const sessionRow = {
   session_id: 'ac-session-1',
@@ -86,25 +94,28 @@ function req(token: string | null = 'valid-token') {
   });
 }
 
-describe('GET /api/activities/write-acceptance-criteria/sessions/current', () => {
+describe('GET /api/activities/[activityType]/llm/sessions/current', () => {
   beforeEach(() => {
     h.state.queues = {};
+    // Every test here targets a real llm-graded activity, so the route's grading-kind guard is
+    // satisfied by default; the tests that exercise the guard itself re-queue this table.
+    queueGradingKind('llm-graded');
     h.state.tables = [];
   });
 
   it('returns 401 without a token', async () => {
-    expect((await GET(req(null))).status).toBe(401);
+    expect((await GET(req(null), PARAMS())).status).toBe(401);
   });
 
   it('returns 401 for an invalid token', async () => {
-    expect((await GET(req('bad-token'))).status).toBe(401);
+    expect((await GET(req('bad-token'), PARAMS())).status).toBe(401);
   });
 
   // Nothing in progress is a normal state, not an error: the client shows "start" instead.
   it('returns 200 with a null session when nothing is in progress', async () => {
     queue('session_log', { data: null, error: null });
 
-    const response = await GET(req());
+    const response = await GET(req(), PARAMS());
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -120,7 +131,7 @@ describe('GET /api/activities/write-acceptance-criteria/sessions/current', () =>
     queue('session_to_user_story', { data: drawnStories, error: null });
     queue('submission', { data: existingSubmissions, error: null });
 
-    const response = await GET(req());
+    const response = await GET(req(), PARAMS());
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -139,7 +150,7 @@ describe('GET /api/activities/write-acceptance-criteria/sessions/current', () =>
     queue('session_to_user_story', { data: drawnStories, error: null });
     queue('submission', { data: existingSubmissions, error: null });
 
-    const body = await (await GET(req())).json();
+    const body = await (await GET(req(), PARAMS())).json();
 
     expect(body.submissions).toHaveLength(1);
     expect(body.submissions[0]).toEqual({
@@ -158,7 +169,7 @@ describe('GET /api/activities/write-acceptance-criteria/sessions/current', () =>
     queue('session_to_user_story', { data: drawnStories, error: null });
     queue('submission', { data: [], error: null });
 
-    const body = await (await GET(req())).json();
+    const body = await (await GET(req(), PARAMS())).json();
 
     expect(body.submissions).toEqual([]);
     expect(body.answeredCount).toBe(0);
@@ -182,7 +193,7 @@ describe('GET /api/activities/write-acceptance-criteria/sessions/current', () =>
       error: null,
     });
 
-    const body = await (await GET(req())).json();
+    const body = await (await GET(req(), PARAMS())).json();
 
     expect(body.answeredCount).toBe(4);
     expect(body.nextPosition).toBeNull();
@@ -195,7 +206,7 @@ describe('GET /api/activities/write-acceptance-criteria/sessions/current', () =>
     queue('session_to_user_story', { data: [...drawnStories].reverse(), error: null });
     queue('submission', { data: [...existingSubmissions], error: null });
 
-    const body = await (await GET(req())).json();
+    const body = await (await GET(req(), PARAMS())).json();
 
     expect(body.nextPosition).toBe(1);
   });

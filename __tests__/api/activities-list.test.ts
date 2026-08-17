@@ -92,12 +92,12 @@ describe('GET /api/activities', () => {
       data: [
         {
           activity_type: 'IDENTIFY_WEAK_USER_STORIES',
-          catalog: { quiz_name: 'Identify Weak User Stories', description: null },
+          catalog: { quiz_name: 'Identify Weak User Stories', description: null, grading_kind: 'mcq' },
           assembled_quiz: { course_id: 'course-1', course: { course_name: 'Software Requirements' } },
         },
         {
           activity_type: 'MY_CUSTOM_QUIZ',
-          catalog: { quiz_name: 'My Custom Quiz', description: 'A quiz about things' },
+          catalog: { quiz_name: 'My Custom Quiz', description: 'A quiz about things', grading_kind: 'llm-graded' },
           assembled_quiz: { course_id: 'course-2', course: { course_name: 'Advanced SE' } },
         },
       ],
@@ -113,6 +113,7 @@ describe('GET /api/activities', () => {
         activityType: 'IDENTIFY_WEAK_USER_STORIES',
         name: 'Identify Weak User Stories',
         description: null,
+        gradingKind: 'mcq',
         courseId: 'course-1',
         courseName: 'Software Requirements',
       },
@@ -120,6 +121,7 @@ describe('GET /api/activities', () => {
         activityType: 'MY_CUSTOM_QUIZ',
         name: 'My Custom Quiz',
         description: 'A quiz about things',
+        gradingKind: 'llm-graded',
         courseId: 'course-2',
         courseName: 'Advanced SE',
       },

@@ -1,9 +1,15 @@
-import type { ActivityType } from './activityTypes';
+import type { ActivityType, GradingKind } from './activityTypes';
 
 /**
- * 'write-acceptance-criteria' is the Type B (LLM-graded) activity from GitHub #149 (REQ-FU-2).
- * Unlike the MCQ activities it has no questionBank — students write free-text answers that are
- * scored by AI, not by picking from a fixed set of options.
+ * 'write-acceptance-criteria' is the seeded example of an LLM-graded activity (GitHub #149,
+ * REQ-FU-2) — no longer the only one since GitHub #379, which let instructors create their own.
+ * Unlike the MCQ activities it has no questionBank: students write free-text answers scored by
+ * AI, not picked from a fixed set of options.
+ *
+ * That entry is deliberately kept in ACTIVITIES even though its static pages are gone. Because
+ * useResolvedActivity checks this array first, it is what keeps /activities/write-acceptance-criteria
+ * resolving after the cutover — bookmarks survive, at zero network cost, and the rich name/summary/
+ * titles ladder is preserved where a server-resolved custom catalog only gets generic fallbacks.
  *
  * Widened to `string` (kept as an alias purely so existing `: ActivitySlug` annotations keep
  * compiling) for the same reason lib/activityTypes.ts's ActivityType was: a catalog reachable
@@ -45,6 +51,15 @@ export type ActivityDefinition = {
   instructions: string;
   category: string;
   titles: Record<Difficulty, string>;
+  /**
+   * GitHub #379: which play flow this activity uses — 'mcq' answers questions through
+   * POST /api/sessions, 'llm-graded' writes free text against user_story prompts. Required rather
+   * than optional on purpose: making it so forces every construction site (the three static
+   * entries below and buildCustomActivityDefinition) to state a kind, and `npm run build` is what
+   * enforces that. Do not weaken it to optional — a silently-absent kind would default a custom
+   * LLM catalog into the MCQ flow, which is precisely the bug this field exists to prevent.
+   */
+  gradingKind: GradingKind;
   /** MCQ activities populate this; LLM-graded activities (e.g. WRITE_ACCEPTANCE_CRITERIA) omit it. */
   questionBank?: Question[];
 };
@@ -333,6 +348,7 @@ export const ACTIVITIES: ActivityDefinition[] = [
       'You\'ll see four user stories per round. Pick the single weakest one — the one that is least Independent, Negotiable, Valuable, Estimable, Small, or Testable. Score 75% or higher across a round to advance to the next difficulty level.',
     category: 'User Stories',
     titles: { 1: 'Story Apprentice', 2: 'Story Analyst', 3: 'Story Master' },
+    gradingKind: 'mcq',
     questionBank: weakUserStories,
   },
   {
@@ -344,6 +360,7 @@ export const ACTIVITIES: ActivityDefinition[] = [
       'Each round shows a user story with four candidate acceptance criteria. Pick the single weakest one. Score 75% or higher across a round to advance to the next difficulty level.',
     category: 'Acceptance Criteria',
     titles: { 1: 'Criteria Novice', 2: 'Criteria Analyst', 3: 'Criteria Expert' },
+    gradingKind: 'mcq',
     questionBank: weakAcceptanceCriteria,
   },
   {
@@ -355,6 +372,7 @@ export const ACTIVITIES: ActivityDefinition[] = [
       'You\'ll be given a user story. Write acceptance criteria for it. Your answer is scored by AI based on clarity, completeness, and testability.',
     category: 'Acceptance Criteria',
     titles: { 1: 'AC Beginner', 2: 'AC Practitioner', 3: 'AC Expert' },
+    gradingKind: 'llm-graded',
   },
 ];
 
@@ -375,16 +393,37 @@ export function getActivity(slug: string): ActivityDefinition | undefined {
  * guard against. A custom catalog's *actual* earned title (if any) still comes from
  * title_definition/computeStudentTitles like any other activity_type — this only supplies a
  * fallback for the ladder label, which nothing renders unless a title was actually earned.
+ *
+ * GitHub #379: gradingKind comes straight from the server (GET /api/activities/{activityType})
+ * and is what the play pages branch on. The default summary/instructions follow it too — the old
+ * copy assumed multiple choice, which would have told a student writing free-text answers to
+ * "answer each question" and pick options that aren't there.
  */
-export function buildCustomActivityDefinition(entry: { activityType: string; name: string; description: string | null }): ActivityDefinition {
+export function buildCustomActivityDefinition(entry: {
+  activityType: string;
+  name: string;
+  description: string | null;
+  gradingKind: GradingKind;
+}): ActivityDefinition {
+  const llmGraded = entry.gradingKind === 'llm-graded';
+
   return {
     slug: entry.activityType,
     activityType: entry.activityType,
     name: entry.name,
-    summary: entry.description ?? 'A question catalog created by an instructor.',
-    instructions: entry.description ?? 'Answer each question as best you can. Score 75% or higher to advance to the next difficulty level.',
+    summary:
+      entry.description ??
+      (llmGraded
+        ? 'A free-text practice activity created by an instructor, graded by AI.'
+        : 'A question catalog created by an instructor.'),
+    instructions:
+      entry.description ??
+      (llmGraded
+        ? 'You\'ll be given a prompt to answer in your own words. Your answer is scored by AI based on clarity, completeness, and testability. Score 75% or higher across a round to advance to the next difficulty level.'
+        : 'Answer each question as best you can. Score 75% or higher to advance to the next difficulty level.'),
     category: 'Custom',
     titles: { 1: 'Level 1', 2: 'Level 2', 3: 'Level 3' },
+    gradingKind: entry.gradingKind,
   };
 }
 

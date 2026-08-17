@@ -15,10 +15,10 @@ import type { StudentActivitySummary } from '../lib/activityLogTypes';
  * acParticipation adds a third metric to an llm-graded card only (GitHub #317 — that activity used
  * to get its own second card with average score + participation; the average score duplicated
  * this card's class-average as a /10 instead of a %, so only participation survives, folded in
- * here instead of a separate view). No instructor can own an llm-graded catalog in this codebase
- * today (no UI exposes a grading-kind choice at catalog creation yet), so this branch is currently
- * unreachable in practice — kept for when that capability lands, the same forward-compatible
- * reasoning as lib/acceptanceCriteriaStatisticsQueries.ts's own scoping.
+ * here instead of a separate view). Since GitHub #379, CreateCatalogModal lets an instructor
+ * choose 'llm-graded' at creation, so this branch is reachable in practice, not just kept for
+ * later — acParticipation is computeLlmActivityStatistics' own studentsAttempted/roster-size pair
+ * (lib/llmActivityStatisticsQueries.ts), scoped the same way the cards themselves are.
  */
 export function InstructorActivityStats({
   entries,

@@ -12,13 +12,14 @@ import { MAX_DIFFICULTY_LEVEL, nextDifficultyLevel } from "../../../lib/sessionR
 import { useResolvedActivity } from "../../../lib/useResolvedActivity";
 import {
   type CompletedAttempt,
-  type CurrentSessionResult,
   abandonSession,
   loadActivityLog,
   loadCompletedAttempts,
   loadCurrentSession,
   startSession,
 } from "../../../lib/sessionClient";
+import { loadCurrentLlmSession, startOrResumeLlmSession } from "../../../lib/llmActivityClient";
+import type { SessionRecord } from "../../../lib/sessionTypes";
 import {
   getSeenUnlockedLevel,
   newlyUnlockedLevel,
@@ -50,6 +51,15 @@ const DIFFICULTY_COLOR: Record<number, string> = {
   2: "bg-white/10 text-brand-gold",
   3: "bg-white/10 text-brand-danger",
 };
+
+/**
+ * What this page actually needs from a running session, normalised across both kinds
+ * (GitHub #379). The MCQ read reports progress as two arrays (questions/answers) and the
+ * LLM-graded one as an array plus a count, but the only thing rendered here is "N of M answered"
+ * — flattening at the fetch keeps the single kind branch in one place instead of spreading a
+ * union type through every read below.
+ */
+type CurrentProgress = { session: SessionRecord | null; total: number; answered: number };
 
 /** A valid 1..MAX_DIFFICULTY_LEVEL integer from the ?level= query param, or null. */
 function parseLevelParam(raw: string | null): number | null {
@@ -83,7 +93,7 @@ function ActivityDetailContent({
   // The server is the only source of "does this activity have a run in progress" (REQ-PL-6.3) —
   // there is no local/mock notion of progress anymore. null means "not checked yet or nothing
   // running", which the render below treats the same as "not started".
-  const [current, setCurrent] = useState<CurrentSessionResult | null>(null);
+  const [current, setCurrent] = useState<CurrentProgress | null>(null);
   const [attempts, setAttempts] = useState<CompletedAttempt[] | null>(null);
   // True until the current-session and completed-attempts fetches below have both resolved —
   // the hero card and level picker render nothing real before then, only ActivityDetailSkeleton,
@@ -178,8 +188,38 @@ function ActivityDetailContent({
     let minDelayTimeout: ReturnType<typeof setTimeout> | undefined;
     const fetchStartedAt = Date.now();
 
+    // GitHub #379: which read answers "is something running" is the one place the two activity
+    // kinds diverge on this page. Everything downstream — the level selector, the unlock
+    // animation, the attempts table, abandon — is already kind-agnostic, because they all work
+    // off session_log rows that both flows write identically.
+    const llmGraded = activity.gradingKind === 'llm-graded';
+
     Promise.all([
-      loadCurrentSession(token, activity.activityType),
+      llmGraded
+        ? loadCurrentLlmSession(token, activity.activityType).then((result) =>
+            result.ok
+              ? {
+                  ok: true as const,
+                  data: {
+                    session: result.data.session,
+                    total: result.data.stories.length,
+                    answered: result.data.answeredCount,
+                  },
+                }
+              : result,
+          )
+        : loadCurrentSession(token, activity.activityType).then((result) =>
+            result.ok
+              ? {
+                  ok: true as const,
+                  data: {
+                    session: result.data.session,
+                    total: result.data.questions.length,
+                    answered: result.data.answers.length,
+                  },
+                }
+              : result,
+          ),
       // forceRefresh, not the cache-first default: highestSelectableLevel below (and therefore
       // how many buttons LevelReplaySelector renders) is derived straight from attempts, so a
       // stale cache hit here doesn't just show a stale *value* — it changes the button row's
@@ -257,7 +297,10 @@ function ActivityDetailContent({
     setStarting(true);
     setError(null);
 
-    const result = await startSession(token, activity!.activityType, { difficultyLevel: selectedLevel ?? undefined });
+    const result =
+      activity!.gradingKind === 'llm-graded'
+        ? await startOrResumeLlmSession(token, activity!.activityType, { difficultyLevel: selectedLevel ?? undefined })
+        : await startSession(token, activity!.activityType, { difficultyLevel: selectedLevel ?? undefined });
 
     if (result.ok) {
       // A fresh (or resumed) session now shows up in the activity log too.
@@ -323,8 +366,8 @@ function ActivityDetailContent({
   }
 
   const session = current?.session ?? null;
-  const totalQuestions = current?.questions.length ?? 0;
-  const answeredCount = current?.answers.length ?? 0;
+  const totalQuestions = current?.total ?? 0;
+  const answeredCount = current?.answered ?? 0;
   // Before a session exists, show whatever level Start would actually use: the replay level the
   // student picked, if any, else highestSelectableLevel — never START_DIFFICULTY_LEVEL here.
   // selectedLevel only gets seeded to highestSelectableLevel by the effect above once attempts

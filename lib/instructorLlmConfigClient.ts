@@ -1,7 +1,7 @@
 'use client';
 
 // GitHub #150: client for the instructor LLM provider settings page. Same role as
-// lib/acceptanceCriteriaClient.ts for the write-acceptance-criteria flow: the one place the UI
+// lib/llmActivityClient.ts for the LLM-graded flow: the one place the UI
 // talks to GET/POST /api/instructor/llm-config, so no component hand-rolls the Authorization
 // header or picks apart an error body.
 
@@ -126,7 +126,7 @@ export async function checkLlmConfigForSelection(
  * non-blank key) passes, but the route validates independently regardless.
  *
  * setActive is intentionally omitted: the settings form has no control for it, and grading
- * (app/api/activities/write-acceptance-criteria/submissions/route.ts) scopes by the story's
+ * (app/api/activities/[activityType]/llm/submissions/route.ts) scopes by the story's
  * creator_id, not by the global is_active flag, so there's nothing here for it to affect.
  *
  * On success, writes through to both caches — the pair just saved, and the "most recent
