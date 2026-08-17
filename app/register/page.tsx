@@ -16,13 +16,21 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [showInstructorCode, setShowInstructorCode] = useState(false);
   const [instructorCode, setInstructorCode] = useState('');
+  // GitHub #440: entering a wrong instructor code used to silently create a student account
+  // with zero feedback — the server accepts the request either way (see lib/authClient.ts's
+  // register() comment on why) and only the returned role reveals what actually happened.
+  // Holding the redirect back here, instead of firing it immediately like the normal success
+  // path, is what gives the student a chance to actually read the warning before it's gone.
+  const [wrongInstructorCode, setWrongInstructorCode] = useState(false);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
     setMessage('');
+    setWrongInstructorCode(false);
 
-    const result = await register(email, password, instructorCode.trim() || undefined);
+    const attemptedInstructorCode = instructorCode.trim();
+    const result = await register(email, password, attemptedInstructorCode || undefined);
 
     if (!result.ok) {
       setLoading(false);
@@ -34,6 +42,14 @@ export default function RegisterPage() {
     // but this still loads the token into the shared context so the sidebar
     // isn't stuck showing a signed-out state on the next screen.
     await refresh();
+
+    if (attemptedInstructorCode && result.role !== 'instructor') {
+      setLoading(false);
+      setWrongInstructorCode(true);
+      setMessage('That instructor access code is incorrect, so your account was created as a student instead. Contact your department for the correct code if you meant to register as an instructor.');
+      return;
+    }
+
     // Registration only creates the auth user; the `user` row is created on the
     // profile page, so send new students there to finish setting up.
     router.push('/profile');
@@ -102,7 +118,24 @@ export default function RegisterPage() {
           </button>
         </form>
 
-        {message ? <p className="mt-4 rounded-xl border border-[#332b6b] bg-[#1b1642] p-3 text-sm text-[#F3F1FF]">{message}</p> : null}
+        {message ? (
+          <div
+            className={`mt-4 rounded-xl border p-3 text-sm ${
+              wrongInstructorCode ? 'border-[#FFD666]/60 bg-[#1b1642] text-[#FFD666]' : 'border-[#332b6b] bg-[#1b1642] text-[#F3F1FF]'
+            }`}
+          >
+            <p>{message}</p>
+            {wrongInstructorCode ? (
+              <button
+                type="button"
+                onClick={() => router.push('/profile')}
+                className="mt-2 font-bold text-[#2DD4BF] hover:underline"
+              >
+                Continue as a student
+              </button>
+            ) : null}
+          </div>
+        ) : null}
 
         <p className="mt-6 text-sm font-semibold text-[#A79FC9]">
           Already have an account? <Link href="/login" className="text-[#2DD4BF] hover:underline">Sign in</Link>

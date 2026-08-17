@@ -9,7 +9,7 @@ import { clearAllClientCaches } from './clientCaches';
 const ACCESS_TOKEN_KEY = 'access_token';
 const REFRESH_TOKEN_KEY = 'refresh_token';
 
-export type AuthResult = { ok: true } | { ok: false; error: string };
+export type AuthResult = { ok: true; role?: 'student' | 'instructor' } | { ok: false; error: string };
 
 type StoredSession = { access_token?: string; refresh_token?: string } | null | undefined;
 
@@ -85,6 +85,13 @@ export async function login(email: string, password: string): Promise<AuthResult
  *
  * instructorCode is passed through as-is and checked only on the server (GitHub #82) — this
  * function never compares it itself, so there is nothing here for the browser to bypass.
+ *
+ * The server always creates the account, even for a wrong/unrecognized instructorCode — it
+ * just silently falls back to 'student' (GitHub #82's own design, so a scripted guesser can't
+ * distinguish "wrong code" from "no code" via the HTTP status). The role it actually granted
+ * comes back in the response body regardless, so the caller (GitHub #440) can tell a student
+ * who *meant* to register as an instructor that their code didn't take, instead of silently
+ * dropping them into a student account with no explanation.
  */
 export async function register(email: string, password: string, instructorCode?: string): Promise<AuthResult> {
   const response = await postJson('/api/auth/register', { email, password, instructorCode });
@@ -97,7 +104,8 @@ export async function register(email: string, password: string, instructorCode?:
     return { ok: false, error: 'Account created, but automatic sign-in failed. Please log in.' };
   }
 
-  return { ok: true };
+  const role = response.body?.user?.user_metadata?.role;
+  return { ok: true, role: role === 'instructor' ? 'instructor' : 'student' };
 }
 
 /**
