@@ -16,6 +16,7 @@ export type AssembledQuizSummary = {
   description: string | null;
   courseId: string;
   courseName: string;
+  catalogs: { activityType: string; name: string }[];
   catalogNames: string[];
   createdAt: string;
 };

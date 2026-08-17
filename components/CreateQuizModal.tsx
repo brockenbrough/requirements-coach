@@ -32,7 +32,7 @@ export function CreateQuizModal({
    * only echoes ids, not display names — the modal already has the mapping (via its own `catalogs`
    * prop) that the page's optimistic-insert row needs to render immediately.
    */
-  onCreated: (quiz: { id: string; name: string; description: string | null; courseId: string; catalogNames: string[] }) => void;
+  onCreated: (quiz: { id: string; name: string; description: string | null; courseId: string; catalogs: { activityType: string; name: string }[]; catalogNames: string[] }) => void;
 }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -78,11 +78,14 @@ export function CreateQuizModal({
       return;
     }
 
-    const catalogNames = selectedCatalogs
-      .map((activityType) => catalogs.find((c) => c.activityType === activityType)?.name)
-      .filter((catalogName): catalogName is string => Boolean(catalogName));
+    const resolvedCatalogs = selectedCatalogs
+      .map((activityType) => {
+        const found = catalogs.find((c) => c.activityType === activityType);
+        return found ? { activityType, name: found.name } : null;
+      })
+      .filter((c): c is { activityType: string; name: string } => c !== null);
 
-    onCreated({ ...result.data.quiz, catalogNames });
+    onCreated({ ...result.data.quiz, catalogs: resolvedCatalogs, catalogNames: resolvedCatalogs.map((c) => c.name) });
     requestClose();
   }
 
