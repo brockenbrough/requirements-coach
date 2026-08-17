@@ -7,12 +7,16 @@ const h = vi.hoisted(() => {
     queues: {} as Record<string, Result[]>,
     tables: [] as string[],
     orders: [] as { table: string; column: string; ascending: boolean }[],
+    filters: [] as { table: string; column: string; value: unknown }[],
   };
 
   function makeBuilder(table: string, result: Result) {
     const builder: Record<string, unknown> = {
       select: () => builder,
-      eq: () => builder,
+      eq: (column: string, value: unknown) => {
+        state.filters.push({ table, column, value });
+        return builder;
+      },
       order: (column: string, opts?: { ascending?: boolean }) => {
         state.orders.push({ table, column, ascending: opts?.ascending ?? true });
         return builder;
@@ -63,6 +67,7 @@ beforeEach(() => {
   h.state.queues = {};
   h.state.tables = [];
   h.state.orders = [];
+  h.state.filters = [];
 });
 
 describe('GET /api/instructor/assembled-quizzes/questions', () => {
@@ -78,9 +83,10 @@ describe('GET /api/instructor/assembled-quizzes/questions', () => {
     expect(res.status).toBe(403);
     expect(await res.text()).toBe('');
     expect(h.state.tables).not.toContain('question');
+    expect(h.state.tables).not.toContain('user_story');
   });
 
-  it('returns every question across every catalog, any author, with its source catalog name', async () => {
+  it('returns only the caller\'s own questions, with each one\'s source catalog name', async () => {
     queueRole('instructor');
     queue('question', {
       data: [
@@ -110,6 +116,8 @@ describe('GET /api/instructor/assembled-quizzes/questions', () => {
       { id: 'q-1', questionText: 'Which story is weakest?', level: 1, catalogActivityType: 'IDENTIFY_WEAK_USER_STORIES', catalogName: 'Identify Weak User Stories' },
       { id: 'q-2', questionText: 'What is a stakeholder?', level: 2, catalogActivityType: 'CUSTOM_QUIZ', catalogName: 'My Custom Quiz' },
     ]);
+
+    expect(h.state.filters).toContainEqual({ table: 'question', column: 'user_id', value: 'instructor-1' });
   });
 
   it('returns an empty list when there are no questions', async () => {
@@ -131,9 +139,54 @@ describe('GET /api/instructor/assembled-quizzes/questions', () => {
     expect(h.state.orders).toContainEqual({ table: 'question', column: 'question_prompt', ascending: true });
   });
 
-  it('returns 500 when the query fails', async () => {
+  it('returns 500 when the question query fails', async () => {
     queueRole('instructor');
     queue('question', { data: null, error: { message: 'DB down' } });
+
+    const res = await GET(req());
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe('DB down');
+  });
+
+  // llm-graded parity: the same picker also returns the caller's own prompts, scoped by
+  // creator_id (user_story's owner column — not user_id, which question uses).
+  it('returns only the caller\'s own prompts, with each one\'s source catalog name', async () => {
+    queueRole('instructor');
+    queue('question', { data: [], error: null });
+    queue('user_story', {
+      data: [
+        {
+          user_story_id: 'story-1',
+          story_text: 'As a shopper, I want a cart.',
+          difficulty_level: 1,
+          activity_type: 'WRITE_ACCEPTANCE_CRITERIA',
+          catalog: { quiz_name: 'Write Acceptance Criteria' },
+        },
+      ],
+      error: null,
+    });
+
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.userStories).toEqual([
+      {
+        id: 'story-1',
+        storyText: 'As a shopper, I want a cart.',
+        level: 1,
+        catalogActivityType: 'WRITE_ACCEPTANCE_CRITERIA',
+        catalogName: 'Write Acceptance Criteria',
+      },
+    ]);
+    expect(h.state.filters).toContainEqual({ table: 'user_story', column: 'creator_id', value: 'instructor-1' });
+  });
+
+  it('returns 500 when the prompt query fails', async () => {
+    queueRole('instructor');
+    queue('question', { data: [], error: null });
+    queue('user_story', { data: null, error: { message: 'DB down' } });
 
     const res = await GET(req());
     expect(res.status).toBe(500);

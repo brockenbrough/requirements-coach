@@ -8,15 +8,27 @@ const h = vi.hoisted(() => {
     tables: [] as string[],
     orders: [] as { table: string; column: string; ascending: boolean }[],
     filters: [] as { table: string; column: string; value: unknown }[],
+    deletes: [] as { table: string; column: string; value: unknown }[],
   };
 
   function makeBuilder(table: string, result: Result) {
+    let isDelete = false;
+
     const builder: Record<string, unknown> = {
       select: () => builder,
-      eq: (column: string, value: unknown) => {
-        state.filters.push({ table, column, value });
+      delete: () => {
+        isDelete = true;
         return builder;
       },
+      eq: (column: string, value: unknown) => {
+        (isDelete ? state.deletes : state.filters).push({ table, column, value });
+        return builder;
+      },
+      in: (column: string, value: unknown) => {
+        (isDelete ? state.deletes : state.filters).push({ table, column, value });
+        return builder;
+      },
+      limit: () => builder,
       order: (column: string, opts?: { ascending?: boolean }) => {
         state.orders.push({ table, column, ascending: opts?.ascending ?? true });
         return builder;
@@ -51,7 +63,7 @@ vi.mock('../../lib/supabase', () => ({
   }),
 }));
 
-import { GET } from '../../app/api/instructor/quizzes/[activityType]/route';
+import { DELETE, GET } from '../../app/api/instructor/quizzes/[activityType]/route';
 
 function queueRole(role: string) {
   queue('user', { data: { role }, error: null });
@@ -89,11 +101,19 @@ function req(activityType = 'IDENTIFY_WEAK_USER_STORIES', token: string | null =
   });
 }
 
+function delReq(activityType = 'IDENTIFY_WEAK_USER_STORIES', token: string | null = 'valid-token') {
+  return DELETE(
+    new Request(`http://localhost/api/instructor/quizzes/${activityType}`, { method: 'DELETE', headers: token ? { Authorization: `Bearer ${token}` } : {} }),
+    { params: { activityType } },
+  );
+}
+
 beforeEach(() => {
   h.state.queues = {};
   h.state.tables = [];
   h.state.orders = [];
   h.state.filters = [];
+  h.state.deletes = [];
 });
 
 describe('GET /api/instructor/quizzes/[activityType]', () => {
@@ -279,5 +299,154 @@ describe('GET /api/instructor/quizzes/[activityType] — llm-graded catalogs', (
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error).toBe('DB down');
+  });
+});
+
+describe('DELETE /api/instructor/quizzes/[activityType]', () => {
+  it('returns 401 without a token', async () => {
+    const res = await delReq('IDENTIFY_WEAK_USER_STORIES', null);
+    expect(res.status).toBe(401);
+    expect(h.state.tables).toEqual([]);
+  });
+
+  it('returns 403 with an empty body when the caller is a student', async () => {
+    queueRole('student');
+    const res = await delReq();
+    expect(res.status).toBe(403);
+    expect(await res.text()).toBe('');
+    expect(h.state.tables).not.toContain('activity_type');
+  });
+
+  it('returns 404 when the activity type matches no catalog', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: null, error: null });
+
+    const res = await delReq('NOT_REAL');
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error).toBe('Catalog not found.');
+    expect(h.state.tables).not.toContain('session_log');
+  });
+
+  it('returns 403 with an empty body when the catalog was created by another instructor', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ creator_id: 'instructor-2' }), error: null });
+
+    const res = await delReq();
+    expect(res.status).toBe(403);
+    expect(await res.text()).toBe('');
+    expect(h.state.tables).not.toContain('session_log');
+  });
+
+  it('returns 403 with an empty body for a built-in catalog (creator_id is null)', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow(), error: null }); // default creator_id: null
+
+    const res = await delReq();
+    expect(res.status).toBe(403);
+    expect(await res.text()).toBe('');
+    expect(h.state.tables).not.toContain('session_log');
+  });
+
+  it('returns 409 and deletes nothing when a student has already started a session for this catalog', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ creator_id: 'instructor-1' }), error: null });
+    queue('session_log', { data: { session_id: 'session-1' }, error: null });
+
+    const res = await delReq();
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toBe('This catalog has already been used by a student and cannot be deleted.');
+    expect(h.state.tables).not.toContain('question');
+    expect(h.state.deletes).toEqual([]);
+  });
+
+  // daily_challenge_attempt has no session_log/activity_type of its own, so a question can be
+  // "in use" there even with zero session_log rows for the catalog — the check this test locks in.
+  it('returns 409 when an mcq catalog\'s question has a daily_challenge_attempt, even with no session_log rows', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ creator_id: 'instructor-1' }), error: null });
+    queue('session_log', { data: null, error: null });
+    queue('question', { data: [{ question_id: 'q-1' }], error: null });
+    queue('daily_challenge_attempt', { data: { daily_challenge_attempt_id: 'attempt-1' }, error: null });
+
+    const res = await delReq();
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toBe('This catalog has already been used by a student and cannot be deleted.');
+    expect(h.state.deletes).toEqual([]);
+  });
+
+  it('deletes an unused mcq catalog\'s questions/answers, unlinks it from every quiz, and deletes the catalog', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ creator_id: 'instructor-1' }), error: null }); // getQuizByActivityType
+    queue('session_log', { data: null, error: null });
+    queue('question', { data: [{ question_id: 'q-1' }, { question_id: 'q-2' }], error: null }); // select ids
+    queue('daily_challenge_attempt', { data: null, error: null });
+    queue('question_to_answer', { data: [{ answer_id: 'a-1' }, { answer_id: 'a-2' }], error: null }); // select answer ids
+    queue('question_to_answer', { data: null, error: null }); // delete
+    queue('answer', { data: null, error: null }); // delete
+    queue('question', { data: null, error: null }); // delete
+    queue('title_definition', { data: null, error: null }); // delete
+    queue('assembled_quiz_catalog', { data: null, error: null }); // delete
+    queue('activity_type', { data: null, error: null }); // delete
+
+    const res = await delReq();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ activityType: 'IDENTIFY_WEAK_USER_STORIES' });
+
+    expect(h.state.deletes).toContainEqual({ table: 'question_to_answer', column: 'question_id', value: ['q-1', 'q-2'] });
+    expect(h.state.deletes).toContainEqual({ table: 'answer', column: 'answer_id', value: ['a-1', 'a-2'] });
+    expect(h.state.deletes).toContainEqual({ table: 'question', column: 'question_id', value: ['q-1', 'q-2'] });
+    expect(h.state.deletes).toContainEqual({ table: 'title_definition', column: 'activity_type', value: 'IDENTIFY_WEAK_USER_STORIES' });
+    expect(h.state.deletes).toContainEqual({ table: 'assembled_quiz_catalog', column: 'activity_type', value: 'IDENTIFY_WEAK_USER_STORIES' });
+    expect(h.state.deletes).toContainEqual({ table: 'activity_type', column: 'activity_type', value: 'IDENTIFY_WEAK_USER_STORIES' });
+  });
+
+  it('deletes an unused llm-graded catalog\'s prompts, unlinks it from every quiz, and deletes the catalog', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'instructor-1' }), error: null });
+    queue('session_log', { data: null, error: null });
+    queue('user_story', { data: null, error: null }); // delete
+    queue('title_definition', { data: null, error: null });
+    queue('assembled_quiz_catalog', { data: null, error: null });
+    queue('activity_type', { data: null, error: null }); // delete
+
+    const res = await delReq('WRITE_ACCEPTANCE_CRITERIA');
+    expect(res.status).toBe(200);
+
+    expect(h.state.deletes).toContainEqual({ table: 'user_story', column: 'activity_type', value: 'WRITE_ACCEPTANCE_CRITERIA' });
+    expect(h.state.deletes).toContainEqual({ table: 'assembled_quiz_catalog', column: 'activity_type', value: 'WRITE_ACCEPTANCE_CRITERIA' });
+    expect(h.state.tables).not.toContain('question');
+    expect(h.state.tables).not.toContain('daily_challenge_attempt');
+  });
+
+  it('returns 500 when the final delete fails for a reason other than a foreign key violation', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'instructor-1' }), error: null });
+    queue('session_log', { data: null, error: null });
+    queue('user_story', { data: null, error: null });
+    queue('title_definition', { data: null, error: null });
+    queue('assembled_quiz_catalog', { data: null, error: null });
+    queue('activity_type', { data: null, error: { message: 'DB down' } });
+
+    const res = await delReq('WRITE_ACCEPTANCE_CRITERIA');
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe('DB down');
+  });
+
+  it('returns 409 (defense in depth) when the final delete hits a foreign key violation the earlier checks missed', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'instructor-1' }), error: null });
+    queue('session_log', { data: null, error: null });
+    queue('user_story', { data: null, error: null });
+    queue('title_definition', { data: null, error: null });
+    queue('assembled_quiz_catalog', { data: null, error: null });
+    queue('activity_type', { data: null, error: { message: 'update or delete violates foreign key constraint', code: '23503' } });
+
+    const res = await delReq('WRITE_ACCEPTANCE_CRITERIA');
+    expect(res.status).toBe(409);
   });
 });

@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../../../components/AppShell';
 import { CatalogPromptCard } from '../../../../components/CatalogPromptCard';
@@ -8,7 +9,7 @@ import { ConfirmModal } from '../../../../components/ConfirmModal';
 import { DeleteQuestionModal } from '../../../../components/DeleteQuestionModal';
 import { PromptFormModal } from '../../../../components/PromptFormModal';
 import { QuestionFormModal } from '../../../../components/QuestionFormModal';
-import { loadQuizDetail, type QuizMeta } from '../../../../lib/quizClient';
+import { deleteCatalog, loadQuizDetail, type QuizMeta } from '../../../../lib/quizClient';
 import { createQuestion, updateQuestion } from '../../../../lib/sessionClient';
 import {
   createUserStory,
@@ -77,6 +78,7 @@ function shortLevels(prompts: CatalogUserStory[]): (1 | 2 | 3)[] {
  */
 export default function CatalogDetailPage({ params }: { params: { activityType: string } }) {
   const { token, profile, loading, authorized } = useRequireRole('instructor');
+  const router = useRouter();
 
   const [quiz, setQuiz] = useState<QuizMeta | null>(null);
   const [questions, setQuestions] = useState<CatalogQuestion[] | null>(null);
@@ -94,6 +96,7 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
   const [promptDeleteTarget, setPromptDeleteTarget] = useState<CatalogUserStory | null>(null);
   const [highlight, setHighlight] = useState<{ id: string; label: string } | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [showDeleteCatalog, setShowDeleteCatalog] = useState(false);
 
   useEffect(() => {
     if (!token) return;
@@ -239,6 +242,18 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
     window.setTimeout(() => setToastMessage(null), TOAST_MS);
   }
 
+  async function handleDeleteCatalog(): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (!token) return { ok: false, error: 'Your session has expired. Please sign in again.' };
+
+    // A 409 ("already used by a student") arrives here with the route's own wording and keeps
+    // the dialog open, same contract as handleDeletePrompt above.
+    const result = await deleteCatalog(token, params.activityType);
+    if (!result.ok) return { ok: false, error: result.error };
+
+    router.push('/instructor/quizzes');
+    return { ok: true };
+  }
+
   return (
     <AppShell active="instructor-quizzes">
       <div className="mx-auto max-w-3xl">
@@ -301,6 +316,15 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
                   }`}
                 >
                   {editMode ? 'Done' : 'Edit'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteCatalog(true)}
+                  aria-label="Delete this catalog"
+                  title="Delete this catalog"
+                  className="flex h-10 w-10 flex-none items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 transition hover:border-brand-danger hover:text-brand-danger"
+                >
+                  <TrashIcon />
                 </button>
               </div>
             </div>
@@ -503,6 +527,26 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
           confirmingLabel="Deleting…"
           onClose={() => setPromptDeleteTarget(null)}
           onConfirm={handleDeletePrompt}
+        />
+      ) : null}
+
+      {showDeleteCatalog ? (
+        <ConfirmModal
+          kicker="Question Catalogs"
+          title="Delete this catalog?"
+          message={
+            <>
+              <span className="block font-bold text-brand-ink">{quiz?.name ?? 'This catalog'}</span>
+              <span className="mt-2 block">
+                This permanently deletes every {llmGraded ? 'prompt' : 'question'} in this catalog and removes it
+                from any quiz it&apos;s linked to. This can&apos;t be undone.
+              </span>
+            </>
+          }
+          confirmLabel="Delete catalog"
+          confirmingLabel="Deleting…"
+          onClose={() => setShowDeleteCatalog(false)}
+          onConfirm={handleDeleteCatalog}
         />
       ) : null}
     </AppShell>

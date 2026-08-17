@@ -1,6 +1,7 @@
 import { getSupabaseClient } from '../../../../../lib/supabase';
 import { requireInstructor } from '../../../../../lib/instructorAuth';
 import {
+  deleteCatalog,
   getQuizByActivityType,
   listCatalogQuestions,
   listCatalogUserStories,
@@ -68,4 +69,48 @@ export async function GET(request: Request, { params }: { params: { activityType
   }
 
   return Response.json({ quiz, questions, userStories: [] }, { status: 200 });
+}
+
+/**
+ * DELETE /api/instructor/quizzes/:activityType — deletes a catalog the caller owns: its own
+ * questions/answers (mcq) or user_story prompts (llm-graded), and unlinks it from every assembled
+ * quiz that composed it (deleteCatalog, lib/activityTypeQueries.ts, has the exact cascade). Same
+ * 404-then-403 ownership check as GET above.
+ *
+ * - 401 missing/invalid bearer token
+ * - 403 caller isn't an instructor, or doesn't own this catalog (no body either way)
+ * - 404 activityType matches no catalog
+ * - 409 a student has already engaged with this catalog (deleteCatalog's own docblock has the
+ *   exact usage this checks) — the catalog is left untouched
+ * - 200 { activityType }
+ * - 500 Supabase not configured, or a query fails
+ */
+export async function DELETE(request: Request, { params }: { params: { activityType: string } }) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
+
+  const guard = await requireInstructor(supabase, getToken(request));
+  if (!guard.ok) {
+    return guard.status === 403
+      ? new Response(null, { status: 403 })
+      : Response.json(
+          { error: guard.status === 401 ? 'Unauthorized' : 'Supabase credentials are not configured.' },
+          { status: guard.status },
+        );
+  }
+
+  const { activityType } = params;
+
+  const { quiz, creatorId, error: quizError } = await getQuizByActivityType(supabase, activityType);
+  if (quizError) return Response.json({ error: quizError.message }, { status: 500 });
+  if (!quiz) return Response.json({ error: 'Catalog not found.' }, { status: 404 });
+  if (creatorId !== guard.user_id) return new Response(null, { status: 403 });
+
+  const result = await deleteCatalog(supabase, activityType, quiz.gradingKind);
+  if (result.status === 'in_use') {
+    return Response.json({ error: 'This catalog has already been used by a student and cannot be deleted.' }, { status: 409 });
+  }
+  if (result.status === 'error') return Response.json({ error: result.error.message }, { status: 500 });
+
+  return Response.json({ activityType }, { status: 200 });
 }

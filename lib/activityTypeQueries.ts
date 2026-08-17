@@ -294,3 +294,97 @@ export async function listCatalogUserStories(supabase: SupabaseClient, activityT
 
   return { userStories, error: null };
 }
+
+export type DeleteCatalogResult = { status: 'ok' } | { status: 'in_use' } | { status: 'error'; error: { message: string } };
+
+/**
+ * Deletes a catalog (activity_type row) entirely: its own questions/answers (mcq) or user_story
+ * prompts (llm-graded), and every assembled_quiz_catalog link that referenced it — a link to a
+ * catalog that no longer exists is meaningless, so this is what removes a deleted catalog from
+ * any quiz it was composed into. quiz_excluded_question and assembled_quiz_extra_question rows
+ * cascade automatically (their FK to question is ON DELETE CASCADE, see supabase/schema.sql); no
+ * manual cleanup needed for those.
+ *
+ * Refuses with 'in_use' instead of deleting anything if a student has ever engaged with this
+ * catalog: a session_log row for this activity_type — which a session_to_question or
+ * session_to_user_story row always implies by construction, since a session only ever draws from
+ * its own activity_type's pool — or, for an mcq catalog specifically, a daily_challenge_attempt
+ * row for one of its questions (that table has no session_log/activity_type of its own to check
+ * instead, unlike every other student-history table). None of session_to_question/
+ * session_to_user_story/answered_question_log/submission/daily_challenge_attempt has an ON DELETE
+ * clause on its FK into question/user_story, so a physical delete would either fail outright or,
+ * attempted piecemeal, orphan a student's history — checking first avoids both, the same reasoning
+ * DELETE /api/instructor/questions/{questionId} already documents for a single question.
+ *
+ * Not transactional (the Supabase JS client offers none, same limitation every other multi-step
+ * write in this codebase accepts) — ordered children-before-parents so a failure partway through
+ * leaves the catalog missing some content rather than a broken half-deleted row. The final delete
+ * additionally treats a foreign_key_violation (23503) as 'in_use' rather than a raw error — defense
+ * in depth in case some usage isn't one of the tables checked above.
+ */
+export async function deleteCatalog(supabase: SupabaseClient, activityType: string, gradingKind: GradingKind): Promise<DeleteCatalogResult> {
+  const { data: sessionUsage, error: sessionUsageError } = await supabase
+    .from('session_log')
+    .select('session_id')
+    .eq('activity_type', activityType)
+    .limit(1)
+    .maybeSingle();
+  if (sessionUsageError) return { status: 'error', error: sessionUsageError };
+  if (sessionUsage) return { status: 'in_use' };
+
+  if (gradingKind === 'llm-graded') {
+    const { error: deleteStoriesError } = await supabase.from('user_story').delete().eq('activity_type', activityType);
+    if (deleteStoriesError) return { status: 'error', error: deleteStoriesError };
+  } else {
+    const { data: questionRows, error: questionsError } = await supabase
+      .from('question')
+      .select('question_id')
+      .eq('activity_type', activityType);
+    if (questionsError) return { status: 'error', error: questionsError };
+
+    const questionIds = ((questionRows ?? []) as { question_id: string }[]).map((row) => row.question_id);
+
+    if (questionIds.length > 0) {
+      const { data: dailyUsage, error: dailyUsageError } = await supabase
+        .from('daily_challenge_attempt')
+        .select('daily_challenge_attempt_id')
+        .in('question_id', questionIds)
+        .limit(1)
+        .maybeSingle();
+      if (dailyUsageError) return { status: 'error', error: dailyUsageError };
+      if (dailyUsage) return { status: 'in_use' };
+
+      const { data: linkRows, error: linkFetchError } = await supabase
+        .from('question_to_answer')
+        .select('answer_id')
+        .in('question_id', questionIds);
+      if (linkFetchError) return { status: 'error', error: linkFetchError };
+      const answerIds = ((linkRows ?? []) as { answer_id: string }[]).map((row) => row.answer_id);
+
+      const { error: unlinkError } = await supabase.from('question_to_answer').delete().in('question_id', questionIds);
+      if (unlinkError) return { status: 'error', error: unlinkError };
+
+      if (answerIds.length > 0) {
+        const { error: answerDeleteError } = await supabase.from('answer').delete().in('answer_id', answerIds);
+        if (answerDeleteError) return { status: 'error', error: answerDeleteError };
+      }
+
+      const { error: questionDeleteError } = await supabase.from('question').delete().in('question_id', questionIds);
+      if (questionDeleteError) return { status: 'error', error: questionDeleteError };
+    }
+  }
+
+  const { error: titleDeleteError } = await supabase.from('title_definition').delete().eq('activity_type', activityType);
+  if (titleDeleteError) return { status: 'error', error: titleDeleteError };
+
+  const { error: unlinkQuizError } = await supabase.from('assembled_quiz_catalog').delete().eq('activity_type', activityType);
+  if (unlinkQuizError) return { status: 'error', error: unlinkQuizError };
+
+  const { error: deleteError } = await supabase.from('activity_type').delete().eq('activity_type', activityType);
+  if (deleteError) {
+    if ((deleteError as { code?: string }).code === '23503') return { status: 'in_use' };
+    return { status: 'error', error: deleteError };
+  }
+
+  return { status: 'ok' };
+}

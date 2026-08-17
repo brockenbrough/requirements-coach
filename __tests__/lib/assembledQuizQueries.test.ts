@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
   addExtraQuestionToQuiz,
+  addExtraUserStoryToQuiz,
+  excludeUserStoryFromQuiz,
   getQuizComposition,
+  includeUserStoryInQuiz,
+  listQuizExcludedUserStoryIds,
   listQuizExtraQuestionIds,
+  listQuizExtraUserStoryIds,
   loadCatalogQuestionPool,
   pickRandomQuestions,
   removeExtraQuestionFromQuiz,
+  removeExtraUserStoryFromQuiz,
 } from '../../lib/assembledQuizQueries';
 
 type PoolItem = { question_id: string };
@@ -412,7 +418,9 @@ describe('getQuizComposition — hand-picked questions (GitHub #380)', () => {
         { level: 3, available: 0, required: 4, sufficient: false },
       ],
       extraQuestions: [],
+      extraUserStories: [],
       activeCatalogQuestionIds: [],
+      activeCatalogUserStoryIds: [],
       error: null,
     });
   });
