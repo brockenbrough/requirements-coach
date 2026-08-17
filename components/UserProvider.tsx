@@ -181,7 +181,16 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     }
 
     let cancelled = false;
-    loadStudentScore(token, userId).then((result) => {
+    // onRevalidate (GitHub #392 follow-up): a cache hit resolves instantly, but a real request
+    // still fires underneath, and corrects `score` if the cached value had gone stale — e.g. a
+    // session finished in a different tab/browser profile, or a value left over from before this
+    // score-caching path itself was fixed, neither of which anything else on this device would
+    // otherwise ever notice.
+    loadStudentScore(token, userId, {
+      onRevalidate: (fresh) => {
+        if (!cancelled) setScore(fresh.score);
+      },
+    }).then((result) => {
       if (cancelled) return;
       if (result.ok) setScore(result.data.score);
     });
