@@ -62,10 +62,7 @@ export default function InstructorAssembledQuizzesPage() {
   if (loading || !authorized) return null;
   if (!token) return null;
 
-  function handleCreated(quiz: { id: string; name: string; description: string | null; courseId: string; catalogNames: string[] }) {
-    // Optimistic insert: the response only echoes ids, but the course name needed to render the
-    // new row is already in this page's own state (courses, loaded for the modal's own dropdown)
-    // — catalogNames comes from the modal itself, which has the same mapping available.
+  function handleCreated(quiz: { id: string; name: string; description: string | null; courseId: string; catalogs: { activityType: string; name: string }[]; catalogNames: string[] }) {
     const course = (courses ?? []).find((c) => c.id === quiz.courseId);
 
     setQuizzes((current) => [
@@ -75,6 +72,7 @@ export default function InstructorAssembledQuizzesPage() {
         description: quiz.description,
         courseId: quiz.courseId,
         courseName: course?.name ?? 'Unknown course',
+        catalogs: quiz.catalogs,
         catalogNames: quiz.catalogNames,
         createdAt: new Date().toISOString(),
       },

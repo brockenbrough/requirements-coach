@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { AppShell } from '../../../components/AppShell';
 import { CreateCatalogModal } from '../../../components/CreateCatalogModal';
 import { loadQuizzes, type CreatedQuiz, type QuizSummary } from '../../../lib/quizClient';
@@ -29,7 +30,17 @@ const TOAST_MS = 3200;
  * (GitHub #359) that replaces the retired flat Question Bank page.
  */
 export default function InstructorQuizzesPage() {
+  return (
+    <Suspense fallback={null}>
+      <InstructorQuizzesContent />
+    </Suspense>
+  );
+}
+
+function InstructorQuizzesContent() {
   const { token, profile, loading, authorized } = useRequireRole('instructor');
+  const searchParams = useSearchParams();
+  const fromCourseId = searchParams.get('courseId');
 
   const [quizzes, setQuizzes] = useState<QuizSummary[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -105,6 +116,16 @@ export default function InstructorQuizzesPage() {
             Create catalog
           </button>
         </div>
+
+        {fromCourseId ? (
+          <div className="mb-5 mt-3 flex items-center gap-2.5 rounded-brand-md border border-brand-purple/30 bg-brand-purple/5 px-4 py-3 text-sm font-semibold text-brand-navy">
+            Create a catalog, then&nbsp;
+            <Link href={`/instructor/courses/${encodeURIComponent(fromCourseId)}`} className="font-extrabold text-brand-purple hover:underline">
+              return to your course
+            </Link>
+            &nbsp;to assemble a quiz from it.
+          </div>
+        ) : null}
 
         {toastMessage ? (
           <div

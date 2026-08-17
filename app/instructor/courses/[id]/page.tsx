@@ -251,9 +251,6 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
 
             {error ? <p className="mb-4 text-sm font-semibold text-brand-danger">{error}</p> : null}
 
-            <p className="mb-3 text-xs font-extrabold uppercase tracking-wide text-gray-400">
-              Quizzes {quizzes ? `(${quizzes.length})` : ''}
-            </p>
             {quizzesLoadFailed ? (
               <div className="rounded-brand-lg border border-brand-danger/40 bg-brand-danger/10 p-4 text-center">
                 <p className="mb-3 text-sm font-semibold text-brand-danger">Failed to load this course&apos;s quizzes.</p>
@@ -268,7 +265,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
             ) : quizzes === null ? (
               <p className="text-sm font-semibold text-gray-500">Loading…</p>
             ) : (
-              <CourseQuizzesList quizzes={quizzes} />
+              <CourseQuizzesList quizzes={quizzes} courseId={params.id} />
             )}
           </>
         )}
