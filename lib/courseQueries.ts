@@ -220,6 +220,69 @@ export async function loadEnrolledStudents(supabase: SupabaseClient, courseId: s
   return { students, error: null };
 }
 
+export type CourseEngagement = {
+  enrolledCount: number;
+  activeStudentCount: number;
+  averageScore: number | null;
+  passRate: number | null;
+};
+
+/**
+ * Per-course engagement stats for the instructor dashboard (GitHub #335).
+ * Three numbers come from two queries merged in JS:
+ *   1. student_course → list of enrolled user_ids (→ enrolledCount)
+ *   2. session_log for those users, status=completed → activeStudentCount, averageScore, passRate
+ * "Active" means at least one completed session ever, not necessarily in a date window.
+ * averageScore/passRate are null when no enrolled student has a completed session yet.
+ */
+export async function getCourseEngagement(
+  supabase: SupabaseClient,
+  courseId: string,
+): Promise<{ engagement: CourseEngagement | null; error: { message: string } | null }> {
+  const { data: enrolled, error: enrolledError } = await supabase
+    .from('student_course')
+    .select('user_id')
+    .eq('course_id', courseId);
+
+  if (enrolledError) return { engagement: null, error: enrolledError };
+
+  const enrolledIds = ((enrolled ?? []) as { user_id: string }[]).map((r) => r.user_id);
+
+  if (enrolledIds.length === 0) {
+    return {
+      engagement: { enrolledCount: 0, activeStudentCount: 0, averageScore: null, passRate: null },
+      error: null,
+    };
+  }
+
+  const { data: sessions, error: sessionsError } = await supabase
+    .from('session_log')
+    .select('user_id, cumulative_score, max_score, passed')
+    .in('user_id', enrolledIds)
+    .eq('status', 'completed');
+
+  if (sessionsError) return { engagement: null, error: sessionsError };
+
+  type SessionRow = { user_id: string; cumulative_score: number; max_score: number; passed: boolean | null };
+  const rows = (sessions ?? []) as SessionRow[];
+
+  const activeStudentCount = new Set(rows.map((r) => r.user_id)).size;
+
+  const scorable = rows.filter((r) => r.max_score > 0);
+  const averageScore =
+    scorable.length > 0
+      ? scorable.reduce((sum, r) => sum + r.cumulative_score / r.max_score, 0) / scorable.length
+      : null;
+
+  const passRate =
+    rows.length > 0 ? rows.filter((r) => r.passed === true).length / rows.length : null;
+
+  return {
+    engagement: { enrolledCount: enrolledIds.length, activeStudentCount, averageScore, passRate },
+    error: null,
+  };
+}
+
 /**
  * Unenrolls a student. Idempotent by design: deleting a link that doesn't exist is still a
  * success (error stays null either way) — the end state ("not enrolled") is identical, and the
