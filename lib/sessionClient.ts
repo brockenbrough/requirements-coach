@@ -548,17 +548,43 @@ export function updateQuestion(token: string, question: QuizQuestion) {
   );
 }
 
+/** The 409 body's `impact` field when a question has already been used in a student session. */
+export type QuestionDeleteImpact = {
+  sessionsCount: number;
+  answeredSessionsCount: number;
+  studentsAffectedCount: number;
+  pointsAtRisk: number;
+};
+
+export type DeleteQuestionResult =
+  | { ok: true; data: { questionId: string; pointsRemoved: number } }
+  | { ok: false; status: number; error: string; impact?: QuestionDeleteImpact };
+
 /**
- * Removes a question and its answers (DELETE /api/instructor/questions/{id}, GitHub #359). Can
- * fail with a 409 ({ error }) if the question has already been served to a student — the caller
- * shows that message rather than removing the row from its own list.
+ * Removes a question and its answers (DELETE /api/instructor/questions/{id}, GitHub #359). A
+ * question already served to a student 409s with an `impact` payload (sessions/students/points
+ * affected) rather than a bare message, unless `force` is passed — then the route deletes it
+ * anyway and rewinds the points it contributed to every affected session's score. A bespoke fetch
+ * rather than the generic `request` helper above, since `impact` on the failure body is specific
+ * to this one route.
  */
-export function deleteQuestion(token: string, questionId: string) {
-  return request<{ questionId: string }>(
-    `/api/instructor/questions/${encodeURIComponent(questionId)}`,
-    { method: 'DELETE' },
-    token,
-  );
+export async function deleteQuestion(token: string, questionId: string, force = false): Promise<DeleteQuestionResult> {
+  const url = `/api/instructor/questions/${encodeURIComponent(questionId)}${force ? '?force=true' : ''}`;
+
+  let response: Response;
+  try {
+    response = await fetch(url, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+  } catch {
+    return { ok: false, status: 0, error: NETWORK_ERROR };
+  }
+
+  const body = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    return { ok: false, status: response.status, error: body?.error || 'Something went wrong.', impact: body?.impact };
+  }
+
+  return { ok: true, data: body as { questionId: string; pointsRemoved: number } };
 }
 
 /** One student row as returned by GET /api/instructor/students. */
