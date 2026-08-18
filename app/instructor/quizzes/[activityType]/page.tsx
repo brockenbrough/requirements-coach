@@ -13,18 +13,9 @@ import { RatingPromptModal } from '../../../../components/RatingPromptModal';
 import {
   deleteCatalog,
   loadQuizDetail,
-  loadTitleNames,
-  saveTitleLadder,
   updateRatingPrompt,
   type QuizMeta,
 } from '../../../../lib/quizClient';
-import type { StoredTitleRung } from '../../../../lib/titleAuthoringQueries';
-import {
-  emptyTitleLadderDraft,
-  TitleLadderFields,
-  titleLadderDraftToRungs,
-  type TitleLadderDraft,
-} from '../../../../components/TitleLadderFields';
 import { createQuestion, updateQuestion } from '../../../../lib/sessionClient';
 import {
   createUserStory,
@@ -40,12 +31,6 @@ import { useRequireRole } from '../../../../lib/useRequireRole';
 
 const LEVEL_OPTIONS = ['all', 1, 2, 3] as const;
 
-/** The stored ladder (only levels that have a title) widened into a full per-level form draft. */
-function titleLadderToDraft(titles: StoredTitleRung[]): TitleLadderDraft {
-  const draft = emptyTitleLadderDraft();
-  for (const rung of titles) draft[rung.difficultyLevel] = rung.titleName;
-  return draft;
-}
 const HIGHLIGHT_MS = 4000;
 const TOAST_MS = 3200;
 
@@ -121,11 +106,6 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
   const [showDeleteCatalog, setShowDeleteCatalog] = useState(false);
   const [ratingPromptModalOpen, setRatingPromptModalOpen] = useState(false);
 
-  const [titleDraft, setTitleDraft] = useState<TitleLadderDraft>(emptyTitleLadderDraft);
-  const [titleSuggestions, setTitleSuggestions] = useState<string[]>([]);
-  const [savingTitles, setSavingTitles] = useState(false);
-  const [titleError, setTitleError] = useState('');
-
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
@@ -140,7 +120,6 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
         setQuiz(result.data.quiz);
         setQuestions(result.data.questions);
         setPrompts(result.data.userStories);
-        setTitleDraft(titleLadderToDraft(result.data.titles));
       } else if (result.status === 404) {
         setNotFound(true);
       } else if (result.status === 403) {
@@ -154,38 +133,6 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
       cancelled = true;
     };
   }, [token, params.activityType, retryCount]);
-
-  // Suggestions only — a failure leaves the title fields working as plain text inputs, so it is
-  // deliberately not surfaced as a page error.
-  useEffect(() => {
-    if (!token) return;
-    let cancelled = false;
-    loadTitleNames(token).then((result) => {
-      if (!cancelled && result.ok) setTitleSuggestions(result.data.titleNames);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [token]);
-
-  async function handleSaveTitles() {
-    if (!token) return;
-    setSavingTitles(true);
-    setTitleError('');
-
-    const result = await saveTitleLadder(token, params.activityType, titleLadderDraftToRungs(titleDraft));
-    setSavingTitles(false);
-
-    if (!result.ok) {
-      setTitleError(result.error);
-      return;
-    }
-
-    // Re-seed from what the server actually stored rather than keeping the local draft — the two
-    // can differ (trimming, a rung cleared to null), and the stored version is the truth.
-    setTitleDraft(titleLadderToDraft(result.data.titles));
-    setToastMessage('Mastery titles saved.');
-  }
 
   if (loading || !authorized) return null;
   if (!token || !profile) return null;
@@ -451,54 +398,6 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
                 </button>
               </div>
             ) : null}
-
-            {/* Catalog-level metadata, so it sits above the level filter rather than inside the
-                filtered list — the ladder describes all three levels at once and filtering to one
-                level must not hide the other two rungs. Read-only until the same Edit toggle that
-                governs questions and prompts is on. */}
-            <div className="mb-6 mt-6 rounded-brand-lg border border-gray-100 bg-gray-50 p-5">
-              <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Mastery titles</p>
-
-              {editMode ? (
-                <>
-                  <p className="mb-3 mt-1.5 text-xs font-semibold text-gray-500">
-                    What a student is called once they pass each level. Start typing to reuse a title
-                    that already exists. Students who already passed a level get its title as soon as
-                    you save.
-                  </p>
-                  <TitleLadderFields
-                    draft={titleDraft}
-                    onChange={(lvl, value) => setTitleDraft((current) => ({ ...current, [lvl]: value }))}
-                    suggestions={titleSuggestions}
-                    disabled={savingTitles}
-                  />
-                  {titleError ? <p className="mt-3 text-xs font-bold text-brand-danger">{titleError}</p> : null}
-                  <button
-                    type="button"
-                    onClick={handleSaveTitles}
-                    disabled={savingTitles}
-                    className="mt-4 rounded-brand-md bg-brand-purple px-5 py-2 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark disabled:opacity-60"
-                  >
-                    {savingTitles ? 'Saving…' : 'Save titles'}
-                  </button>
-                </>
-              ) : (
-                <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                  {LEVEL_OPTIONS.filter((lvl): lvl is 1 | 2 | 3 => lvl !== 'all').map((lvl) => (
-                    <div key={lvl} className="rounded-brand-md border border-gray-200 bg-white px-3.5 py-2.5">
-                      <p className="text-xs font-bold uppercase tracking-wide text-gray-400">{LEVEL_LABEL[lvl]}</p>
-                      <p
-                        className={`mt-0.5 text-sm font-extrabold ${
-                          titleDraft[lvl] ? 'text-brand-navy' : 'text-gray-400'
-                        }`}
-                      >
-                        {titleDraft[lvl] || 'No title yet'}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
 
             <div className="mb-6 mt-6 flex flex-wrap gap-1.5">
               {LEVEL_OPTIONS.map((lvl) => (
