@@ -1,12 +1,6 @@
 import { getSupabaseClient } from '../../../lib/supabase';
+import { PROFILE_COLUMNS } from '../../../lib/profileQueries';
 import { canWearTitle } from '../../../lib/titleQueries';
-
-// selected_title is an embed, not a column: the row stores a title_definition_id, and every
-// consumer (the profile page's dropdown, the sidebar under the avatar) needs the name too. Joining
-// it here means neither has to make a second call, and a title renamed by its instructor shows up
-// renamed everywhere without a backfill.
-const PROFILE_COLUMNS =
-  'user_id, username, biography, avatar_url, role, first_name, last_name, age, semester, has_seen_onboarding_tour, selected_title_definition_id, selected_title:title_definition(title_name)';
 
 const MIN_AGE = 1;
 const MAX_AGE = 129;
