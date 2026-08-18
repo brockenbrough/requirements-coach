@@ -197,3 +197,58 @@ export async function listActivityTypesForCourses(
 
   return { activities, error: null };
 }
+
+export type ActivityCourseRef = { courseId: string; courseName: string };
+
+type ActivityCourseLinkRow = {
+  activity_type: string;
+  assembled_quiz: { course_id: string; course: { course_name: string } | null } | null;
+};
+
+/**
+ * The reverse direction of listActivityTypesForCourses above: given a set of activity_types
+ * (catalogs), every course each one is currently linked to — GitHub #474, the Instructor
+ * Dashboard's activity log needing to show which course a student's attempt belongs to.
+ *
+ * Deliberately does NOT collapse to one course per catalog the way listActivityTypesForCourses
+ * does: that function picks the first course/quiz found because it's answering "does this catalog
+ * belong to (at least) one of these courses" for student-facing access, where any one match is
+ * enough. This function's callers show the course(s) *to an instructor reviewing a specific
+ * attempt*, and a catalog composed into more than one course's assembled_quiz is a real,
+ * unremarkable case (assembled_quiz_catalog has no uniqueness constraint on activity_type) — so
+ * every distinct course is kept, not just the first.
+ *
+ * A catalog with no assembled_quiz link at all simply has no entry in the returned map; callers
+ * treat a missing key (or an empty array) as "no course assigned" rather than an error.
+ *
+ * activityTypes: [] short-circuits to an empty map without a query, same convention as
+ * listActivityTypesForCourses's courseIds: [] handling.
+ */
+export async function listCoursesForActivityTypes(
+  supabase: SupabaseClient,
+  activityTypes: string[],
+): Promise<{ coursesByActivityType: Map<string, ActivityCourseRef[]> | null; error: { message: string } | null }> {
+  if (activityTypes.length === 0) return { coursesByActivityType: new Map(), error: null };
+
+  const { data, error } = await supabase
+    .from('assembled_quiz_catalog')
+    .select('activity_type, assembled_quiz:assembled_quiz_id!inner(course_id, course:course_id(course_name))')
+    .in('activity_type', activityTypes);
+
+  if (error) return { coursesByActivityType: null, error };
+
+  const coursesByActivityType = new Map<string, ActivityCourseRef[]>();
+
+  for (const row of (data ?? []) as unknown as ActivityCourseLinkRow[]) {
+    if (!row.assembled_quiz) continue;
+
+    const courseId = row.assembled_quiz.course_id;
+    const courseName = row.assembled_quiz.course?.course_name ?? 'Unknown course';
+
+    const existing = coursesByActivityType.get(row.activity_type) ?? [];
+    if (!existing.some((course) => course.courseId === courseId)) existing.push({ courseId, courseName });
+    coursesByActivityType.set(row.activity_type, existing);
+  }
+
+  return { coursesByActivityType, error: null };
+}

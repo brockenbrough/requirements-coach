@@ -1,6 +1,7 @@
 import { getSupabaseClient } from '../../../../../lib/supabase';
 import { requireInstructor } from '../../../../../lib/instructorAuth';
 import { listOwnedActivityTypes } from '../../../../../lib/activityTypeQueries';
+import { listCoursesForActivityTypes } from '../../../../../lib/activityCourseQueries';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -41,6 +42,9 @@ function studentDisplayName(student: SubmissionRow['student']): string {
  * difficultyLevel (GitHub #276) comes along with the story join so the combined instructor
  * dashboard's Level filter has something real to filter these rows on, the same way it already
  * does for quiz attempts via session_log.difficulty_level.
+ *
+ * courses (GitHub #474) is the same per-catalog course lookup GET /api/instructor/activities
+ * attaches to quiz attempts — [] means the catalog isn't linked to any course yet.
  *
  * An empty list is a 200.
  */
@@ -85,6 +89,12 @@ export async function GET(request: Request) {
 
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
+  // GitHub #474: same "which course(s) is this catalog linked to" resolution
+  // GET /api/instructor/activities uses for quiz attempts, scoped to ownedTypes so this stays one
+  // extra round trip regardless of how many submissions there are.
+  const { coursesByActivityType, error: coursesError } = await listCoursesForActivityTypes(supabase, ownedTypes);
+  if (coursesError) return Response.json({ error: coursesError.message }, { status: 500 });
+
   const submissions = (data ?? []).map((row) => {
     const r = row as unknown as SubmissionRow;
     return {
@@ -99,6 +109,7 @@ export async function GET(request: Request) {
       llmFeedback: r.llm_feedback,
       submittedAt: r.submitted_at,
       gradedAt: r.graded_at,
+      courses: coursesByActivityType!.get(r.story.activity_type) ?? [],
     };
   });
 

@@ -149,6 +149,7 @@ describe('GET /api/instructor/acceptance-criteria/submissions', () => {
         llmFeedback: 'Good coverage of the happy path.',
         submittedAt: '2026-08-01T10:00:00.000Z',
         gradedAt: '2026-08-01T10:05:00.000Z',
+        courses: [],
       },
       {
         submissionId: 'submission-2',
@@ -162,8 +163,32 @@ describe('GET /api/instructor/acceptance-criteria/submissions', () => {
         llmFeedback: null,
         submittedAt: '2026-08-01T10:00:00.000Z',
         gradedAt: null,
+        courses: [],
       },
     ]);
+  });
+
+  // GitHub #474: same per-catalog course lookup GET /api/instructor/activities uses for quiz
+  // attempts — a submission's own catalog can be linked to a course too.
+  it("attaches every course the submission's catalog is linked to", async () => {
+    queueRole('instructor');
+    queueOwnedActivityTypes(['MY_LLM_CATALOG']);
+    queue('submission', { data: [submissionRow()], error: null });
+    queue('assembled_quiz_catalog', {
+      data: [
+        {
+          activity_type: 'MY_LLM_CATALOG',
+          assembled_quiz: { course_id: 'course-1', course: { course_name: 'Requirements 101' } },
+        },
+      ],
+      error: null,
+    });
+
+    const response = await GET(request(undefined, 'valid-token'));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.submissions[0].courses).toEqual([{ courseId: 'course-1', courseName: 'Requirements 101' }]);
   });
 
   it('filters to role student, so an instructor’s own submissions stay out of their report', async () => {

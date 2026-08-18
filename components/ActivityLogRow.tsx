@@ -53,12 +53,20 @@ export function ActivityLogRow<T extends ActivityLogEntry>({
   entry,
   variant = 'table',
   studentName,
+  courses,
   renderDetail,
 }: {
   entry: T;
   variant?: 'table' | 'compact';
   /** Instructor Dashboard only (GitHub #82): renders a leading Student column in the table variant. */
   studentName?: string;
+  /**
+   * Instructor Dashboard only (GitHub #474): renders a Course column showing every course this
+   * attempt's catalog is currently linked to. Undefined omits the column entirely (student's own
+   * log, dashboard preview); an empty array renders "No course assigned" for a catalog that
+   * exists but isn't composed into any assembled quiz yet — the two are deliberately distinct.
+   */
+  courses?: { courseId: string; courseName: string }[];
   /**
    * GitHub #276: when provided, adds an expand chevron as the table variant's trailing column —
    * clicking it reveals whatever this returns for the row (a quiz attempt's questions/options/
@@ -88,7 +96,7 @@ export function ActivityLogRow<T extends ActivityLogEntry>({
     );
   }
 
-  const colSpan = (studentName ? 1 : 0) + 5 + (renderDetail ? 1 : 0);
+  const colSpan = (studentName ? 1 : 0) + 5 + (courses ? 1 : 0) + (renderDetail ? 1 : 0);
 
   return (
     <>
@@ -141,6 +149,24 @@ export function ActivityLogRow<T extends ActivityLogEntry>({
         <td className="px-4 py-3.5">
           <ActivityStatusBadge state={state} />
         </td>
+        {courses ? (
+          <td className="px-4 py-3.5">
+            {courses.length === 0 ? (
+              <span className="text-xs font-semibold italic text-brand-ink-muted">No course assigned</span>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {courses.map((course) => (
+                  <span
+                    key={course.courseId}
+                    className="inline-block whitespace-nowrap rounded-full bg-brand-navy-border px-2.5 py-1 text-xs font-bold text-brand-ink"
+                  >
+                    {course.courseName}
+                  </span>
+                ))}
+              </div>
+            )}
+          </td>
+        ) : null}
         {renderDetail ? (
           <td className="px-4 py-3.5 text-right">
             <button
