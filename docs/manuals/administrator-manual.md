@@ -64,9 +64,20 @@ enrollment-by-instructor only, by design.
 ## Setting up LLM grading (for "Write Acceptance Criteria"-style activities)
 
 Some activity catalogs are graded by an LLM instead of multiple-choice. For these to work, an
-instructor has to configure an LLM provider under **Instructor → Settings**. This is **not** an
-environment variable — the API key is entered through that in-app form and stored (encrypted at
-rest, masked in every API response) in the `instructor_llm_config` table.
+instructor has to configure an LLM provider under **Instructor → Settings**. The provider/model
+choice is not an environment variable — it's entered through that in-app form and stored (masked
+in every API response) in the `instructor_llm_config` table. The API key itself *is* backed by an
+environment variable, though: `LLM_CONFIG_ENCRYPTION_KEY` (see `.env.example`) is the secret the
+app encrypts that key with before writing it to the database, so it's never stored in plaintext —
+this variable must be set (a base64-encoded 32-byte value, `openssl rand -base64 32`) for saving
+or grading against an LLM config to work at all; if it's missing, saving a config or grading a
+submission fails with a 500 rather than silently falling back to plaintext.
+
+**If you're deploying this on top of an existing database** that already has rows in
+`instructor_llm_config` from before `LLM_CONFIG_ENCRYPTION_KEY` existed: those rows were saved as
+plaintext and cannot be decrypted after this change ships. Any instructor who already configured
+a provider needs to re-save it once from **Instructor → Settings** — grading will 500 with
+"Configured LLM provider key could not be read" until they do.
 
 Supported providers today (see `lib/llm/factory.ts`): Anthropic Claude, OpenAI ChatGPT, and
 Google Gemini. Whichever one is configured needs a valid API key from that provider, which the

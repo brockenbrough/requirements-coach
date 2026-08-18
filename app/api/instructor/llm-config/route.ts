@@ -1,12 +1,15 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { requireInstructor } from '../../../../lib/instructorAuth';
 import { isLLMProviderName } from '../../../../lib/llm/provider';
+import { encryptSecret } from '../../../../lib/secretEncryption';
 
 const UNIQUE_VIOLATION = '23505';
 
 // api_key is deliberately excluded — write-only from the client's perspective, matching the
 // schema comment on instructor_llm_config ("only a service-role route can read or write
-// api_key, and that route is responsible for masking it before it reaches the client").
+// api_key, and that route is responsible for masking it before it reaches the client"). The
+// column itself also never holds a plaintext key: POST encrypts it (lib/secretEncryption.ts)
+// before the insert, so even a direct database read only ever sees ciphertext.
 const CONFIG_COLUMNS = 'instructor_llm_config_id, provider, model, is_active, updated_at';
 
 function getToken(request: Request): string | null {
@@ -34,7 +37,7 @@ function getToken(request: Request): string | null {
  *  - 403 if the caller isn't an instructor (no body, matching requireInstructor's convention)
  *  - 400 if provider isn't one of CLAUDE/CHATGPT/GEMINI, or apiKey is empty
  *  - 200 with the saved row — api_key never included
- *  - 500 if Supabase isn't configured or a query fails
+ *  - 500 if Supabase isn't configured, LLM_CONFIG_ENCRYPTION_KEY isn't configured, or a query fails
  *
  * GET AC summary:
  *  - Same 401/403 as POST.
@@ -125,6 +128,14 @@ export async function POST(request: Request) {
     return Response.json({ error: 'apiKey is required.' }, { status: 400 });
   }
 
+  // Encrypted before it ever reaches the database — see lib/secretEncryption.ts. null means
+  // LLM_CONFIG_ENCRYPTION_KEY isn't configured for this deployment; fail closed rather than
+  // fall back to writing the plaintext key.
+  const encryptedApiKey = encryptSecret(apiKey);
+  if (!encryptedApiKey) {
+    return Response.json({ error: 'LLM key storage is not configured.' }, { status: 500 });
+  }
+
   const isActive = Boolean(setActive);
 
   const deactivateExisting = () =>
@@ -138,7 +149,7 @@ export async function POST(request: Request) {
         user_id: guard.user_id,
         provider,
         model,
-        api_key: apiKey,
+        api_key: encryptedApiKey,
         is_active: isActive,
       })
       .select(CONFIG_COLUMNS)
