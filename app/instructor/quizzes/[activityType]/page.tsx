@@ -9,7 +9,8 @@ import { ConfirmModal } from '../../../../components/ConfirmModal';
 import { DeleteQuestionModal } from '../../../../components/DeleteQuestionModal';
 import { PromptFormModal } from '../../../../components/PromptFormModal';
 import { QuestionFormModal } from '../../../../components/QuestionFormModal';
-import { deleteCatalog, loadQuizDetail, type QuizMeta } from '../../../../lib/quizClient';
+import { RatingPromptModal } from '../../../../components/RatingPromptModal';
+import { deleteCatalog, loadQuizDetail, updateRatingPrompt, type QuizMeta } from '../../../../lib/quizClient';
 import { createQuestion, updateQuestion } from '../../../../lib/sessionClient';
 import {
   createUserStory,
@@ -97,6 +98,7 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
   const [highlight, setHighlight] = useState<{ id: string; label: string } | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showDeleteCatalog, setShowDeleteCatalog] = useState(false);
+  const [ratingPromptModalOpen, setRatingPromptModalOpen] = useState(false);
 
   useEffect(() => {
     if (!token) return;
@@ -242,6 +244,20 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
     window.setTimeout(() => setToastMessage(null), TOAST_MS);
   }
 
+  async function handleSaveRatingPrompt(value: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (!token) return { ok: false, error: 'Your session has expired. Please sign in again.' };
+
+    const result = await updateRatingPrompt(token, params.activityType, value);
+    if (!result.ok) return { ok: false, error: result.error };
+
+    setQuiz((current) => (current ? { ...current, ratingPrompt: result.data.ratingPrompt } : current));
+    setRatingPromptModalOpen(false);
+    setToastMessage('Grading rubric updated.');
+    window.setTimeout(() => setToastMessage(null), TOAST_MS);
+
+    return { ok: true };
+  }
+
   async function handleDeleteCatalog(): Promise<{ ok: true } | { ok: false; error: string }> {
     if (!token) return { ok: false, error: 'Your session has expired. Please sign in again.' };
 
@@ -354,6 +370,26 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
                   activity at {coverageGaps.length === 1 ? 'that level' : 'those levels'} until each has at least{' '}
                   {STORIES_PER_SESSION}.
                 </p>
+              </div>
+            ) : null}
+
+            {llmGraded ? (
+              <div className="mb-6 mt-6 flex flex-wrap items-start justify-between gap-3 rounded-brand-lg border border-gray-100 bg-gray-50 p-4">
+                <div className="min-w-0 flex-1">
+                  <p className="mb-1 text-xs font-extrabold uppercase tracking-wide text-gray-400">Grading Rubric</p>
+                  {quiz.ratingPrompt ? (
+                    <p className="whitespace-pre-wrap text-sm font-medium text-gray-600">{quiz.ratingPrompt}</p>
+                  ) : (
+                    <p className="text-sm font-medium text-gray-400">Using the built-in default rubric.</p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setRatingPromptModalOpen(true)}
+                  className="flex-none rounded-full border border-gray-300 bg-white px-4 py-1.5 text-xs font-extrabold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple"
+                >
+                  {quiz.ratingPrompt ? 'Edit rubric' : 'Set rubric'}
+                </button>
               </div>
             ) : null}
 
@@ -505,6 +541,15 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
           catalogOptions={quizOptions}
           onClose={() => setPromptModalState(null)}
           onSave={handleSavePrompt}
+        />
+      ) : null}
+
+      {ratingPromptModalOpen ? (
+        <RatingPromptModal
+          mode="edit"
+          initialValue={quiz?.ratingPrompt ?? ''}
+          onCancel={() => setRatingPromptModalOpen(false)}
+          onSave={handleSaveRatingPrompt}
         />
       ) : null}
 
