@@ -60,12 +60,12 @@ function TrashIcon() {
  * component only decides *when* to call them, never what they do.
  *
  * The trigger button and every menu item stopPropagation() on click so this menu can sit inside
- * (or visually over) a clickable card without ever triggering the card's own navigation/selection —
- * see CourseCard's own docblock for why that matters in its "selected" (toggle, not Link) mode.
+ * (or visually over) a clickable card without ever triggering the card's own navigation — see
+ * CourseCard's own docblock; its whole info area is a Link now, so this menu's actions would
+ * otherwise fire a navigation alongside whatever they're actually meant to do.
  *
- * "View course" always navigates via a real Link, regardless of how the card's own primary click
- * behaves — the one action guaranteed to reach the course detail page from a card that might not
- * navigate on its own (the instructor dashboard's "select to preview stats" cards, see CourseCard).
+ * "View course" is a redundant-but-harmless convenience alongside the card's own navigation — kept
+ * for a menu-driven navigation path that doesn't require finding the card body.
  */
 export function CourseCardMenu({
   course,

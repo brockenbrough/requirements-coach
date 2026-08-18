@@ -7,7 +7,14 @@ import { CreateCourseModal } from '../../../components/CreateCourseModal';
 import { DeleteCourseModal } from '../../../components/DeleteCourseModal';
 import { DuplicateCourseModal } from '../../../components/DuplicateCourseModal';
 import { EditCourseModal } from '../../../components/EditCourseModal';
-import { loadCourses, loadAllCourseClassStats, type CourseSummary, type CourseClassStats } from '../../../lib/courseClient';
+import {
+  loadCourses,
+  loadAllCourseClassStats,
+  loadCourseStats,
+  type CourseSummary,
+  type CourseClassStats,
+  type CourseActivityStats,
+} from '../../../lib/courseClient';
 import { useRequireRole } from '../../../lib/useRequireRole';
 
 /**
@@ -33,6 +40,8 @@ export default function InstructorCoursesPage() {
   const [duplicateSource, setDuplicateSource] = useState<CourseSummary | null>(null);
   const [editSource, setEditSource] = useState<CourseSummary | null>(null);
   const [deleteSource, setDeleteSource] = useState<CourseSummary | null>(null);
+  const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
+  const [courseStats, setCourseStats] = useState<CourseActivityStats[] | null>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -56,6 +65,17 @@ export default function InstructorCoursesPage() {
       cancelled = true;
     };
   }, [token, retryCount]);
+
+  async function handleSelectCourse(courseId: string | null) {
+    if (!token) return;
+    setSelectedCourseId(courseId);
+    // Reset to the loading state before the fetch, not just on deselect — see
+    // app/instructor/page.tsx's identical handler for why (GitHub #423).
+    setCourseStats(null);
+    if (!courseId) return;
+    const result = await loadCourseStats(token, courseId);
+    if (result.ok) setCourseStats(result.data.statistics);
+  }
 
   if (loading || !authorized) return null;
   if (!token || !profile) return null;
@@ -108,6 +128,9 @@ export default function InstructorCoursesPage() {
                 key={course.id}
                 course={course}
                 classStats={classStatsById?.[course.id] ?? null}
+                activityStats={selectedCourseId === course.id ? courseStats : undefined}
+                statsExpanded={selectedCourseId === course.id}
+                onToggleStats={(c) => handleSelectCourse(selectedCourseId === c.id ? null : c.id)}
                 onDuplicate={setDuplicateSource}
                 onEdit={setEditSource}
                 onDelete={setDeleteSource}
@@ -156,6 +179,7 @@ export default function InstructorCoursesPage() {
           onClose={() => setDeleteSource(null)}
           onDeleted={() => {
             setCourses((current) => (current ?? []).filter((c) => c.id !== deleteSource.id));
+            if (selectedCourseId === deleteSource.id) setSelectedCourseId(null);
             setDeleteSource(null);
           }}
         />
