@@ -10,11 +10,8 @@ function getToken(request: Request): string | null {
   return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
 }
 
-// studentId is the "user"."user_id" UUID, never studentName — this is the depersonalization
-// REQ-PL-3.4.3 asks for: a consistent per-student ID a researcher can group by, with no name
-// column anywhere in the file.
+// No studentId or studentName column — this is the depersonalization REQ-PL-3.4.3 asks for.
 const EXPORT_COLUMNS = [
-  'studentId',
   'activityType',
   'difficultyLevel',
   'status',
@@ -36,7 +33,8 @@ const EXPORT_COLUMNS = [
  *
  * Reuses loadStudentActivityForIds (already built for the course roster page) rather than a new
  * query — same session-level rows the roster's per-student summary is computed from, just
- * un-aggregated and with studentName stripped before it ever reaches the response.
+ * un-aggregated and with studentName and studentId stripped before it ever reaches the response.
+ * There is no per-student identifier in the file at all, so rows cannot be grouped by student.
  *
  * - 401 missing/invalid bearer token
  * - 403 caller isn't an instructor (no body)
@@ -78,7 +76,6 @@ export async function GET(request: Request, { params }: { params: { id: string }
   }
 
   const rows = activities.map((a) => [
-    a.studentId,
     a.activity_type,
     a.difficulty_level,
     a.status,

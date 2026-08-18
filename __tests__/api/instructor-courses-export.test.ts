@@ -124,7 +124,7 @@ describe('GET /api/instructor/courses/[id]/export', () => {
     expect(await res.text()).toBe('');
   });
 
-  it('returns a depersonalized CSV keyed by studentId, with no name column anywhere', async () => {
+  it('returns a depersonalized CSV with no student ID or name column anywhere', async () => {
     queueRole('instructor');
     queue('course', { data: courseRow(), error: null });
     queue('student_course', {
@@ -141,10 +141,10 @@ describe('GET /api/instructor/courses/[id]/export', () => {
     expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="course-ABCDEF-report.csv"');
 
     const csv = await res.text();
-    expect(csv).not.toMatch(/Alex|Chen|achen/);
+    expect(csv).not.toMatch(/Alex|Chen|achen|student-1/);
     expect(csv).toBe(
-      'studentId,activityType,difficultyLevel,status,startedAt,endedAt,cumulativeScore,maxScore,passed,questionCount,answeredCount\r\n' +
-        'student-1,IDENTIFY_WEAK_USER_STORIES,1,completed,2026-08-01T10:00:00Z,2026-08-01T10:10:00Z,3,4,true,0,0\r\n',
+      'activityType,difficultyLevel,status,startedAt,endedAt,cumulativeScore,maxScore,passed,questionCount,answeredCount\r\n' +
+        'IDENTIFY_WEAK_USER_STORIES,1,completed,2026-08-01T10:00:00Z,2026-08-01T10:10:00Z,3,4,true,0,0\r\n',
     );
   });
 
@@ -157,7 +157,7 @@ describe('GET /api/instructor/courses/[id]/export', () => {
     expect(res.status).toBe(200);
     const csv = await res.text();
     expect(csv).toBe(
-      'studentId,activityType,difficultyLevel,status,startedAt,endedAt,cumulativeScore,maxScore,passed,questionCount,answeredCount\r\n',
+      'activityType,difficultyLevel,status,startedAt,endedAt,cumulativeScore,maxScore,passed,questionCount,answeredCount\r\n',
     );
     expect(h.state.tables).not.toContain('session_log');
   });
