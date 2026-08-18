@@ -1,7 +1,6 @@
 import { getSupabaseClient } from '../../../lib/supabase';
-
-const PROFILE_COLUMNS =
-  'user_id, username, biography, avatar_url, role, first_name, last_name, age, semester, has_seen_onboarding_tour';
+import { PROFILE_COLUMNS } from '../../../lib/profileQueries';
+import { canWearTitle } from '../../../lib/titleQueries';
 
 const MIN_AGE = 1;
 const MAX_AGE = 129;
@@ -115,13 +114,22 @@ export async function PATCH(request: Request) {
   if (!user) return Response.json({ error: 'Invalid or expired token.' }, { status: 401 });
 
   const body = await request.json();
-  const { biography, first_name, last_name, age, semester, has_seen_onboarding_tour } = body as {
+  const {
+    biography,
+    first_name,
+    last_name,
+    age,
+    semester,
+    has_seen_onboarding_tour,
+    selected_title_definition_id,
+  } = body as {
     biography?: string;
     first_name?: string;
     last_name?: string;
     age?: number | null;
     semester?: number | null;
     has_seen_onboarding_tour?: boolean;
+    selected_title_definition_id?: string | null;
   };
 
   const updates: Record<string, unknown> = {};
@@ -152,6 +160,21 @@ export async function PATCH(request: Request) {
   // re-finished) — never unset by this route, but not rejected either; there's no harm in it,
   // and it keeps this route's validation from having to know about the tour's own state machine.
   if (has_seen_onboarding_tour !== undefined) updates.has_seen_onboarding_tour = has_seen_onboarding_tour;
+
+  // The title a student wears. Clearing it is always allowed; setting one is checked against their
+  // own session history, never taken on the client's word — this route derives user_id from the
+  // token, so canWearTitle is asking "did *this* caller pass that level", not "does the body say
+  // so". Without the check any title in the database could be worn by anyone.
+  if (selected_title_definition_id !== undefined) {
+    if (selected_title_definition_id === null) {
+      updates.selected_title_definition_id = null;
+    } else {
+      const verdict = await canWearTitle(supabase!, user.id, selected_title_definition_id);
+      if (verdict.error) return Response.json({ error: verdict.error.message }, { status: 500 });
+      if (!verdict.ok) return Response.json({ error: verdict.reason }, { status: 400 });
+      updates.selected_title_definition_id = selected_title_definition_id;
+    }
+  }
 
   if (Object.keys(updates).length === 0) {
     return Response.json({ error: 'No fields to update.' }, { status: 400 });

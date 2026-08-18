@@ -19,6 +19,31 @@ function formatRemaining(ms: number): string {
 }
 
 /**
+ * Lets a student leave the challenge screen from any state, including mid-attempt — safe to do
+ * since there's no "abandon" for the Daily Challenge: the deadline keeps counting down
+ * server-side regardless of whether this page is open, and loadDailyChallenge picks the attempt
+ * back up on return.
+ *
+ * Carries its own background/border rather than relying on surrounding text color, since it
+ * renders both on AppShell's white <main> (the in-progress and completed states have no
+ * wrapping card) and on this page's own dark cards (bg-[#1b1642]) — a plain light-on-transparent
+ * link had good contrast on the dark cards but nearly none on white.
+ */
+function BackToDashboardLink() {
+  return (
+    <Link
+      href="/dashboard"
+      className="mb-4 inline-flex items-center gap-1.5 rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3 py-1.5 text-xs font-extrabold text-white transition hover:bg-brand-navy"
+    >
+      <svg viewBox="0 0 24 24" className="h-3 w-3 flex-none" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+        <path d="M15 6l-6 6 6 6" />
+      </svg>
+      Back to dashboard
+    </Link>
+  );
+}
+
+/**
  * The Daily Challenge attempt screen (GitHub #336) — landing/in-progress/expired/completed all
  * live on this one route, unlike the Type A activities/play split, since there is no
  * difficulty-level choice or multi-question setup to show first: a single question either is or
@@ -160,6 +185,7 @@ export default function DailyChallengePage() {
         ) : !state.attempt ? (
           !state.available ? (
             <div className="rounded-2xl border border-[#332b6b] bg-[#1b1642] p-6 text-[#F3F1FF]">
+              <BackToDashboardLink />
               <h2 className="mb-2 text-xl font-extrabold text-white">No Daily Challenge yet</h2>
               <p className="mb-4 text-sm font-semibold text-[#A79FC9]">
                 Join a course to unlock a daily bonus question drawn from its question bank.
@@ -173,6 +199,7 @@ export default function DailyChallengePage() {
             </div>
           ) : (
             <div className="rounded-2xl border border-[#332b6b] bg-[#1b1642] p-6 text-[#F3F1FF]">
+              <BackToDashboardLink />
               <h2 className="mb-2 text-xl font-extrabold text-white">Today’s Daily Challenge</h2>
               <p className="mb-4 text-sm font-semibold text-[#A79FC9]">
                 One question, double points, under a time limit. The clock starts the moment you begin.
@@ -189,6 +216,7 @@ export default function DailyChallengePage() {
           )
         ) : state.attempt.submitted_at ? (
           <>
+            <BackToDashboardLink />
             {state.question ? (
               <FeedbackCard
                 prompt={state.question.question_prompt}
@@ -226,8 +254,9 @@ export default function DailyChallengePage() {
           </div>
         ) : (
           <>
+            <BackToDashboardLink />
             <div className="mb-5 flex items-center justify-between">
-              <span className="text-xs font-extrabold uppercase tracking-wide text-[#FFD666]">Daily Challenge · 2x points</span>
+              <span className="text-xs font-extrabold uppercase tracking-wide text-brand-danger">Daily Challenge · 2x points</span>
               <span className="rounded-full bg-[#241f52] px-3 py-1 text-sm font-extrabold text-white">
                 {remainingMs === null ? '…' : formatRemaining(remainingMs)}
               </span>

@@ -30,6 +30,8 @@ export type AssembledQuizSummary = {
   courseName: string;
   /** GitHub: the single catalog kind this quiz may ever compose/hand-pick from — see assembled_quiz.grading_kind's own comment in supabase/schema.sql. */
   gradingKind: GradingKind;
+  /** GitHub #416: how many questions/prompts a session draws per level for this quiz — see assembled_quiz.questions_per_level's own comment in supabase/schema.sql. */
+  questionsPerLevel: number;
   catalogs: { activityType: string; name: string; gradingKind: GradingKind }[];
   catalogNames: string[];
   createdAt: string;
@@ -41,13 +43,14 @@ type AssembledQuizRow = {
   description: string | null;
   course_id: string;
   grading_kind: string;
+  questions_per_level: number;
   created_at: string;
   course: { course_name: string } | null;
   assembled_quiz_catalog: { activity_type: string; catalog: { quiz_name: string; grading_kind: string } | null }[] | null;
 };
 
 const ASSEMBLED_QUIZ_SUMMARY_SELECT =
-  'assembled_quiz_id, quiz_name, description, course_id, grading_kind, created_at, course:course_id(course_name), assembled_quiz_catalog(activity_type, catalog:activity_type(quiz_name, grading_kind))';
+  'assembled_quiz_id, quiz_name, description, course_id, grading_kind, questions_per_level, created_at, course:course_id(course_name), assembled_quiz_catalog(activity_type, catalog:activity_type(quiz_name, grading_kind))';
 
 function mapAssembledQuizRow(row: AssembledQuizRow): AssembledQuizSummary {
   const catalogs = (row.assembled_quiz_catalog ?? []).map((link) => ({
@@ -62,6 +65,7 @@ function mapAssembledQuizRow(row: AssembledQuizRow): AssembledQuizSummary {
     courseId: row.course_id,
     courseName: row.course?.course_name ?? 'Unknown course',
     gradingKind: row.grading_kind === 'llm-graded' ? 'llm-graded' : 'mcq',
+    questionsPerLevel: row.questions_per_level,
     catalogs,
     catalogNames: catalogs.map((c) => c.name),
     createdAt: row.created_at,
@@ -113,6 +117,7 @@ export type AssembledQuizRecord = {
   description: string | null;
   courseId: string;
   gradingKind: GradingKind;
+  questionsPerLevel: number;
 };
 
 /**
@@ -125,6 +130,10 @@ export type AssembledQuizRecord = {
  * gradingKind is required, not inferred from catalogActivityTypes — the caller (the POST route)
  * already validated every catalog matches it, and locking the value in here rather than deriving
  * it is what makes the column meaningful once catalogs are later added/removed.
+ *
+ * questionsPerLevel (GitHub #416) is required too, not left to the column's own DB default — the
+ * route validates and fills in the same default (4) itself when the instructor doesn't set one,
+ * so this function never has to guess whether an omission was deliberate.
  */
 export async function createAssembledQuiz(
   supabase: SupabaseClient,
@@ -134,6 +143,7 @@ export async function createAssembledQuiz(
     courseId: string;
     creatorId: string;
     gradingKind: GradingKind;
+    questionsPerLevel: number;
     catalogActivityTypes: string[];
   },
 ): Promise<{ quiz: AssembledQuizRecord | null; error: { message: string } | null }> {
@@ -146,6 +156,7 @@ export async function createAssembledQuiz(
     course_id: params.courseId,
     creator_id: params.creatorId,
     grading_kind: params.gradingKind,
+    questions_per_level: params.questionsPerLevel,
   });
 
   if (quizError) return { quiz: null, error: quizError };
@@ -169,6 +180,7 @@ export async function createAssembledQuiz(
       description: params.description,
       courseId: params.courseId,
       gradingKind: params.gradingKind,
+      questionsPerLevel: params.questionsPerLevel,
     },
     error: null,
   };
@@ -181,11 +193,12 @@ type AssembledQuizMetaRow = {
   course_id: string;
   creator_id: string;
   grading_kind: string;
+  questions_per_level: number;
   created_at: string;
 };
 
 const ASSEMBLED_QUIZ_COLUMNS =
-  'assembled_quiz_id, quiz_name, description, course_id, creator_id, grading_kind, created_at';
+  'assembled_quiz_id, quiz_name, description, course_id, creator_id, grading_kind, questions_per_level, created_at';
 
 export type OwnedAssembledQuizResult =
   | { status: 'ok'; quiz: AssembledQuizMetaRow }
@@ -529,10 +542,16 @@ export type QuizCatalogComposition = {
 
 export type QuizLevelCoverage = { level: 1 | 2 | 3; available: number; required: number; sufficient: boolean };
 
-function buildLevelCoverage(availableQuestions: readonly { difficulty_level: number }[]): QuizLevelCoverage[] {
+// GitHub #416: required defaults to QUESTIONS_PER_SESSION but callers pass the quiz's own
+// questions_per_level so the coverage banner warns against what a session here will actually try
+// to draw, not the app-wide default.
+function buildLevelCoverage(
+  availableQuestions: readonly { difficulty_level: number }[],
+  required: number = QUESTIONS_PER_SESSION,
+): QuizLevelCoverage[] {
   return ([1, 2, 3] as const).map((level) => {
     const available = availableQuestions.filter((q) => q.difficulty_level === level).length;
-    return { level, available, required: QUESTIONS_PER_SESSION, sufficient: available >= QUESTIONS_PER_SESSION };
+    return { level, available, required, sufficient: available >= required };
   });
 }
 
@@ -603,11 +622,12 @@ function compositionFailure(error: { message: string }): GetQuizCompositionResul
  * llm-graded parity that added quiz_excluded_user_story/assembled_quiz_extra_user_story): every
  * linked catalog with its genuinely-active question or prompt count (total minus this quiz's own
  * exclusions — never the catalog's or any other quiz's), every individually hand-picked question
- * or prompt with its source catalog for display, and per-level coverage against
- * QUESTIONS_PER_SESSION so the detail page can warn *before* a student ever hits a level with too
- * few questions left to draw a round (requirement 4) — counting hand-picked items toward that
- * coverage too, since they are genuinely drawable (see loadCatalogQuestionPool's own docblock for
- * the identical MCQ pool formula; no equivalent draw exists yet for llm-graded quizzes).
+ * or prompt with its source catalog for display, and per-level coverage against this quiz's own
+ * questionsPerLevel (GitHub #416; the caller passes it since it already has the quiz's meta row)
+ * so the detail page can warn *before* a student ever hits a level with too few questions left to
+ * draw a round (requirement 4) — counting hand-picked items toward that coverage too, since they
+ * are genuinely drawable (see loadCatalogQuestionPool's own docblock for the identical MCQ pool
+ * formula; no equivalent draw exists yet for llm-graded quizzes).
  *
  * mcq and llm-graded are handled by fully parallel code paths throughout — question/
  * quiz_excluded_question/assembled_quiz_extra_question on one side, user_story/
@@ -625,7 +645,11 @@ function compositionFailure(error: { message: string }): GetQuizCompositionResul
  * reusing the already-fetched catalogActiveQuestions/catalogActiveUserStories arrays here avoids a
  * second query just for that.
  */
-export async function getQuizComposition(supabase: SupabaseClient, quizId: string): Promise<GetQuizCompositionResult> {
+export async function getQuizComposition(
+  supabase: SupabaseClient,
+  quizId: string,
+  questionsPerLevel: number = QUESTIONS_PER_SESSION,
+): Promise<GetQuizCompositionResult> {
   const { data: linkRows, error: linkError } = await supabase
     .from('assembled_quiz_catalog')
     .select('activity_type, catalog:activity_type(quiz_name, description, grading_kind, rating_prompt)')
@@ -778,7 +802,7 @@ export async function getQuizComposition(supabase: SupabaseClient, quizId: strin
     }
   }
 
-  const levelCoverage = buildLevelCoverage(combinedForCoverage);
+  const levelCoverage = buildLevelCoverage(combinedForCoverage, questionsPerLevel);
 
   return {
     catalogs,
@@ -995,8 +1019,9 @@ export async function listAllUserStoriesForPicker(supabase: SupabaseClient, inst
 
 /**
  * GitHub #362: copies every assembled_quiz belonging to `sourceCourseId` onto `targetCourseId` —
- * same quiz_name/description, the same linked catalogs (assembled_quiz_catalog), the
- * same per-quiz question exclusions (quiz_excluded_question) and hand-picked questions
+ * same quiz_name/description/questions_per_level (GitHub #416), the same linked catalogs
+ * (assembled_quiz_catalog), the same per-quiz question exclusions (quiz_excluded_question) and
+ * hand-picked questions
  * (assembled_quiz_extra_question, GitHub #380), and the same llm-graded prompt exclusions/
  * hand-picks (quiz_excluded_user_story/assembled_quiz_extra_user_story), all re-pointed at freshly
  * generated assembled_quiz ids. Reuses createAssembledQuiz rather than inserting assembled_quiz/
@@ -1017,7 +1042,7 @@ export async function duplicateQuizzesForCourse(
 ): Promise<{ copiedCount: number; error: { message: string } | null }> {
   const { data, error: sourceError } = await supabase
     .from('assembled_quiz')
-    .select('assembled_quiz_id, quiz_name, description, grading_kind')
+    .select('assembled_quiz_id, quiz_name, description, grading_kind, questions_per_level')
     .eq('course_id', params.sourceCourseId);
 
   if (sourceError) return { copiedCount: 0, error: sourceError };
@@ -1027,6 +1052,7 @@ export async function duplicateQuizzesForCourse(
     quiz_name: string;
     description: string | null;
     grading_kind: string;
+    questions_per_level: number;
   };
   const sourceQuizzes = (data ?? []) as SourceQuizRow[];
   let copiedCount = 0;
@@ -1053,6 +1079,7 @@ export async function duplicateQuizzesForCourse(
       courseId: params.targetCourseId,
       creatorId: params.creatorId,
       gradingKind: sourceQuiz.grading_kind === 'llm-graded' ? 'llm-graded' : 'mcq',
+      questionsPerLevel: sourceQuiz.questions_per_level,
       catalogActivityTypes: activityTypes ?? [],
     });
     if (createError || !newQuiz) return { copiedCount, error: createError };

@@ -41,6 +41,13 @@ CREATE TABLE "user" (
     -- account backfilled by the ALTER TABLE below is treated the same as a brand new one: they
     -- get the tour once, same as everybody else.
     has_seen_onboarding_tour bool NOT NULL DEFAULT false,
+    -- The mastery title this student has chosen to wear next to their name. NULL means none,
+    -- which is every account's starting state — nothing is auto-selected on the student's behalf.
+    -- A title_definition_id rather than the title text: an instructor renaming a title carries
+    -- straight through to every display, and ON DELETE SET NULL (below) cleans up after a deleted
+    -- one instead of leaving a dangling name. Which titles are *earnable* stays derived from
+    -- session_log as it always was — only the student's pick is stored here.
+    selected_title_definition_id uuid,
     PRIMARY KEY (user_id));
 
 -- ---------------------------------------------------------------------
@@ -302,14 +309,28 @@ CREATE TABLE student_course (
 -- "locked forever" convention activity_type.grading_kind already uses. Before this, a quiz
 -- could link catalogs of both kinds at once with nothing to say which one its "Create new
 -- question"/"Add prompt" composition actions should offer.
+--
+-- questions_per_level (GitHub #416): how many questions/prompts a session draws per level for
+-- this quiz, replacing the app-wide QUESTIONS_PER_SESSION constant (lib/sessionRules.ts) as the
+-- draw size for any catalog this quiz grants access to. Defaults to 4 (QUESTIONS_PER_SESSION's
+-- own value) so a quiz created without touching the field draws exactly as every quiz did before
+-- this column existed, and can never be set below MIN_QUESTIONS_PER_LEVEL (also 4 today, but a
+-- separate named constant — see its own comment in lib/sessionRules.ts) via
+-- ck_assembled_quiz_questions_per_level below. Resolved per catalog at session-start time via
+-- getAccessibleCourseForActivity (lib/activityCourseQueries.ts) — the same assembled_quiz row
+-- POST /api/sessions already reads for quiz_excluded_question, not a new lookup — so this is
+-- subject to the same known limitation documented on assembled_quiz.grading_kind and
+-- computeCourseClassStats: a catalog reachable through more than one assembled quiz uses
+-- whichever one that query happens to resolve first.
 CREATE TABLE assembled_quiz (
-    assembled_quiz_id uuid      NOT NULL,
-    quiz_name         text      NOT NULL,
-    description       text,
-    course_id         uuid      NOT NULL,
-    creator_id        uuid      NOT NULL,
-    grading_kind      text      NOT NULL DEFAULT 'mcq',
-    created_at        timestamp NOT NULL DEFAULT now(),
+    assembled_quiz_id   uuid      NOT NULL,
+    quiz_name           text      NOT NULL,
+    description         text,
+    course_id           uuid      NOT NULL,
+    creator_id          uuid      NOT NULL,
+    grading_kind        text      NOT NULL DEFAULT 'mcq',
+    questions_per_level integer   NOT NULL DEFAULT 4,
+    created_at          timestamp NOT NULL DEFAULT now(),
     PRIMARY KEY (assembled_quiz_id));
 
 -- The m:n link to the catalogs (activity_type rows) a quiz draws from.
@@ -563,6 +584,13 @@ ALTER TABLE assembled_quiz_extra_user_story ADD CONSTRAINT fk_assembled_quiz_ext
 ALTER TABLE assembled_quiz_extra_user_story ADD CONSTRAINT fk_assembled_quiz_extra_user_story_user_story FOREIGN KEY (user_story_id) REFERENCES user_story (user_story_id) ON DELETE CASCADE;
 
 ALTER TABLE title_definition ADD CONSTRAINT fk_title_definition_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
+
+-- The title a student has chosen to wear. ON DELETE SET NULL rather than RESTRICT or CASCADE:
+-- deleting a title_definition row must not be blocked by whoever happens to be wearing it, and it
+-- certainly must not delete their profile — the wearer simply stops having a title, which is the
+-- same state every account starts in. This FK is also why the column stores an id instead of the
+-- title text: it is what keeps a stale name from surviving the row it came from.
+ALTER TABLE "user" ADD CONSTRAINT fk_user_title_definition FOREIGN KEY (selected_title_definition_id) REFERENCES title_definition (title_definition_id) ON DELETE SET NULL;
 -- Who authored the story, for attribution/moderation.
 ALTER TABLE user_story ADD CONSTRAINT fk_user_story_user FOREIGN KEY (creator_id) REFERENCES "user" (user_id);
 
@@ -619,6 +647,11 @@ ALTER TABLE activity_type ADD CONSTRAINT ck_activity_type_grading_kind CHECK (gr
 -- Same reasoning as ck_activity_type_grading_kind directly above, for assembled_quiz's own
 -- grading_kind column.
 ALTER TABLE assembled_quiz ADD CONSTRAINT ck_assembled_quiz_grading_kind CHECK (grading_kind IN ('mcq', 'llm-graded'));
+
+-- A quiz's per-level draw size may never go below MIN_QUESTIONS_PER_LEVEL (lib/sessionRules.ts,
+-- GitHub #416) — a hard business-rule floor ("every quiz has at least this many questions per
+-- level"), not just "must be positive."
+ALTER TABLE assembled_quiz ADD CONSTRAINT ck_assembled_quiz_questions_per_level CHECK (questions_per_level >= 4);
 
 -- REQ-GAM-DL-2.1: one title per (activity_type, difficulty_level) pair so the BL-1 lookup is
 -- unambiguous. activity_type itself is restricted to the known set via fk_title_definition_activity_type
@@ -1058,6 +1091,16 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 --
 --   ALTER TABLE "user" ADD COLUMN IF NOT EXISTS has_seen_onboarding_tour bool NOT NULL DEFAULT false;
 
+-- Selectable mastery title (the profile page's title dropdown): if your "user" table predates
+-- this column, add it and its foreign key. Existing rows backfill to NULL — nobody is wearing a
+-- title until they pick one, which is deliberate: auto-selecting the highest earned title would
+-- put a name on accounts that never asked for one.
+--
+--   ALTER TABLE "user" ADD COLUMN IF NOT EXISTS selected_title_definition_id uuid;
+--   ALTER TABLE "user" ADD CONSTRAINT fk_user_title_definition
+--     FOREIGN KEY (selected_title_definition_id)
+--     REFERENCES title_definition (title_definition_id) ON DELETE SET NULL;
+
 -- GitHub #347 (create and browse quizzes): if your activity_type table predates quiz_name/
 -- description/creator_id, add them without touching the three existing rows' keys — every
 -- existing FK to activity_type (question, session_log, title_definition) and every existing
@@ -1282,3 +1325,17 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 -- custom rubric until an instructor sets one (buildRatingPrompt, lib/llm/promptUtils.ts, already
 -- falls back to the built-in RATING_RUBRIC whenever it's null) — exactly the "unchanged behavior
 -- for pre-migration rows" state the null default already gives for free.
+
+-- assembled_quiz.questions_per_level (GitHub #416): a per-quiz override for how many
+-- questions/prompts a session draws per level, replacing the flat QUESTIONS_PER_SESSION constant
+-- as the draw size for any catalog the quiz grants access to. Never below MIN_QUESTIONS_PER_LEVEL
+-- (lib/sessionRules.ts) — every quiz must have at least 4 questions per level. If your database
+-- predates this:
+--
+--   ALTER TABLE assembled_quiz ADD COLUMN IF NOT EXISTS questions_per_level integer NOT NULL DEFAULT 4;
+--
+--   ALTER TABLE assembled_quiz ADD CONSTRAINT ck_assembled_quiz_questions_per_level
+--     CHECK (questions_per_level >= 4);
+--
+-- No backfill needed: DEFAULT 4 already matches QUESTIONS_PER_SESSION, so every existing quiz
+-- draws exactly as it did before this column existed.

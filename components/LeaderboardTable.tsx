@@ -42,6 +42,11 @@ export function LeaderboardRow({
           {entry.username}
         </Link>
         {isCurrentUser ? <span className="ml-2 text-xs font-extrabold text-brand-purple">You</span> : null}
+        {/* The mastery title this student chose to wear, under their name rather than beside it —
+            titles are long enough ("Acceptance Criteria Apprentice") to wreck the column width. */}
+        {entry.title ? (
+          <span className="mt-0.5 block text-xs font-bold text-brand-ink-muted">{entry.title}</span>
+        ) : null}
       </td>
       <td className="whitespace-nowrap px-4 py-3.5">
         <StreakBadge streak={entry.streak} />

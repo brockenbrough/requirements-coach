@@ -1,87 +1,41 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { buildMasteryTitleEntries, totalLevelsPassed, type MasteryTitleEntry } from '../lib/masteryTitles';
-import { loadAvailableTitles, loadStudentScore, loadStudentTitles } from '../lib/sessionClient';
+import { totalLevelsPassed, type MasteryTitleEntry } from '../lib/masteryTitles';
 import { CompletedSessionsSummary } from './CompletedSessionsSummary';
 import { MasteryProgressSkeleton } from './MasteryProgressSkeleton';
 import { MasteryTitleCard } from './MasteryTitleCard';
 
 /**
- * GitHub #39: the profile page's cumulative score + mastery titles section — self-contained (owns
- * its own fetch, loading, and error state), so app/profile/page.tsx just renders it for a student
- * and doesn't otherwise know how it works.
+ * GitHub #39: the profile page's cumulative score + mastery titles section.
  *
- * Loads GET /api/students/{id}/score, GET /api/students/{id}/titles, and
- * GET /api/students/{id}/available-titles in parallel, then reconciles the latter two via
- * lib/masteryTitles.ts: /titles only returns entries for activity types the student has actually
- * attempted, and /available-titles is the course-scoped list of every activity (and its full
- * title ladder) the student could attempt at all.
+ * It used to own its own fetch. That moved to lib/useMasteryProgress.ts once the profile page's
+ * title dropdown needed the same entries — see that hook's header for why one shared call beats
+ * two components fetching the same uncached endpoints. This component is now purely presentational
+ * and the page decides where its data comes from.
  */
-export function MasteryProgressSection({ token, studentId }: { token: string; studentId: string }) {
-  const [cumulativeScore, setCumulativeScore] = useState<number | null>(null);
-  const [sessionsCompleted, setSessionsCompleted] = useState<number | null>(null);
-  const [entries, setEntries] = useState<MasteryTitleEntry[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loadAttempt, setLoadAttempt] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    setError(null);
-
-    Promise.all([
-      // onRevalidate (GitHub #392 follow-up, same as UserProvider's own score load): corrects a
-      // stale cached score in the background if the server disagrees, rather than leaving this
-      // section stuck on a wrong number until the student finishes another session or logs out.
-      loadStudentScore(token, studentId, {
-        onRevalidate: (fresh) => {
-          if (cancelled) return;
-          setCumulativeScore(fresh.score);
-          setSessionsCompleted(fresh.sessionsCompleted);
-        },
-      }),
-      loadStudentTitles(token, studentId),
-      loadAvailableTitles(token, studentId),
-    ]).then(([scoreResult, titlesResult, availableResult]) => {
-      if (cancelled) return;
-
-      if (!scoreResult.ok) {
-        setError(scoreResult.error);
-        return;
-      }
-      if (!titlesResult.ok) {
-        setError(titlesResult.error);
-        return;
-      }
-      if (!availableResult.ok) {
-        setError(availableResult.error);
-        return;
-      }
-
-      setCumulativeScore(scoreResult.data.score);
-      setSessionsCompleted(scoreResult.data.sessionsCompleted);
-      setEntries(buildMasteryTitleEntries(availableResult.data.activities, titlesResult.data.titles));
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [token, studentId, loadAttempt]);
-
-  const loading = !error && entries === null;
-
+export function MasteryProgressSection({
+  entries,
+  cumulativeScore,
+  sessionsCompleted,
+  error,
+  loading,
+  onRetry,
+}: {
+  entries: MasteryTitleEntry[] | null;
+  cumulativeScore: number | null;
+  sessionsCompleted: number | null;
+  error: string | null;
+  loading: boolean;
+  onRetry: () => void;
+}) {
   return (
-    <div className="mt-8 border-t border-gray-100 pt-6">
+    <div>
       <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Mastery &amp; Progress</p>
 
       {error ? (
         <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-600">
           {error}
-          <button
-            type="button"
-            onClick={() => setLoadAttempt((count) => count + 1)}
-            className="ml-2 font-bold underline hover:text-red-700"
-          >
+          <button type="button" onClick={onRetry} className="ml-2 font-bold underline hover:text-red-700">
             Retry
           </button>
         </div>
@@ -96,18 +50,20 @@ export function MasteryProgressSection({ token, studentId }: { token: string; st
             sessionsCompleted={sessionsCompleted ?? 0}
             levelsPassed={totalLevelsPassed(entries ?? [])}
           />
-          <div className="space-y-4">
-            {entries && entries.length === 0 ? (
-              // Genuinely possible now that this is course-scoped (GET /api/students/{id}/
-              // available-titles), not a fixed set of three: a student enrolled in no course, or
-              // in courses with nothing linked yet, sees this instead of an empty list.
-              <p className="text-sm font-semibold text-gray-500">
-                No mastery titles yet — join a course to see what you can earn.
-              </p>
-            ) : (
-              (entries ?? []).map((entry) => <MasteryTitleCard key={entry.activityType} entry={entry} />)
-            )}
-          </div>
+          {entries && entries.length === 0 ? (
+            // Genuinely possible now that this is course-scoped (GET /api/students/{id}/
+            // available-titles), not a fixed set of three: a student enrolled in no course, or
+            // in courses with nothing linked yet, sees this instead of an empty list.
+            <p className="text-sm font-semibold text-gray-500">
+              No mastery titles yet — join a course to see what you can earn.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              {(entries ?? []).map((entry) => (
+                <MasteryTitleCard key={entry.activityType} entry={entry} />
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

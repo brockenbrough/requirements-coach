@@ -128,9 +128,26 @@ describe('GET /api/courses/{courseId}/leaderboard', () => {
     queue('course', { data: { course_id: COURSE_ID }, error: null });
     queue('student_course', { data: [{ course_id: COURSE_ID }], error: null }); // membership check
     queue('student_course', {
-      data: [{ user_id: 'student-1', student: { username: 'ada', avatar_url: null, role: 'student' } }],
+      data: [
+        {
+          user_id: 'student-1',
+          student: { username: 'ada', avatar_url: null, role: 'student', selected_title: { title_name: 'Story Analyst' } },
+        },
+      ],
       error: null,
     }); // roster
+    queue('assembled_quiz_catalog', {
+      // Links IDENTIFY_WEAK_USER_STORIES to this course, the same shape
+      // lib/activityCourseQueries.ts's listActivityTypesForCourses reads (GitHub #432 scoping).
+      data: [
+        {
+          activity_type: 'IDENTIFY_WEAK_USER_STORIES',
+          catalog: { quiz_name: 'IDENTIFY_WEAK_USER_STORIES', description: null, grading_kind: 'mcq' },
+          assembled_quiz: { course_id: COURSE_ID, quiz_name: 'Quiz', description: null, course: { course_name: 'Course' } },
+        },
+      ],
+      error: null,
+    });
     queue('session_log', {
       data: [
         {
@@ -149,7 +166,9 @@ describe('GET /api/courses/{courseId}/leaderboard', () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body.entries).toEqual([{ rank: 1, studentId: 'student-1', username: 'ada', avatarUrl: null, points: 100, streak: 1 }]);
+    expect(body.entries).toEqual([
+      { rank: 1, studentId: 'student-1', username: 'ada', avatarUrl: null, points: 100, streak: 1, title: 'Story Analyst' },
+    ]);
   });
 
   it('returns 500 when the course lookup fails', async () => {

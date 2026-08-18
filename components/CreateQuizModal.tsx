@@ -5,7 +5,14 @@ import { createAssembledQuiz } from '../lib/assembledQuizClient';
 import type { CourseSummary } from '../lib/courseClient';
 import type { QuizSummary } from '../lib/quizClient';
 import type { GradingKind } from '../lib/activityTypes';
+import { MIN_QUESTIONS_PER_LEVEL, QUESTIONS_PER_SESSION } from '../lib/sessionRules';
 import { useModalDismiss } from './useModalDismiss';
+
+// A generous sanity ceiling, not a real catalog-derived limit — the modal has no single
+// (catalog, level) pair to check against (a quiz can compose several catalogs at once, GitHub
+// #360), so the actual "enough questions exist" check still happens where it always has: at
+// session-start time (POST /api/sessions' AC 5), against whichever level a student first draws.
+const MAX_QUESTIONS_PER_LEVEL = 50;
 
 /**
  * Same two-way choice as components/CreateCatalogModal.tsx's KIND_OPTIONS — a quiz is locked to
@@ -33,11 +40,22 @@ const KIND_OPTIONS: { value: GradingKind; label: string; hint: string }[] = [
  * courses (GitHub #347/#360 follow-up), replacing the permanently visible inline form
  * app/instructor/assembled-quizzes/page.tsx used to render below the list. Structurally the same
  * shape as components/CreateCatalogModal.tsx (same overlay/panel/header/footer, same
- * useModalDismiss wiring) with three additional fields this quiz's composition needs and a
- * catalog has no use for: a course single-select, a grading-kind choice, and a catalog
- * multi-select filtered to that kind. `courses`/`catalogs` are passed in rather than fetched here
- * — the parent page already loads both for the list/table view, and this modal only ever opens
- * after that load has completed.
+ * useModalDismiss wiring) with four additional fields this quiz's composition needs and a
+ * catalog has no use for: a course single-select, a grading-kind choice, a catalog multi-select
+ * filtered to that kind, and (GitHub #416) a per-level question count. `courses`/`catalogs` are
+ * passed in rather than fetched here — the parent page already loads both for the list/table
+ * view, and this modal only ever opens after that load has completed.
+ *
+ * Questions per level defaults to QUESTIONS_PER_SESSION and is validated client-side against
+ * MIN_QUESTIONS_PER_LEVEL (a hard business-rule floor — every quiz must have at least this many
+ * questions per level, enforced again server-side and by the DB's own CHECK constraint) and a
+ * generous sanity ceiling (MAX_QUESTIONS_PER_LEVEL), not against any catalog's actual question
+ * count — a quiz can compose several catalogs across three levels each, so there is no single
+ * number to validate against here. The real "are there enough questions" check already exists at
+ * session-start time (POST /api/sessions' AC 5, now reading this quiz's own value instead of the
+ * flat constant) and, for an already-created quiz, on its own detail page's level-coverage
+ * banner (GET /api/instructor/assembled-quizzes/{quizId}) — this field only has to clear the
+ * floor when the instructor sets it, not be provably satisfiable by any one catalog yet.
  */
 export function CreateQuizModal({
   token,
@@ -61,6 +79,7 @@ export function CreateQuizModal({
     description: string | null;
     courseId: string;
     gradingKind: GradingKind;
+    questionsPerLevel: number;
     catalogs: { activityType: string; name: string; gradingKind: QuizSummary['gradingKind'] }[];
     catalogNames: string[];
   }) => void;
@@ -73,8 +92,20 @@ export function CreateQuizModal({
   // instructor to accept without looking.
   const [gradingKind, setGradingKind] = useState<GradingKind | null>(null);
   const [selectedCatalogs, setSelectedCatalogs] = useState<string[]>([]);
+  // GitHub #416: defaults to QUESTIONS_PER_SESSION (4) so a quiz created without touching this
+  // field draws exactly as every quiz did before the field existed. Kept as a string, not a
+  // number, so the input can go through an empty/invalid intermediate state while typing without
+  // snapping back to a stale numeric value.
+  const [questionsPerLevelInput, setQuestionsPerLevelInput] = useState(String(QUESTIONS_PER_SESSION));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  const parsedQuestionsPerLevel = Number.parseInt(questionsPerLevelInput, 10);
+  const questionsPerLevelValid =
+    questionsPerLevelInput.trim() !== '' &&
+    Number.isInteger(parsedQuestionsPerLevel) &&
+    parsedQuestionsPerLevel >= MIN_QUESTIONS_PER_LEVEL &&
+    parsedQuestionsPerLevel <= MAX_QUESTIONS_PER_LEVEL;
 
   const { panelRef, firstFieldRef, requestClose } = useModalDismiss<HTMLDivElement, HTMLInputElement>({
     onClose,
@@ -96,6 +127,7 @@ export function CreateQuizModal({
     Boolean(courseId) &&
     gradingKind !== null &&
     selectedCatalogs.length > 0 &&
+    questionsPerLevelValid &&
     !submitting;
 
   async function handleSubmit(event: React.FormEvent) {
@@ -110,6 +142,7 @@ export function CreateQuizModal({
       description: description.trim() || undefined,
       courseId,
       gradingKind,
+      questionsPerLevel: parsedQuestionsPerLevel,
       catalogActivityTypes: selectedCatalogs,
     });
 
@@ -274,6 +307,29 @@ export function CreateQuizModal({
               ))
             )}
           </div>
+
+          <label className="mb-1.5 mt-4 block text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted">
+            Questions per level
+            <input
+              type="number"
+              min={MIN_QUESTIONS_PER_LEVEL}
+              max={MAX_QUESTIONS_PER_LEVEL}
+              step={1}
+              value={questionsPerLevelInput}
+              onChange={(event) => setQuestionsPerLevelInput(event.target.value)}
+              className="mt-1.5 block w-full rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none transition focus:border-brand-purple"
+            />
+          </label>
+          {!questionsPerLevelValid ? (
+            <p className="mt-1.5 text-xs font-semibold text-brand-danger">
+              Enter a whole number from {MIN_QUESTIONS_PER_LEVEL} to {MAX_QUESTIONS_PER_LEVEL}.
+            </p>
+          ) : (
+            <p className="mt-1.5 text-xs font-semibold text-brand-ink-muted/70">
+              How many questions a student draws per level when they start this quiz. A level must
+              have at least this many questions available, or starting it will fail.
+            </p>
+          )}
 
           {error ? <p className="mt-3 text-xs font-bold text-brand-danger">{error}</p> : null}
 

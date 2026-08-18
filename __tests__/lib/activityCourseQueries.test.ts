@@ -148,6 +148,30 @@ describe('getAccessibleCourseForActivity', () => {
     expect(result).toEqual({ link: null, error: { message: 'db down' } });
   });
 
+  // GitHub #416: POST /api/sessions reads this off the same row to size its draw, not a second lookup.
+  it('carries the granting quiz\'s own questionsPerLevel through', async () => {
+    queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
+    queue('assembled_quiz_catalog', {
+      data: [
+        {
+          assembled_quiz: {
+            course_id: 'course-1',
+            quiz_name: 'Week 3 Review',
+            description: null,
+            questions_per_level: 6,
+            course: { course_name: 'Intro to SE' },
+          },
+          catalog: { quiz_name: 'Sprint 1 Check', description: null },
+        },
+      ],
+      error: null,
+    });
+
+    const result = await getAccessibleCourseForActivity(makeSupabase(), 'CUSTOM_QUIZ', 'student-1');
+
+    expect(result.link?.questionsPerLevel).toBe(6);
+  });
+
   it('surfaces a quiz-catalog lookup error', async () => {
     queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
     queue('assembled_quiz_catalog', { data: null, error: { message: 'db down' } });

@@ -69,6 +69,7 @@ export default function InstructorAssembledQuizzesPage() {
     description: string | null;
     courseId: string;
     gradingKind: AssembledQuizSummary['gradingKind'];
+    questionsPerLevel: number;
     catalogs: { activityType: string; name: string; gradingKind: GradingKind }[];
     catalogNames: string[];
   }) {
@@ -82,6 +83,7 @@ export default function InstructorAssembledQuizzesPage() {
         courseId: quiz.courseId,
         courseName: course?.name ?? 'Unknown course',
         gradingKind: quiz.gradingKind,
+        questionsPerLevel: quiz.questionsPerLevel,
         catalogs: quiz.catalogs,
         catalogNames: quiz.catalogNames,
         createdAt: new Date().toISOString(),

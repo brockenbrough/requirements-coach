@@ -114,8 +114,8 @@ describe('GET /api/students/{studentId}/available-titles', () => {
     // Only levels 1 and 2 have a title_definition row — level 3 has none yet.
     queue('title_definition', {
       data: [
-        { activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 1, title_name: 'Story Apprentice' },
-        { activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 2, title_name: 'Story Analyst' },
+        { title_definition_id: 'title-1', activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 1, title_name: 'Story Apprentice' },
+        { title_definition_id: 'title-2', activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 2, title_name: 'Story Analyst' },
       ],
       error: null,
     });
@@ -130,10 +130,12 @@ describe('GET /api/students/{studentId}/available-titles', () => {
         activityName: 'Identify Weak User Stories',
         courseId: 'course-1',
         courseName: 'Software Requirements',
+        // titleDefinitionId travels with each rung so the profile page's title dropdown can store
+        // the student's pick by id; it is null exactly where the title is.
         titles: [
-          { difficultyLevel: 1, title: 'Story Apprentice' },
-          { difficultyLevel: 2, title: 'Story Analyst' },
-          { difficultyLevel: 3, title: null },
+          { difficultyLevel: 1, titleDefinitionId: 'title-1', title: 'Story Apprentice' },
+          { difficultyLevel: 2, titleDefinitionId: 'title-2', title: 'Story Analyst' },
+          { difficultyLevel: 3, titleDefinitionId: null, title: null },
         ],
       },
     ]);

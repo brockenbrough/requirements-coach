@@ -18,6 +18,13 @@ export type Profile = {
   semester: number | null;
   /** GitHub #318: has the first-login guided tour been finished or skipped yet. */
   has_seen_onboarding_tour: boolean;
+  /** title_definition_id of the mastery title the student chose to wear, or null for none. */
+  selected_title_definition_id: string | null;
+  /**
+   * The worn title's name, joined by GET /api/profile rather than stored — so a title renamed by
+   * its instructor updates everywhere at once. Null whenever selected_title_definition_id is.
+   */
+  selected_title: { title_name: string } | null;
 };
 
 type UserContextValue = {

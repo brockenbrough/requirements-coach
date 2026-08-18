@@ -72,6 +72,7 @@ function quizRow(overrides: Partial<Record<string, unknown>> = {}) {
     course_id: 'course-1',
     creator_id: 'instructor-1',
     grading_kind: 'mcq',
+    questions_per_level: 4,
     created_at: '2026-08-14T10:00:00',
     ...overrides,
   };
@@ -161,6 +162,7 @@ describe('GET /api/instructor/assembled-quizzes/[quizId]', () => {
       courseId: 'course-1',
       courseName: 'Software Requirements',
       gradingKind: 'mcq',
+      questionsPerLevel: 4,
     });
 
     expect(body.catalogs).toEqual([
@@ -180,6 +182,33 @@ describe('GET /api/instructor/assembled-quizzes/[quizId]', () => {
     expect(body.levelCoverage).toContainEqual({ level: 1, available: 3, required: 4, sufficient: false });
     expect(body.levelCoverage).toContainEqual({ level: 2, available: 1, required: 4, sufficient: false });
     expect(body.levelCoverage).toContainEqual({ level: 3, available: 0, required: 4, sufficient: false });
+  });
+
+  // GitHub #416: the coverage banner warns against this quiz's own questionsPerLevel, not the
+  // flat QUESTIONS_PER_SESSION default.
+  it('reports level coverage against this quiz\'s own questionsPerLevel', async () => {
+    queueRole('instructor');
+    queue('assembled_quiz', { data: quizRow({ questions_per_level: 3 }), error: null });
+    queue('course', { data: { course_name: 'Software Requirements' }, error: null });
+    queue('assembled_quiz_catalog', {
+      data: [{ activity_type: 'CATALOG_A', catalog: { quiz_name: 'Catalog A', description: 'About A' } }],
+      error: null,
+    });
+    queue('question', {
+      data: [
+        { question_id: 'q-1', activity_type: 'CATALOG_A', difficulty_level: 1 },
+        { question_id: 'q-2', activity_type: 'CATALOG_A', difficulty_level: 1 },
+        { question_id: 'q-3', activity_type: 'CATALOG_A', difficulty_level: 1 },
+      ],
+      error: null,
+    });
+    queue('quiz_excluded_question', { data: [], error: null });
+
+    const res = await req();
+    const body = await res.json();
+
+    expect(body.quiz.questionsPerLevel).toBe(3);
+    expect(body.levelCoverage).toContainEqual({ level: 1, available: 3, required: 3, sufficient: true });
   });
 
   // Regression test: getQuizComposition used to only ever query `question`, so an llm-graded

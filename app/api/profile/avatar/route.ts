@@ -6,6 +6,7 @@ import {
   avatarSizeError,
   sniffAvatarMime,
 } from '../../../../lib/imageRules';
+import { PROFILE_COLUMNS } from '../../../../lib/profileQueries';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -68,7 +69,7 @@ export async function POST(request: Request) {
     .from('user')
     .update({ avatar_url: publicUrl })
     .eq('user_id', user.id)
-    .select('user_id, username, biography, avatar_url, role')
+    .select(PROFILE_COLUMNS)
     .single();
 
   if (updateError) return Response.json({ error: updateError.message }, { status: 400 });

@@ -167,6 +167,8 @@ type LeaderboardRow = {
   avatarUrl: string | null;
   points: number;
   streak: number;
+  /** The mastery title this student chose to wear, or null — see LeaderboardEntry.title. */
+  title: string | null;
 };
 
 /**
@@ -207,6 +209,44 @@ export function loadCourseLeaderboard(
 
     const entries = withRankChange(result.data.entries, getPreviousRanks(courseId));
     setCachedLeaderboard(courseId, entries);
+    return { ok: true as const, data: { entries } };
+  });
+}
+
+// A reserved cache/rank-snapshot key for the global leaderboard, sharing the same courseId-keyed
+// stores (lib/leaderboardStore.ts, lib/previousRankStore.ts) real course leaderboards use rather
+// than adding parallel storage: a real course_id is always a UUID, so this string can never
+// collide with one, and clearCachedLeaderboard()/clearPreviousRanks() already clear every key —
+// this one included — with no changes needed there.
+export const GLOBAL_LEADERBOARD_KEY = '__global__';
+
+/**
+ * The dashboard's global leaderboard (GET /api/leaderboard, GitHub #432 follow-up): every
+ * student who shares at least one course with the caller, ranked by their total score across all
+ * of their courses — see computeGlobalLeaderboard's own doc (lib/leaderboardQueries.ts) for why
+ * "global" stops at "shares a course with me" rather than every user in the app.
+ *
+ * Same cache-first/forceRefresh shape as loadCourseLeaderboard above, and the same
+ * cache/rank-change plumbing, just keyed by GLOBAL_LEADERBOARD_KEY instead of a courseId — so a
+ * completed session's existing invalidation (clearCachedLeaderboard(), called from the play
+ * flow's handleFinishSummary) already covers this entry too, with no new invalidation path.
+ */
+export function loadGlobalLeaderboard(
+  token: string,
+  options: { forceRefresh?: boolean } = {},
+): Promise<ApiResult<{ entries: LeaderboardEntry[] }>> {
+  if (!options.forceRefresh) {
+    const cached = getCachedLeaderboard(GLOBAL_LEADERBOARD_KEY);
+    if (cached !== null) {
+      return Promise.resolve({ ok: true, data: { entries: cached } });
+    }
+  }
+
+  return request<{ entries: LeaderboardRow[] }>('/api/leaderboard', { method: 'GET' }, token).then((result) => {
+    if (!result.ok) return result;
+
+    const entries = withRankChange(result.data.entries, getPreviousRanks(GLOBAL_LEADERBOARD_KEY));
+    setCachedLeaderboard(GLOBAL_LEADERBOARD_KEY, entries);
     return { ok: true as const, data: { entries } };
   });
 }

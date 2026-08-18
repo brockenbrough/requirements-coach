@@ -1,10 +1,16 @@
 'use client';
 
-import { useState } from 'react';
-import { createQuiz, type CreatedQuiz } from '../lib/quizClient';
+import { useEffect, useState } from 'react';
+import { createQuiz, loadTitleNames, type CreatedQuiz } from '../lib/quizClient';
 import type { GradingKind } from '../lib/activityTypes';
 import { useModalDismiss } from './useModalDismiss';
 import { RatingPromptModal } from './RatingPromptModal';
+import {
+  emptyTitleLadderDraft,
+  TitleLadderFields,
+  titleLadderDraftToRungs,
+  type TitleLadderDraft,
+} from './TitleLadderFields';
 
 /**
  * GitHub #379: the two kinds of catalog an instructor can create. Rendered as radio cards rather
@@ -66,6 +72,21 @@ export function CreateCatalogModal({
   const [ratingPromptModalOpen, setRatingPromptModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [titles, setTitles] = useState<TitleLadderDraft>(emptyTitleLadderDraft);
+  const [titleSuggestions, setTitleSuggestions] = useState<string[]>([]);
+
+  // Suggestions are a convenience, so a failure here is swallowed rather than surfaced: the fields
+  // stay perfectly usable as plain text inputs, and blocking catalog creation on them would be a
+  // worse outcome than losing the autocomplete.
+  useEffect(() => {
+    let cancelled = false;
+    loadTitleNames(token).then((result) => {
+      if (!cancelled && result.ok) setTitleSuggestions(result.data.titleNames);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   const { panelRef, firstFieldRef, requestClose } = useModalDismiss<HTMLDivElement, HTMLInputElement>({
     onClose,
@@ -90,6 +111,7 @@ export function CreateCatalogModal({
       gradingKind: gradingKind!,
       description: description.trim() || undefined,
       ratingPrompt: gradingKind === 'llm-graded' ? ratingPrompt.trim() : undefined,
+      titles: titleLadderDraftToRungs(titles),
     });
 
     setSubmitting(false);
@@ -216,6 +238,26 @@ export function CreateCatalogModal({
               </button>
             </div>
           ) : null}
+
+          {/* Titles are optional and canSubmit deliberately ignores them: a catalog without a
+              ladder is what every catalog looks like today, and requiring names here would turn a
+              nice-to-have into a barrier in front of catalog creation. */}
+          <fieldset className="mt-4">
+            <legend className="mb-1.5 text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted">
+              Mastery titles <span className="normal-case text-brand-ink-muted/70">(optional)</span>
+            </legend>
+            <p className="mb-2.5 text-xs font-semibold text-brand-ink-muted/70">
+              What a student is called once they pass each level. Start typing to reuse a title that
+              already exists. You can add or change these later.
+            </p>
+            <TitleLadderFields
+              draft={titles}
+              onChange={(level, value) => setTitles((current) => ({ ...current, [level]: value }))}
+              suggestions={titleSuggestions}
+              disabled={submitting}
+              tone="dark"
+            />
+          </fieldset>
 
           {error ? <p className="mt-3 text-xs font-bold text-brand-danger">{error}</p> : null}
 

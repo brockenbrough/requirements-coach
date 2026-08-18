@@ -1,6 +1,8 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { requireInstructor } from '../../../../lib/instructorAuth';
 import { isGradingKind, slugifyQuizName, validateRatingPromptText } from '../../../../lib/activityTypes';
+import { saveTitleLadder } from '../../../../lib/titleAuthoringQueries';
+import { validateTitleLadder } from '../../../../lib/titleLadderInput';
 
 // Matches activity_type.activity_type varchar(50) in supabase/schema.sql.
 const MAX_KEY_LENGTH = 50;
@@ -21,7 +23,7 @@ function getToken(request: Request): string | null {
  * references it — see lib/activityCourseQueries.ts's checkActivityAccess for the derived access
  * check this now backs.
  *
- * Body: { name: string, gradingKind: 'mcq' | 'llm-graded', description?: string, ratingPrompt?: string }.
+ * Body: { name: string, gradingKind: 'mcq' | 'llm-graded', description?: string, ratingPrompt?: string, titles?: TitleLadderRungInput[] }.
  *
  * GitHub #379: gradingKind decides which pool the new activity draws from — question/answer rows
  * for 'mcq', free-text user_story prompts graded by the instructor's configured LLM provider for
@@ -47,7 +49,7 @@ function getToken(request: Request): string | null {
  *
  * creator_id comes from the authenticated instructor (guard.user_id), never the request body.
  *
- * Returns: { quiz: { activityType, name, description, gradingKind, ratingPrompt } }
+ * Returns: { quiz: { activityType, name, description, gradingKind, ratingPrompt, titles } }
  */
 export async function POST(request: Request) {
   const supabase = getSupabaseClient();
@@ -67,11 +69,12 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Invalid JSON body.' }, { status: 400 });
   }
 
-  const { name, description, gradingKind, ratingPrompt } = (body ?? {}) as {
+  const { name, description, gradingKind, ratingPrompt, titles } = (body ?? {}) as {
     name?: unknown;
     description?: unknown;
     gradingKind?: unknown;
     ratingPrompt?: unknown;
+    titles?: unknown;
   };
 
   if (typeof name !== 'string' || name.trim() === '') {
@@ -105,6 +108,12 @@ export async function POST(request: Request) {
     );
   }
 
+  // Validated before the catalog is inserted, so a malformed ladder never creates a catalog that
+  // then has to be rolled back. titles is optional throughout: a catalog without one behaves
+  // exactly as every catalog does today.
+  const ladder = validateTitleLadder(titles);
+  if (!ladder.ok) return Response.json({ error: ladder.error }, { status: 400 });
+
   const trimmedDescription = typeof description === 'string' && description.trim() !== '' ? description.trim() : null;
 
   const { data, error } = await supabase
@@ -135,6 +144,19 @@ export async function POST(request: Request) {
     rating_prompt: string | null;
   };
 
+  // Rollback by hand: there is no transaction available through supabase-js, so a failed ladder
+  // insert deletes the catalog it was about to belong to — the same unwind createAssembledQuiz
+  // (lib/assembledQuizQueries.ts) and POST /api/instructor/questions perform. Leaving the catalog
+  // behind would be worse than failing outright: the instructor would retry the same name and hit
+  // the 409 above, with no way to see why.
+  if (ladder.rungs.length > 0) {
+    const { error: ladderError } = await saveTitleLadder(supabase, row.activity_type, ladder.rungs);
+    if (ladderError) {
+      await supabase.from('activity_type').delete().eq('activity_type', row.activity_type);
+      return Response.json({ error: ladderError.message }, { status: 500 });
+    }
+  }
+
   return Response.json(
     {
       quiz: {
@@ -143,6 +165,7 @@ export async function POST(request: Request) {
         description: row.description,
         gradingKind: row.grading_kind,
         ratingPrompt: row.rating_prompt,
+        titles: ladder.rungs.filter((rung) => rung.titleName !== null),
       },
     },
     { status: 201 },

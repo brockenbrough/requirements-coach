@@ -7,17 +7,31 @@
 import type { SupabaseClient } from './sessionQueries';
 import { sumBestScores, type SessionRow } from './scoreQueries';
 import { computeStreakFromSessions, type StreakSessionRow } from './streakQueries';
+import { listActivityTypesForCourses } from './activityCourseQueries';
+import { getEnrolledCourseIds } from './courseQueries';
 
 // Aliased to `student`, same convention as lib/sessionQueries.ts's STUDENT_EMBED, because the
 // table is called "user" (a reserved word). !inner matters here exactly the way it does there:
 // without it, .eq('student.role', 'student') would null the embed instead of dropping the row,
 // and an instructor who was somehow enrolled would still show up ranked among their own
 // students. Backed by ix_user_role, the same index that embed relies on.
-const ROSTER_STUDENT_EMBED = 'student:user!inner(username, avatar_url, role)';
+//
+// selected_title rides along on this same embed rather than costing a query of its own: the worn
+// title is stored as a title_definition_id on "user", and PostgREST resolves the name through the
+// existing fk_user_title_definition foreign key. Note it is the title the student *chose*, not a
+// re-derivation of their highest earned one — showing a title nobody picked would put a name on a
+// leaderboard row its owner never opted into.
+const ROSTER_STUDENT_EMBED =
+  'student:user!inner(username, avatar_url, role, selected_title:title_definition(title_name))';
 
 type RosterRow = {
   user_id: string;
-  student: { username: string; avatar_url: string | null; role: string };
+  student: {
+    username: string;
+    avatar_url: string | null;
+    role: string;
+    selected_title: { title_name: string } | null;
+  };
 };
 
 /** One ranked row. No rankChange here — that's derived client-side, see LeaderboardEntry's own doc. */
@@ -29,10 +43,68 @@ export type LeaderboardRow = {
   points: number;
   /** Same definition as computeStudentStreak (lib/streakQueries.ts, GitHub #307). */
   streak: number;
+  /** The mastery title this student chose to wear, or null if they haven't picked one. */
+  title: string | null;
 };
 
+type CombinedSessionRow = SessionRow & StreakSessionRow & { user_id: string; passed: boolean };
+
 /**
- * One course's leaderboard: every enrolled student, ranked by cumulative score.
+ * Shared tail of both computeCourseLeaderboard and computeGlobalLeaderboard below: given a roster
+ * and every completed session for it, reduce each student's points (via pointsFilter, the one
+ * thing that differs between the two callers) and streak (always the student's full, unfiltered
+ * session set — see computeCourseLeaderboard's own comment on why streak never gets course-
+ * scoped), then apply the one ranking rule both leaderboards share: standard competition ranking
+ * on points (ties share a rank, the next rank skips: 1, 2, 2, 4), username ascending as the
+ * deterministic tiebreaker.
+ */
+function rankRoster(
+  roster: RosterRow[],
+  sessionsByStudent: Map<string, CombinedSessionRow[]>,
+  pointsFilter: (sessions: CombinedSessionRow[]) => CombinedSessionRow[],
+): LeaderboardRow[] {
+  const unranked = roster
+    .map((row) => {
+      const sessions = sessionsByStudent.get(row.user_id) ?? [];
+      return {
+        studentId: row.user_id,
+        username: row.student.username,
+        avatarUrl: row.student.avatar_url,
+        title: row.student.selected_title?.title_name ?? null,
+        points: sumBestScores(pointsFilter(sessions)),
+        streak: computeStreakFromSessions(sessions.filter((session) => session.passed)),
+      };
+    })
+    .sort((a, b) => b.points - a.points || a.username.localeCompare(b.username));
+
+  const data: LeaderboardRow[] = [];
+  let previousPoints: number | null = null;
+  let previousRank = 0;
+
+  unranked.forEach((entry, index) => {
+    const rank = entry.points === previousPoints ? previousRank : index + 1;
+    data.push({ rank, ...entry });
+    previousPoints = entry.points;
+    previousRank = rank;
+  });
+
+  return data;
+}
+
+/**
+ * One course's leaderboard: every enrolled student, ranked by the score they earned *in this
+ * course specifically* — GitHub #432 fixed a bug where every course showed the same, global
+ * total: the session_log read used to be filtered only by roster membership, with no
+ * activity_type filter at all, so sumBestScores summed a student's entire history across every
+ * course they're in. Points are still never stored (see CLAUDE.md's "Gamification is derived,
+ * not stored") — the fix is scoping the read, not adding a course_points table. Course membership
+ * for an activity_type is derived the same way everywhere else (Course -> assembled_quiz ->
+ * assembled_quiz_catalog -> catalog, lib/activityCourseQueries.ts's listActivityTypesForCourses).
+ *
+ * streak deliberately still reduces over the student's *unfiltered* sessions, not the course-
+ * scoped subset: GET /api/students/{id}/streak (lib/streakQueries.ts) defines "streak" as a
+ * global, cross-course concept, and a course leaderboard row disagreeing with that route about a
+ * student's own streak would be a worse inconsistency than points being unscoped was.
  *
  * The roster comes from student_course, not from who has completed something — a student with
  * zero completed sessions still appears, at 0 points, which is the opposite of
@@ -43,11 +115,11 @@ export type LeaderboardRow = {
  *
  * Two queries, merged in JS, the same shape listJoinableCourses (lib/courseQueries.ts) already
  * uses: the roster first, then every completed session_log row for that whole roster in one
- * .in() call, rather than one session_log query per student — and rather than a second .in()
- * query for streak, the same row set is reused for both: sumBestScores reduces it into points
- * exactly the way computeStudentScore reduces a single student's, and the passed=true subset is
- * reduced by computeStreakFromSessions exactly the way computeStudentStreak reduces a single
- * student's. Neither number can drift from its single-student counterpart.
+ * .in() call, rather than one session_log query per student. sumBestScores reduces the
+ * course-filtered subset into points exactly the way computeStudentScore reduces a single
+ * student's (global) rows, and the passed=true subset of the *unfiltered* rows is reduced by
+ * computeStreakFromSessions exactly the way computeStudentStreak reduces a single student's — so
+ * neither number can drift from its single-student, single-purpose counterpart.
  *
  * Standard competition ranking on points (ties share a rank, the next rank skips: 1, 2, 2, 4),
  * with username as the deterministic secondary sort — two requests can't disagree about who's
@@ -73,6 +145,14 @@ export async function computeCourseLeaderboard(
 
   const studentIds = roster.map((row) => row.user_id);
 
+  const { activities: courseActivities, error: activitiesError } = await listActivityTypesForCourses(supabase, [
+    courseId,
+  ]);
+
+  if (activitiesError) return { data: null, error: activitiesError };
+
+  const courseActivityTypes = new Set((courseActivities ?? []).map((activity) => activity.activityType));
+
   const { data: sessionData, error: sessionError } = await supabase
     .from('session_log')
     .select('user_id, activity_type, difficulty_level, cumulative_score, ended_at, passed')
@@ -81,45 +161,80 @@ export async function computeCourseLeaderboard(
 
   if (sessionError) return { data: null, error: sessionError };
 
-  type CombinedRow = SessionRow & StreakSessionRow & { user_id: string; passed: boolean };
-
-  const sessionsByStudent = new Map<string, CombinedRow[]>();
-  for (const row of (sessionData ?? []) as CombinedRow[]) {
+  const sessionsByStudent = new Map<string, CombinedSessionRow[]>();
+  for (const row of (sessionData ?? []) as CombinedSessionRow[]) {
     const list = sessionsByStudent.get(row.user_id) ?? [];
     list.push(row);
     sessionsByStudent.set(row.user_id, list);
   }
 
-  const unranked = roster
-    .map((row) => {
-      const sessions = sessionsByStudent.get(row.user_id) ?? [];
-      return {
-        studentId: row.user_id,
-        username: row.student.username,
-        avatarUrl: row.student.avatar_url,
-        points: sumBestScores(sessions),
-        streak: computeStreakFromSessions(sessions.filter((session) => session.passed)),
-      };
-    })
-    .sort((a, b) => b.points - a.points || a.username.localeCompare(b.username));
+  const data = rankRoster(roster, sessionsByStudent, (sessions) =>
+    sessions.filter((session) => courseActivityTypes.has(session.activity_type)),
+  );
 
-  const data: LeaderboardRow[] = [];
-  let previousPoints: number | null = null;
-  let previousRank = 0;
+  return { data, error: null };
+}
 
-  unranked.forEach((entry, index) => {
-    const rank = entry.points === previousPoints ? previousRank : index + 1;
-    data.push({
-      rank,
-      studentId: entry.studentId,
-      username: entry.username,
-      avatarUrl: entry.avatarUrl,
-      points: entry.points,
-      streak: entry.streak,
-    });
-    previousPoints = entry.points;
-    previousRank = rank;
-  });
+/**
+ * The dashboard's global leaderboard (GitHub #432 follow-up): every student who shares at least
+ * one course with the viewer, ranked by their TOTAL score across every course they're in — no
+ * activity_type filter, the same "no course_id filter" definition computeStudentScore already
+ * uses for a single student's own sidebar total. The one thing this deliberately does NOT do is
+ * rank every student in the entire app: this codebase's one other cross-user disclosure rule,
+ * GET /api/students/{id}/public-profile, only ever disclosed a student's identity/score to
+ * someone who shares a course with them (lib/courseQueries.ts's isEnrolledInAnyCourse), and a
+ * literal "every user, everywhere" leaderboard would be the first place in the app to break that
+ * invariant. "Shares at least one course with the viewer" is the least-surprising way to stay
+ * global (not capped to a single course, unlike computeCourseLeaderboard) without doing that —
+ * the union of every course the viewer is in, rather than one course's own roster.
+ *
+ * The viewer's own courses always include the viewer, so an empty result here can only mean "not
+ * enrolled in any course at all" — never "enrolled, but nobody has scored yet" (their own 0-point
+ * row would still appear). Callers can rely on that to choose which empty-state message to show,
+ * the same way computeCourseLeaderboard's callers rely on data: [] meaning "a real, empty roster".
+ *
+ * Same roster-then-sessions shape as computeCourseLeaderboard, and the same rankRoster tail — the
+ * two can't disagree about what "rank" or "tie" means, only about which points count.
+ */
+export async function computeGlobalLeaderboard(
+  supabase: SupabaseClient,
+  viewerId: string,
+): Promise<{ data: LeaderboardRow[] | null; error: { message: string } | null }> {
+  const { courseIds, error: courseIdsError } = await getEnrolledCourseIds(supabase, viewerId);
+  if (courseIdsError) return { data: null, error: courseIdsError };
+
+  if (!courseIds || courseIds.length === 0) return { data: [], error: null };
+
+  const { data: rosterData, error: rosterError } = await supabase
+    .from('student_course')
+    .select(`user_id, ${ROSTER_STUDENT_EMBED}`)
+    .in('course_id', courseIds)
+    .eq('student.role', 'student');
+
+  if (rosterError) return { data: null, error: rosterError };
+
+  const rosterRows = (rosterData ?? []) as unknown as RosterRow[];
+  const roster = [...new Map(rosterRows.map((row) => [row.user_id, row])).values()];
+  if (roster.length === 0) return { data: [], error: null };
+
+  const studentIds = roster.map((row) => row.user_id);
+
+  const { data: sessionData, error: sessionError } = await supabase
+    .from('session_log')
+    .select('user_id, activity_type, difficulty_level, cumulative_score, ended_at, passed')
+    .in('user_id', studentIds)
+    .eq('status', 'completed');
+
+  if (sessionError) return { data: null, error: sessionError };
+
+  const sessionsByStudent = new Map<string, CombinedSessionRow[]>();
+  for (const row of (sessionData ?? []) as CombinedSessionRow[]) {
+    const list = sessionsByStudent.get(row.user_id) ?? [];
+    list.push(row);
+    sessionsByStudent.set(row.user_id, list);
+  }
+
+  const data = rankRoster(roster, sessionsByStudent, (sessions) => sessions);
 
   return { data, error: null };
 }

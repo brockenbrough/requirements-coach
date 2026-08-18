@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { computeCourseLeaderboard } from '../../lib/leaderboardQueries';
+import { computeCourseLeaderboard, computeGlobalLeaderboard } from '../../lib/leaderboardQueries';
 
 type Result = { data?: unknown; error?: unknown };
 
@@ -45,8 +45,24 @@ function makeSupabase() {
   } as any;
 }
 
-function rosterRow(userId: string, username: string, avatarUrl: string | null = null, role = 'student') {
-  return { user_id: userId, student: { username, avatar_url: avatarUrl, role } };
+function rosterRow(
+  userId: string,
+  username: string,
+  avatarUrl: string | null = null,
+  role = 'student',
+  selectedTitle: string | null = null,
+) {
+  return {
+    user_id: userId,
+    student: {
+      username,
+      avatar_url: avatarUrl,
+      role,
+      // The embed PostgREST returns for fk_user_title_definition: an object when the student wears
+      // a title, null when selected_title_definition_id is null.
+      selected_title: selectedTitle === null ? null : { title_name: selectedTitle },
+    },
+  };
 }
 
 function sessionRow(
@@ -67,6 +83,18 @@ function sessionRow(
 }
 
 const COURSE_ID = 'course-1';
+
+// Shape lib/activityCourseQueries.ts's listActivityTypesForCourses expects back from
+// assembled_quiz_catalog — one row per activity_type linked to the course via some assembled
+// quiz. The fake builder's .in() is a no-op recorder, not a real filter, so a test controls "does
+// this activity_type belong to the course" purely by whether it queues a row for it here.
+function catalogLinkRow(activityType: string, courseId: string = COURSE_ID) {
+  return {
+    activity_type: activityType,
+    catalog: { quiz_name: activityType, description: null, grading_kind: 'mcq' },
+    assembled_quiz: { course_id: courseId, quiz_name: activityType, description: null, course: { course_name: 'Course' } },
+  };
+}
 
 describe('computeCourseLeaderboard', () => {
   beforeEach(() => {
@@ -93,7 +121,7 @@ describe('computeCourseLeaderboard', () => {
     const result = await computeCourseLeaderboard(makeSupabase(), COURSE_ID);
 
     expect(result).toEqual({
-      data: [{ rank: 1, studentId: 'stu-1', username: 'newcomer', avatarUrl: null, points: 0, streak: 0 }],
+      data: [{ rank: 1, studentId: 'stu-1', username: 'newcomer', avatarUrl: null, points: 0, streak: 0, title: null }],
       error: null,
     });
   });
@@ -102,6 +130,10 @@ describe('computeCourseLeaderboard', () => {
   // weaker retake doesn't change the total, only a higher one does.
   it('sums each student\'s best score per activity type and difficulty level, like computeStudentScore', async () => {
     queue('student_course', { data: [rosterRow('stu-1', 'ada')], error: null });
+    queue('assembled_quiz_catalog', {
+      data: [catalogLinkRow('IDENTIFY_WEAK_USER_STORIES'), catalogLinkRow('IDENTIFY_WEAK_ACCEPTANCE_CRITERIA')],
+      error: null,
+    });
     queue('session_log', {
       data: [
         sessionRow('stu-1', 'IDENTIFY_WEAK_USER_STORIES', 1, 75),
@@ -113,17 +145,64 @@ describe('computeCourseLeaderboard', () => {
 
     const result = await computeCourseLeaderboard(makeSupabase(), COURSE_ID);
 
-    expect(result.data).toEqual([{ rank: 1, studentId: 'stu-1', username: 'ada', avatarUrl: null, points: 150, streak: 0 }]);
+    expect(result.data).toEqual([{ rank: 1, studentId: 'stu-1', username: 'ada', avatarUrl: null, points: 150, streak: 0, title: null }]);
+  });
+
+  // GitHub #432: the bug this scoping fixed — a student's session in an activity_type that
+  // belongs to a *different* course must not count toward this course's leaderboard, even though
+  // the old, unscoped query would have summed it in regardless of which course it came from.
+  it("excludes a student's sessions from activity types that don't belong to this course", async () => {
+    queue('student_course', { data: [rosterRow('stu-1', 'ada')], error: null });
+    // Only this course's own catalog is linked — OTHER_COURSE_ACTIVITY has no row here, meaning
+    // no assembled quiz in *this* course composes it.
+    queue('assembled_quiz_catalog', { data: [catalogLinkRow('IDENTIFY_WEAK_USER_STORIES')], error: null });
+    queue('session_log', {
+      data: [
+        sessionRow('stu-1', 'IDENTIFY_WEAK_USER_STORIES', 1, 100),
+        // Earned in some other course the student is also enrolled in — must not inflate this
+        // course's leaderboard the way the pre-#432 unscoped query did.
+        sessionRow('stu-1', 'OTHER_COURSE_ACTIVITY', 1, 500),
+      ],
+      error: null,
+    });
+
+    const result = await computeCourseLeaderboard(makeSupabase(), COURSE_ID);
+
+    expect(result.data).toEqual([{ rank: 1, studentId: 'stu-1', username: 'ada', avatarUrl: null, title: null, points: 100, streak: 0 }]);
+  });
+
+  // A course with no assembled quiz yet has no activity types of its own — every enrolled
+  // student shows 0 points, even one with a long history elsewhere, rather than falling back to
+  // their global total.
+  it('gives every student 0 points when the course has no linked activity types yet', async () => {
+    queue('student_course', { data: [rosterRow('stu-1', 'ada')], error: null });
+    queue('assembled_quiz_catalog', { data: [], error: null });
+    queue('session_log', { data: [sessionRow('stu-1', 'SOME_OTHER_ACTIVITY', 1, 999)], error: null });
+
+    const result = await computeCourseLeaderboard(makeSupabase(), COURSE_ID);
+
+    expect(result.data).toEqual([{ rank: 1, studentId: 'stu-1', username: 'ada', avatarUrl: null, title: null, points: 0, streak: 0 }]);
+  });
+
+  it('returns the error and no data when the course-activities query fails', async () => {
+    queue('student_course', { data: [rosterRow('stu-1', 'ada')], error: null });
+    queue('assembled_quiz_catalog', { data: null, error: { message: 'db down' } });
+
+    const result = await computeCourseLeaderboard(makeSupabase(), COURSE_ID);
+
+    expect(result).toEqual({ data: null, error: { message: 'db down' } });
+    expect(state.tables).not.toContain('session_log');
   });
 
   // AC: completed, not passed — a finished attempt below the pass threshold still contributes.
   it('counts a completed session that was not passed', async () => {
     queue('student_course', { data: [rosterRow('stu-1', 'ada')], error: null });
+    queue('assembled_quiz_catalog', { data: [catalogLinkRow('IDENTIFY_WEAK_USER_STORIES')], error: null });
     queue('session_log', { data: [sessionRow('stu-1', 'IDENTIFY_WEAK_USER_STORIES', 1, 25)], error: null });
 
     const result = await computeCourseLeaderboard(makeSupabase(), COURSE_ID);
 
-    expect(result.data).toEqual([{ rank: 1, studentId: 'stu-1', username: 'ada', avatarUrl: null, points: 25, streak: 0 }]);
+    expect(result.data).toEqual([{ rank: 1, studentId: 'stu-1', username: 'ada', avatarUrl: null, points: 25, streak: 0, title: null }]);
   });
 
   // AC: streak reuses computeStreakFromSessions (lib/streakQueries.ts) over the passed=true
@@ -163,6 +242,7 @@ describe('computeCourseLeaderboard', () => {
       data: [rosterRow('stu-1', 'brockenbrough'), rosterRow('stu-2', 'anne'), rosterRow('stu-3', 'zed')],
       error: null,
     });
+    queue('assembled_quiz_catalog', { data: [catalogLinkRow('IDENTIFY_WEAK_USER_STORIES')], error: null });
     queue('session_log', {
       data: [
         sessionRow('stu-1', 'IDENTIFY_WEAK_USER_STORIES', 1, 100),
@@ -175,9 +255,9 @@ describe('computeCourseLeaderboard', () => {
     const result = await computeCourseLeaderboard(makeSupabase(), COURSE_ID);
 
     expect(result.data).toEqual([
-      { rank: 1, studentId: 'stu-2', username: 'anne', avatarUrl: null, points: 100, streak: 0 },
-      { rank: 1, studentId: 'stu-1', username: 'brockenbrough', avatarUrl: null, points: 100, streak: 0 },
-      { rank: 3, studentId: 'stu-3', username: 'zed', avatarUrl: null, points: 50, streak: 0 },
+      { rank: 1, studentId: 'stu-2', username: 'anne', avatarUrl: null, points: 100, streak: 0, title: null },
+      { rank: 1, studentId: 'stu-1', username: 'brockenbrough', avatarUrl: null, points: 100, streak: 0, title: null },
+      { rank: 3, studentId: 'stu-3', username: 'zed', avatarUrl: null, points: 50, streak: 0, title: null },
     ]);
   });
 
@@ -187,6 +267,7 @@ describe('computeCourseLeaderboard', () => {
       data: [rosterRow('stu-1', 'zed'), rosterRow('stu-2', 'anne'), rosterRow('stu-3', 'mid')],
       error: null,
     });
+    queue('assembled_quiz_catalog', { data: [catalogLinkRow('IDENTIFY_WEAK_USER_STORIES')], error: null });
     queue('session_log', {
       data: [
         sessionRow('stu-1', 'IDENTIFY_WEAK_USER_STORIES', 1, 100),
@@ -201,19 +282,33 @@ describe('computeCourseLeaderboard', () => {
     expect(result.data?.map((row) => row.studentId)).toEqual(['stu-2', 'stu-3', 'stu-1']);
   });
 
-  // AC: only username/avatar_url leave "user" — no first/last name, age or semester.
-  it('selects only username and avatar_url from the student embed', async () => {
+  // AC: only username/avatar_url and the worn title leave "user" — no first/last name, age or
+  // semester. The title is deliberately public: it is chosen to be displayed next to the name.
+  it('selects only username, avatar_url and the worn title from the student embed', async () => {
     queue('student_course', { data: [rosterRow('stu-1', 'ada', 'https://example.com/a.png')], error: null });
     queue('session_log', { data: [], error: null });
 
     const result = await computeCourseLeaderboard(makeSupabase(), COURSE_ID);
 
-    expect(result.data?.[0]).toEqual({ rank: 1, studentId: 'stu-1', username: 'ada', avatarUrl: 'https://example.com/a.png', points: 0, streak: 0 });
+    expect(result.data?.[0]).toEqual({ rank: 1, studentId: 'stu-1', username: 'ada', avatarUrl: 'https://example.com/a.png', points: 0, streak: 0, title: null });
   });
 
-  // AC: roster and session queries are both scoped to the given course/roster.
-  it('scopes the roster query to the course and the role, and the session query to that roster', async () => {
+  it("carries through the title a student chose to wear", async () => {
+    queue('student_course', {
+      data: [rosterRow('stu-1', 'ada', null, 'student', 'Story Analyst')],
+      error: null,
+    });
+    queue('session_log', { data: [], error: null });
+
+    const result = await computeCourseLeaderboard(makeSupabase(), COURSE_ID);
+
+    expect(result.data?.[0].title).toBe('Story Analyst');
+  });
+
+  // AC: roster, course-activities, and session queries are all scoped to the given course/roster.
+  it('scopes the roster query, the course-activities query, and the session query to that course/roster', async () => {
     queue('student_course', { data: [rosterRow('stu-1', 'ada'), rosterRow('stu-2', 'bea')], error: null });
+    queue('assembled_quiz_catalog', { data: [], error: null });
     queue('session_log', { data: [], error: null });
 
     await computeCourseLeaderboard(makeSupabase(), COURSE_ID);
@@ -221,6 +316,7 @@ describe('computeCourseLeaderboard', () => {
     expect(state.filters).toEqual([
       { table: 'student_course', column: 'course_id', value: COURSE_ID },
       { table: 'student_course', column: 'student.role', value: 'student' },
+      { table: 'assembled_quiz_catalog', column: 'assembled_quiz.course_id', value: [COURSE_ID] },
       { table: 'session_log', column: 'user_id', value: ['stu-1', 'stu-2'] },
       { table: 'session_log', column: 'status', value: 'completed' },
     ]);
@@ -240,6 +336,123 @@ describe('computeCourseLeaderboard', () => {
     queue('session_log', { data: null, error: { message: 'db down' } });
 
     const result = await computeCourseLeaderboard(makeSupabase(), COURSE_ID);
+
+    expect(result).toEqual({ data: null, error: { message: 'db down' } });
+  });
+});
+
+const VIEWER_ID = 'viewer-1';
+
+function enrolledCourseRow(courseId: string) {
+  return { course_id: courseId };
+}
+
+describe('computeGlobalLeaderboard', () => {
+  beforeEach(() => {
+    state.queues = {};
+    state.tables = [];
+    state.filters = [];
+  });
+
+  it('returns an empty list, without touching the roster or session tables, when the viewer is enrolled nowhere', async () => {
+    queue('student_course', { data: [], error: null }); // getEnrolledCourseIds
+
+    const result = await computeGlobalLeaderboard(makeSupabase(), VIEWER_ID);
+
+    expect(result).toEqual({ data: [], error: null });
+    expect(state.tables).toEqual(['student_course']);
+  });
+
+  // GitHub #432 follow-up: the whole point of this function — sums a student's score across
+  // every course they're in, not just one, unlike computeCourseLeaderboard's course-scoped sum.
+  it("sums a student's score across every course they're enrolled in, not just one", async () => {
+    queue('student_course', { data: [enrolledCourseRow('course-a'), enrolledCourseRow('course-b')], error: null }); // getEnrolledCourseIds
+    queue('student_course', { data: [rosterRow(VIEWER_ID, 'ada')], error: null }); // roster across course-a/course-b
+    queue('session_log', {
+      data: [
+        sessionRow(VIEWER_ID, 'CATALOG_IN_COURSE_A', 1, 50),
+        sessionRow(VIEWER_ID, 'CATALOG_IN_COURSE_B', 1, 20),
+      ],
+      error: null,
+    });
+
+    const result = await computeGlobalLeaderboard(makeSupabase(), VIEWER_ID);
+
+    expect(result.data).toEqual([{ rank: 1, studentId: VIEWER_ID, username: 'ada', avatarUrl: null, title: null, points: 70, streak: 0 }]);
+  });
+
+  // The roster query spans every one of the viewer's courses via .in(), so the same classmate
+  // enrolled in two of them must be counted (and ranked) once, not twice.
+  it('deduplicates a classmate enrolled in more than one of the viewer\'s courses', async () => {
+    queue('student_course', { data: [enrolledCourseRow('course-a'), enrolledCourseRow('course-b')], error: null });
+    queue('student_course', {
+      data: [rosterRow('stu-1', 'ada'), rosterRow('stu-1', 'ada')], // same student surfaced by both courses' rows
+      error: null,
+    });
+    queue('session_log', { data: [sessionRow('stu-1', 'SOME_CATALOG', 1, 30)], error: null });
+
+    const result = await computeGlobalLeaderboard(makeSupabase(), VIEWER_ID);
+
+    expect(result.data).toEqual([{ rank: 1, studentId: 'stu-1', username: 'ada', avatarUrl: null, title: null, points: 30, streak: 0 }]);
+  });
+
+  // The defining difference from computeCourseLeaderboard: no activity_type filter at all, so a
+  // classmate who shares only one of several courses with the viewer still shows their FULL
+  // cross-course total here, not just what they earned in the shared course.
+  it("does not filter a classmate's points to only the course they share with the viewer", async () => {
+    queue('student_course', { data: [enrolledCourseRow('course-a')], error: null });
+    queue('student_course', { data: [rosterRow('stu-1', 'ada')], error: null });
+    queue('session_log', {
+      data: [
+        sessionRow('stu-1', 'SHARED_COURSE_CATALOG', 1, 10),
+        // Earned in some other course the viewer isn't part of at all.
+        sessionRow('stu-1', 'UNRELATED_COURSE_CATALOG', 1, 500),
+      ],
+      error: null,
+    });
+
+    const result = await computeGlobalLeaderboard(makeSupabase(), VIEWER_ID);
+
+    expect(result.data).toEqual([{ rank: 1, studentId: 'stu-1', username: 'ada', avatarUrl: null, title: null, points: 510, streak: 0 }]);
+  });
+
+  it('scopes the roster query to every one of the viewer\'s enrolled courses', async () => {
+    queue('student_course', { data: [enrolledCourseRow('course-a'), enrolledCourseRow('course-b')], error: null });
+    queue('student_course', { data: [], error: null });
+
+    await computeGlobalLeaderboard(makeSupabase(), VIEWER_ID);
+
+    expect(state.filters).toEqual([
+      { table: 'student_course', column: 'user_id', value: VIEWER_ID },
+      { table: 'student_course', column: 'course_id', value: ['course-a', 'course-b'] },
+      { table: 'student_course', column: 'student.role', value: 'student' },
+    ]);
+  });
+
+  it('returns the error and no data when the enrolled-courses lookup fails', async () => {
+    queue('student_course', { data: null, error: { message: 'db down' } });
+
+    const result = await computeGlobalLeaderboard(makeSupabase(), VIEWER_ID);
+
+    expect(result).toEqual({ data: null, error: { message: 'db down' } });
+    expect(state.tables).toEqual(['student_course']);
+  });
+
+  it('returns the error and no data when the roster query fails', async () => {
+    queue('student_course', { data: [enrolledCourseRow('course-a')], error: null });
+    queue('student_course', { data: null, error: { message: 'db down' } });
+
+    const result = await computeGlobalLeaderboard(makeSupabase(), VIEWER_ID);
+
+    expect(result).toEqual({ data: null, error: { message: 'db down' } });
+  });
+
+  it('returns the error and no data when the session query fails', async () => {
+    queue('student_course', { data: [enrolledCourseRow('course-a')], error: null });
+    queue('student_course', { data: [rosterRow('stu-1', 'ada')], error: null });
+    queue('session_log', { data: null, error: { message: 'db down' } });
+
+    const result = await computeGlobalLeaderboard(makeSupabase(), VIEWER_ID);
 
     expect(result).toEqual({ data: null, error: { message: 'db down' } });
   });
