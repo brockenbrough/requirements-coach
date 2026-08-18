@@ -221,10 +221,10 @@ export function loadCourseLeaderboard(
 export const GLOBAL_LEADERBOARD_KEY = '__global__';
 
 /**
- * The dashboard's global leaderboard (GET /api/leaderboard, GitHub #432 follow-up): every
- * student who shares at least one course with the caller, ranked by their total score across all
- * of their courses — see computeGlobalLeaderboard's own doc (lib/leaderboardQueries.ts) for why
- * "global" stops at "shares a course with me" rather than every user in the app.
+ * The global leaderboard (GET /api/leaderboard): literally every student account in the app,
+ * ranked by their total score across all of their courses — see computeGlobalLeaderboard's own
+ * doc (lib/leaderboardQueries.ts) for why this deliberately does not stop at "shares a course
+ * with the caller" the way GET /api/courses/{courseId}/leaderboard does.
  *
  * Same cache-first/forceRefresh shape as loadCourseLeaderboard above, and the same
  * cache/rank-change plumbing, just keyed by GLOBAL_LEADERBOARD_KEY instead of a courseId — so a

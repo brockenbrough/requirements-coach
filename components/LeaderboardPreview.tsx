@@ -6,9 +6,9 @@ import { Avatar } from './Avatar';
 import { LeaderboardRankBadge } from './LeaderboardRankBadge';
 import { RankChangeIndicator } from './RankChangeIndicator';
 import { StreakBadge } from './StreakBadge';
-import { GLOBAL_LEADERBOARD_KEY, loadGlobalLeaderboard } from '../lib/studentCourseClient';
+import { GLOBAL_LEADERBOARD_KEY, loadGlobalLeaderboard, loadMyLeaderboardCourses } from '../lib/studentCourseClient';
 import { recordLeaderboardRanks } from '../lib/previousRankStore';
-import type { LeaderboardEntry } from '../lib/leaderboardTypes';
+import type { LeaderboardCourse, LeaderboardEntry } from '../lib/leaderboardTypes';
 
 const TOP_COUNT = 5;
 
@@ -41,9 +41,10 @@ function PreviewRow({ entry, isCurrentUser }: { entry: LeaderboardEntry; isCurre
 
 /**
  * The dashboard's glance at the GLOBAL leaderboard (GitHub #432 follow-up): the top five, plus
- * the student's own row appended when they didn't make it, ranked by total score across every
- * course the student shares with the people shown — not one course's own points. The per-course
- * leaderboard lives elsewhere now: app/leaderboard/page.tsx (with its course switcher) and
+ * the student's own row appended when they didn't make it, ranked by every student's own total
+ * score across all of their courses — not one course's own points, and not limited to students
+ * who share a course with the viewer (see computeGlobalLeaderboard's own doc for why). The
+ * per-course leaderboard lives elsewhere now: app/leaderboard/page.tsx (with its course switcher) and
  * components/CourseLeaderboard.tsx (embedded on a course's own quiz-list page) are the two
  * course-scoped readers of GET /api/courses/{courseId}/leaderboard; this is the one reader of the
  * separate, global GET /api/leaderboard (lib/leaderboardQueries.ts's computeGlobalLeaderboard) —
@@ -58,25 +59,32 @@ function PreviewRow({ entry, isCurrentUser }: { entry: LeaderboardEntry; isCurre
  * Reads GET /api/leaderboard via lib/studentCourseClient.ts's loadGlobalLeaderboard, cached under
  * the reserved GLOBAL_LEADERBOARD_KEY in the same courseId-keyed stores real course leaderboards
  * use (lib/leaderboardStore.ts, lib/previousRankStore.ts) — a completed session's existing
- * cache-clear (the play flow's handleFinishSummary) already covers this entry too. An empty
- * result can only mean "not enrolled in any course at all" (see computeGlobalLeaderboard's own
- * doc: the viewer's own row would otherwise always appear, even at 0 points), so that's the one
- * case rendered as "join a course" rather than "be the first".
+ * cache-clear (the play flow's handleFinishSummary) already covers this entry too.
+ *
+ * computeGlobalLeaderboard now ranks literally every student account, enrolled anywhere or not —
+ * a deliberate exception to the shared-course disclosure boundary the rest of the app enforces
+ * (see that function's own doc). That means the entries list itself can no longer answer "has this
+ * student joined a course yet" the way an empty result used to: a never-enrolled student still
+ * gets ranked, just with 0 points, alongside everyone else. So "join a course" is decided from a
+ * second, independent read — loadMyLeaderboardCourses, the same enrolled-courses list
+ * app/leaderboard/page.tsx already reads — rather than from the leaderboard response.
  */
 export function LeaderboardPreview({ token, studentId }: { token: string; studentId?: string }) {
   const [entries, setEntries] = useState<LeaderboardEntry[] | null>(null);
+  const [courses, setCourses] = useState<LeaderboardCourse[] | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
 
-    loadGlobalLeaderboard(token).then((result) => {
+    Promise.all([loadGlobalLeaderboard(token), loadMyLeaderboardCourses(token)]).then(([entriesResult, coursesResult]) => {
       if (cancelled) return;
-      if (!result.ok) {
+      if (!entriesResult.ok || !coursesResult.ok) {
         setFailed(true);
         return;
       }
-      setEntries(result.data.entries);
+      setEntries(entriesResult.data.entries);
+      setCourses(coursesResult.data.courses);
     });
 
     return () => {
@@ -89,7 +97,7 @@ export function LeaderboardPreview({ token, studentId }: { token: string; studen
     recordLeaderboardRanks(GLOBAL_LEADERBOARD_KEY, entries);
   }, [entries]);
 
-  if (entries === null && !failed) {
+  if ((entries === null || courses === null) && !failed) {
     return (
       <section className="mb-7 animate-pulse rounded-brand-lg bg-brand-navy p-6" aria-hidden="true">
         <div className="mb-4 h-6 w-32 rounded-full bg-white/10" />
@@ -106,10 +114,7 @@ export function LeaderboardPreview({ token, studentId }: { token: string; studen
   const top = rows.slice(0, TOP_COUNT);
   const me = rows.find((entry) => entry.studentId === studentId) ?? null;
   const meInTop = top.some((entry) => entry.studentId === studentId);
-  // An empty result here only ever means "not enrolled anywhere" — see computeGlobalLeaderboard's
-  // own doc: the viewer's own courses always include the viewer, so a real, non-empty enrollment
-  // would always produce at least the viewer's own row.
-  const notEnrolled = !failed && rows.length === 0;
+  const notEnrolled = !failed && (courses?.length ?? 0) === 0;
 
   return (
     <section className="mb-7 rounded-brand-lg bg-brand-navy p-6 text-brand-ink">
