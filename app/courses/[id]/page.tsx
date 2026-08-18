@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { AppShell } from '../../../components/AppShell';
 import { ActivityCard, type ActivityCardData } from '../../../components/ActivityCard';
 import { ActivityCardSkeleton } from '../../../components/ActivityCardSkeleton';
+import { CourseLeaderboard } from '../../../components/CourseLeaderboard';
 import { deriveActivityCardStatus } from '../../../lib/activityCardStatus';
 import { buildCustomActivityDefinition, getActivityByType, type ActivityDefinition, type Difficulty } from '../../../lib/activityContent';
 import { loadAvailableActivities } from '../../../lib/activityDiscoveryClient';
@@ -222,6 +223,8 @@ export default function CourseQuizzesPage({ params }: { params: { id: string } }
                 })}
               </div>
             )}
+
+            {token ? <CourseLeaderboard token={token} courseId={params.id} studentId={profile?.user_id} /> : null}
           </>
         )}
       </div>
