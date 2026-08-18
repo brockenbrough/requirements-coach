@@ -319,7 +319,18 @@ export async function listCatalogUserStories(supabase: SupabaseClient, activityT
   return { userStories, error: null };
 }
 
-export type DeleteCatalogResult = { status: 'ok' } | { status: 'in_use' } | { status: 'error'; error: { message: string } };
+/** One assembled quiz that still composes a catalog someone is trying to delete. */
+export type LinkedQuizSummary = { quizId: string; quizName: string; courseName: string };
+
+type QuizLinkRow = {
+  assembled_quiz: { assembled_quiz_id: string; quiz_name: string; course: { course_name: string } | null } | null;
+};
+
+export type DeleteCatalogResult =
+  | { status: 'ok' }
+  | { status: 'in_use' }
+  | { status: 'linked'; quizzes: LinkedQuizSummary[] }
+  | { status: 'error'; error: { message: string } };
 
 /**
  * Deletes a catalog (activity_type row) entirely: its own questions/answers (mcq) or user_story
@@ -340,11 +351,17 @@ export type DeleteCatalogResult = { status: 'ok' } | { status: 'in_use' } | { st
  * attempted piecemeal, orphan a student's history — checking first avoids both, the same reasoning
  * DELETE /api/instructor/questions/{questionId} already documents for a single question.
  *
- * Not transactional (the Supabase JS client offers none, same limitation every other multi-step
- * write in this codebase accepts) — ordered children-before-parents so a failure partway through
- * leaves the catalog missing some content rather than a broken half-deleted row. The final delete
- * additionally treats a foreign_key_violation (23503) as 'in_use' rather than a raw error — defense
- * in depth in case some usage isn't one of the tables checked above.
+ * Also refuses with 'linked' — a second, independent pre-flight check, orthogonal to the 'in_use'
+ * one above — if any assembled_quiz_catalog row still references this catalog. Unlike deleting a
+ * single question (which the DELETE /api/instructor/questions/{questionId}?force= path lets an
+ * instructor push through with `force`), there is no "delete anyway" for a catalog: a catalog can
+ * be composed into several quizzes/courses at once (see CLAUDE.md's Assembled quizzes section), so
+ * silently cascading the unlink here — which is exactly what this function used to do, unyoking a
+ * catalog from every quiz it was in without telling anyone — could quietly break a running course
+ * out from under students. The instructor has to remove the catalog from each quiz by hand first
+ * (DELETE /api/instructor/assembled-quizzes/{quizId}/catalogs/{activityType}, the existing "remove
+ * a catalog from a quiz" action) before a delete here is allowed to proceed. This check runs before
+ * the destructive per-kind deletes below so a rejection never leaves the catalog partially deleted.
  */
 export async function deleteCatalog(supabase: SupabaseClient, activityType: string, gradingKind: GradingKind): Promise<DeleteCatalogResult> {
   const { data: sessionUsage, error: sessionUsageError } = await supabase
@@ -355,6 +372,22 @@ export async function deleteCatalog(supabase: SupabaseClient, activityType: stri
     .maybeSingle();
   if (sessionUsageError) return { status: 'error', error: sessionUsageError };
   if (sessionUsage) return { status: 'in_use' };
+
+  const { data: quizLinkRows, error: quizLinkError } = await supabase
+    .from('assembled_quiz_catalog')
+    .select('assembled_quiz:assembled_quiz_id(assembled_quiz_id, quiz_name, course:course_id(course_name))')
+    .eq('activity_type', activityType);
+  if (quizLinkError) return { status: 'error', error: quizLinkError };
+
+  const linkedQuizzes: LinkedQuizSummary[] = ((quizLinkRows ?? []) as unknown as QuizLinkRow[])
+    .map((row) => row.assembled_quiz)
+    .filter((quiz): quiz is NonNullable<QuizLinkRow['assembled_quiz']> => quiz !== null)
+    .map((quiz) => ({
+      quizId: quiz.assembled_quiz_id,
+      quizName: quiz.quiz_name,
+      courseName: quiz.course?.course_name ?? 'Unknown course',
+    }));
+  if (linkedQuizzes.length > 0) return { status: 'linked', quizzes: linkedQuizzes };
 
   if (gradingKind === 'llm-graded') {
     const { error: deleteStoriesError } = await supabase.from('user_story').delete().eq('activity_type', activityType);
