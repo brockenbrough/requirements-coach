@@ -4,7 +4,10 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { AppShell } from "../../components/AppShell";
-import { LeaderboardCourseSwitcher } from "../../components/LeaderboardCourseSwitcher";
+import {
+  ALL_COURSES_SCOPE,
+  LeaderboardCourseSwitcher,
+} from "../../components/LeaderboardCourseSwitcher";
 import { LeaderboardSkeleton } from "../../components/LeaderboardSkeleton";
 import {
   LeaderboardTable,
@@ -12,7 +15,9 @@ import {
 } from "../../components/LeaderboardTable";
 import { Pagination } from "../../components/Pagination";
 import {
+  GLOBAL_LEADERBOARD_KEY,
   loadCourseLeaderboard,
+  loadGlobalLeaderboard,
   loadMyLeaderboardCourses,
 } from "../../lib/studentCourseClient";
 import { getCachedLeaderboard } from "../../lib/leaderboardStore";
@@ -26,13 +31,21 @@ import { useRequireRole } from "../../lib/useRequireRole";
 const PAGE_SIZE = 10; // keep in sync with ROW_COUNT in components/LeaderboardSkeleton.tsx
 
 /**
- * The course leaderboard: where a student stands against their classmates.
+ * The full leaderboard: where a student stands, either against every student in the app ("All",
+ * the default) or against one course's roster at a time.
  *
- * Reads GET /api/courses/{courseId}/leaderboard via lib/studentCourseClient.ts's
- * loadCourseLeaderboard. rankChange is attached by that client call from
- * lib/previousRankStore.ts's last-recorded snapshot; this page
- * is what records the NEW snapshot, once per fresh fetch, after the entries carrying the old
- * snapshot's deltas have rendered — see the effect below and recordLeaderboardRanks's own doc.
+ * "All" reads GET /api/leaderboard via loadGlobalLeaderboard; a specific course reads
+ * GET /api/courses/{courseId}/leaderboard via loadCourseLeaderboard — genuinely different
+ * endpoints/queries (computeGlobalLeaderboard vs. computeCourseLeaderboard, lib/leaderboardQueries.ts),
+ * not the same one with/without a filter tacked on. Both share the same courseId-keyed cache
+ * (lib/leaderboardStore.ts) and rank-snapshot store (lib/previousRankStore.ts) as the dashboard's
+ * always-global LeaderboardPreview, under the reserved GLOBAL_LEADERBOARD_KEY when the scope is
+ * "All" — the two views can't disagree about the global ranking's cache or "since last visit" delta.
+ *
+ * rankChange is attached by the client call from lib/previousRankStore.ts's last-recorded
+ * snapshot; this page is what records the NEW snapshot, once per fresh fetch, after the entries
+ * carrying the old snapshot's deltas have rendered — see the effect below and
+ * recordLeaderboardRanks's own doc.
  *
  * Split into an inner component because useSearchParams() forces the nearest Suspense boundary
  * to render client-side — without one, `npm run build` fails prerendering this route.
@@ -78,31 +91,42 @@ function LeaderboardContent() {
   }, [token]);
 
   const courseIdParam = searchParams.get("courseId");
-  // An unknown ?courseId= falls back to the first course rather than showing an empty page for
-  // a course the student isn't in — the switcher then re-syncs the URL below.
-  const selectedCourseId = courses
-    ? (courses.find((course) => course.courseId === courseIdParam)?.courseId ??
-      courses[0]?.courseId ??
-      null)
-    : null;
+  // Anything that isn't one of the student's own courses — no param, "all" itself, or an unknown
+  // id — resolves to "All" (the default cross-course view) rather than an empty page for a course
+  // the student isn't in. The switcher then re-syncs the URL below.
+  const selectedScope: string = courses
+    ? (courses.find((course) => course.courseId === courseIdParam)?.courseId ?? ALL_COURSES_SCOPE)
+    : ALL_COURSES_SCOPE;
+
+  // The cache/rank-snapshot key for the current scope — the reserved GLOBAL_LEADERBOARD_KEY for
+  // "All", sharing the same entry the dashboard's LeaderboardPreview reads/writes, or the real
+  // course_id otherwise.
+  const scopeCacheKey = selectedScope === ALL_COURSES_SCOPE ? GLOBAL_LEADERBOARD_KEY : selectedScope;
 
   useEffect(() => {
-    if (!token || !selectedCourseId) {
-      setEntries(courses && courses.length === 0 ? [] : null);
+    if (!token || !courses) {
+      setEntries(null);
+      return;
+    }
+    if (courses.length === 0) {
+      setEntries([]);
       return;
     }
 
     let cancelled = false;
-    // Skip the null reset (and the resulting skeleton) when this course's leaderboard is
-    // already cached this session — loadCourseLeaderboard below will resolve it from cache
-    // essentially instantly, so there is nothing to show a loading state for (GitHub #328).
-    if (getCachedLeaderboard(selectedCourseId) === null) {
+    // Skip the null reset (and the resulting skeleton) when this scope's leaderboard is already
+    // cached this session — the loader below will resolve it from cache essentially instantly, so
+    // there is nothing to show a loading state for (GitHub #328).
+    if (getCachedLeaderboard(scopeCacheKey) === null) {
       setEntries(null);
     }
     setEntriesFailed(false);
     setPage(1);
 
-    loadCourseLeaderboard(token, selectedCourseId).then((result) => {
+    const loader =
+      selectedScope === ALL_COURSES_SCOPE ? loadGlobalLeaderboard(token) : loadCourseLeaderboard(token, selectedScope);
+
+    loader.then((result) => {
       if (cancelled) return;
       if (!result.ok) {
         setEntriesFailed(true);
@@ -114,33 +138,42 @@ function LeaderboardContent() {
     return () => {
       cancelled = true;
     };
+    // courses !== null (not `courses` itself) is the third dep deliberately: selectedScope
+    // resolves to ALL_COURSES_SCOPE both before courses has loaded and after (whenever no
+    // ?courseId= is in the URL), so without some signal that loading finished, this effect would
+    // never re-fire the moment courses arrives and entries would stay stuck on the skeleton
+    // forever. The boolean (not the array reference) is what keeps this from refiring every time
+    // handleRefresh gives `courses` a new array identity without selectedScope changing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, selectedCourseId]);
+  }, [token, selectedScope, courses !== null]);
 
   // Records THIS render's ranks as the new "previous" snapshot, once per fresh, non-empty fetch —
   // never during the fetch that produced the rankChange values just shown. Deliberately not
   // inside the fetch effect above: that effect's job is "get the data", this one's is "the data
   // has now been shown to the student", and folding them together would record before render.
   useEffect(() => {
-    if (!selectedCourseId || !entries || entries.length === 0) return;
-    recordLeaderboardRanks(selectedCourseId, entries);
-  }, [selectedCourseId, entries]);
+    if (!entries || entries.length === 0) return;
+    recordLeaderboardRanks(scopeCacheKey, entries);
+  }, [scopeCacheKey, entries]);
 
-  function handleSelectCourse(courseId: string) {
-    router.replace(`/leaderboard?courseId=${encodeURIComponent(courseId)}`, {
-      scroll: false,
-    });
+  function handleSelectScope(scope: string) {
+    router.replace(
+      scope === ALL_COURSES_SCOPE ? "/leaderboard" : `/leaderboard?courseId=${encodeURIComponent(scope)}`,
+      { scroll: false },
+    );
   }
 
   function handleRefresh() {
-    if (!token || !selectedCourseId || refreshing) return;
+    if (!token || refreshing) return;
     setRefreshing(true);
     // Forces both caches this page reads: the course list (membership can have changed since
-    // this session started) and the selected course's entries — the one on-demand escape hatch
+    // this session started) and the selected scope's entries — the one on-demand escape hatch
     // for both of the session caches GitHub #328 introduced.
     Promise.all([
       loadMyLeaderboardCourses(token, { forceRefresh: true }),
-      loadCourseLeaderboard(token, selectedCourseId, { forceRefresh: true }),
+      selectedScope === ALL_COURSES_SCOPE
+        ? loadGlobalLeaderboard(token, { forceRefresh: true })
+        : loadCourseLeaderboard(token, selectedScope, { forceRefresh: true }),
     ]).then(([coursesResult, entriesResult]) => {
       setRefreshing(false);
       if (coursesResult.ok) setCourses(coursesResult.data.courses);
@@ -229,8 +262,8 @@ function LeaderboardContent() {
           <>
             <LeaderboardCourseSwitcher
               courses={courses}
-              selectedCourseId={selectedCourseId}
-              onSelect={handleSelectCourse}
+              selectedCourseId={selectedScope}
+              onSelect={handleSelectScope}
             />
 
             {entriesFailed ? (

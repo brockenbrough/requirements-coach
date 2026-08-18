@@ -85,12 +85,30 @@ CREATE TABLE "user" (
 -- split is (see CLAUDE.md). DEFAULT 'mcq' matches every activity_type created before this column
 -- existed (see the migration note near the bottom of this file for the WRITE_ACCEPTANCE_CRITERIA
 -- backfill).
+--
+-- rating_prompt: an instructor's custom grading rubric for an llm-graded catalog, substituted for
+-- RATING_RUBRIC (lib/llm/promptUtils.ts) in the prompt sent to the LLM for every submission
+-- against this catalog. Nullable, and only ever meaningful when grading_kind = 'llm-graded' — the
+-- same "column doesn't apply to every kind" shape as the question/user_story split above, and for
+-- the same reason: a CHECK constraint can't express "required when llm-graded, unused otherwise,"
+-- so that pairing is enforced by POST /api/activities/types (required in the request body for a
+-- new llm-graded catalog, with no default — the kind itself is not editable afterwards, so a
+-- silently-missing rubric would be a wrong catalog rather than a fixable one) rather than by the
+-- column. Deliberately per-catalog, not per-quiz: an assembled_quiz can compose more than one
+-- llm-graded catalog at once, and each keeps grading against its own rubric — a student session
+-- always draws user_story rows from exactly one catalog, so the right rubric for any given
+-- submission is always the one on that story's own activity_type, never ambiguous even when a
+-- quiz composes several catalogs. Every catalog created before this column existed (the seeded
+-- WRITE_ACCEPTANCE_CRITERIA row, and any instructor-created llm-graded catalog that predates it)
+-- is NULL forever as of this change — there is no backfill — and buildRatingPrompt falls back to
+-- the built-in RATING_RUBRIC whenever this is null, which is exactly those rows' behavior today.
 -- ---------------------------------------------------------------------
 CREATE TABLE activity_type (
     activity_type varchar(50) NOT NULL,
     quiz_name     text        NOT NULL,
     description   text,
     grading_kind  text        NOT NULL DEFAULT 'mcq',
+    rating_prompt text,
     creator_id    uuid,
     PRIMARY KEY (activity_type));
 
@@ -418,16 +436,16 @@ CREATE TABLE assembled_quiz_extra_user_story (
 -- =====================================================================
 
 CREATE TABLE session_log (
-    session_id       uuid        NOT NULL,
-    user_id          uuid        NOT NULL,
-    activity_type    varchar(50) NOT NULL,
-    difficulty_level int2        NOT NULL DEFAULT 1,
-    started_at       timestamp   NOT NULL DEFAULT now(),
-    ended_at         timestamp,
-    status           varchar(20) NOT NULL DEFAULT 'in-progress',
-    cumulative_score int4        NOT NULL DEFAULT 0,
-    max_score        int4        NOT NULL DEFAULT 100,
-    passed           bool        NOT NULL DEFAULT false,
+    session_id        uuid        NOT NULL,
+    user_id           uuid        NOT NULL,
+    activity_type     varchar(50) NOT NULL,
+    difficulty_level  int2        NOT NULL DEFAULT 1,
+    started_at        timestamp   NOT NULL DEFAULT now(),
+    ended_at          timestamp,
+    status            varchar(20) NOT NULL DEFAULT 'in-progress',
+    cumulative_score  int4        NOT NULL DEFAULT 0,
+    max_score         int4        NOT NULL DEFAULT 100,
+    passed            bool        NOT NULL DEFAULT false,
     PRIMARY KEY (session_id));
 
 -- The 4 drawn questions, analogous to question_to_answer.
@@ -1293,6 +1311,21 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 --
 -- and unlink (DELETE FROM assembled_quiz_catalog ...) the mismatched rows by hand.
 
+-- Custom grading rubric, per catalog: activity_type.rating_prompt. An earlier iteration of this
+-- feature put the rubric on assembled_quiz (per quiz) instead — if your database still has that
+-- column (and session_log.assembled_quiz_id, added alongside it), drop both as part of this same
+-- migration:
+--
+--   ALTER TABLE activity_type ADD COLUMN IF NOT EXISTS rating_prompt text;
+--   ALTER TABLE assembled_quiz DROP COLUMN IF EXISTS rating_prompt;
+--   ALTER TABLE session_log DROP CONSTRAINT IF EXISTS fk_session_log_assembled_quiz;
+--   ALTER TABLE session_log DROP COLUMN IF EXISTS assembled_quiz_id;
+--
+-- Additive only, no backfill possible: every catalog created before this column existed has no
+-- custom rubric until an instructor sets one (buildRatingPrompt, lib/llm/promptUtils.ts, already
+-- falls back to the built-in RATING_RUBRIC whenever it's null) — exactly the "unchanged behavior
+-- for pre-migration rows" state the null default already gives for free.
+
 -- assembled_quiz.questions_per_level (GitHub #416): a per-quiz override for how many
 -- questions/prompts a session draws per level, replacing the flat QUESTIONS_PER_SESSION constant
 -- as the draw size for any catalog the quiz grants access to. Never below MIN_QUESTIONS_PER_LEVEL
@@ -1306,3 +1339,14 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 --
 -- No backfill needed: DEFAULT 4 already matches QUESTIONS_PER_SESSION, so every existing quiz
 -- draws exactly as it did before this column existed.
+
+-- instructor_llm_config.api_key is now encrypted before it's written (lib/secretEncryption.ts,
+-- keyed by the LLM_CONFIG_ENCRYPTION_KEY env var — see .env.example) — no column/type change,
+-- it's still `text`, just no longer plaintext. Unlike the other notes in this footer, this one
+-- has NO safe backfill: any row saved before this change is plaintext, not the app's
+-- iv:authTag:ciphertext format, and cannot be decrypted after the fact — there is no key that
+-- would work, because none was ever used to encrypt it. If your deployment has pre-existing rows
+-- in this table, each affected instructor needs to re-save their LLM provider config once from
+-- Instructor → Settings after this deploys; grading against the old row 500s with "Configured
+-- LLM provider key could not be read" until they do. See docs/manuals/administrator-manual.md's
+-- "Setting up LLM grading" section for the operator-facing version of this note.

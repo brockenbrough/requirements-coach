@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { createQuiz, loadTitleNames, type CreatedQuiz } from '../lib/quizClient';
 import type { GradingKind } from '../lib/activityTypes';
 import { useModalDismiss } from './useModalDismiss';
+import { RatingPromptModal } from './RatingPromptModal';
 import {
   emptyTitleLadderDraft,
   TitleLadderFields,
@@ -44,6 +45,14 @@ const KIND_OPTIONS: { value: GradingKind; label: string; hint: string }[] = [
  * to require picking one here, is gone. A catalog is created owned only by its instructor and
  * becomes visible to students once composed into an assembled_quiz (GitHub #360,
  * app/instructor/assembled-quizzes/page.tsx) for a course.
+ *
+ * GitHub #379 follow-up: selecting "LLM-Graded Task" immediately opens RatingPromptModal
+ * (mode="create") as a second, stacked popup — a catalog's grading rubric (activity_type.rating_prompt)
+ * is required up front, same "cannot be skipped past" treatment gradingKind itself already gets.
+ * Its onSave here is synchronous local state, not a network call (the catalog itself doesn't exist
+ * yet); dismissing it any other way resets gradingKind back to unselected, via
+ * RatingPromptModal's own onCancel contract. Once set, a summary line with an Edit button lets the
+ * instructor revise it before submitting, using the same popup pre-filled via initialValue.
  */
 export function CreateCatalogModal({
   token,
@@ -59,6 +68,8 @@ export function CreateCatalogModal({
   // Starts null with no pre-selection: "creation cannot proceed without this choice" only holds
   // if there is no kind the instructor can accept by simply not looking at the field.
   const [gradingKind, setGradingKind] = useState<GradingKind | null>(null);
+  const [ratingPrompt, setRatingPrompt] = useState('');
+  const [ratingPromptModalOpen, setRatingPromptModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [titles, setTitles] = useState<TitleLadderDraft>(emptyTitleLadderDraft);
@@ -79,10 +90,14 @@ export function CreateCatalogModal({
 
   const { panelRef, firstFieldRef, requestClose } = useModalDismiss<HTMLDivElement, HTMLInputElement>({
     onClose,
-    isBlocked: submitting,
+    isBlocked: submitting || ratingPromptModalOpen,
   });
 
-  const canSubmit = Boolean(name.trim()) && gradingKind !== null && !submitting;
+  const canSubmit =
+    Boolean(name.trim()) &&
+    gradingKind !== null &&
+    (gradingKind !== 'llm-graded' || Boolean(ratingPrompt.trim())) &&
+    !submitting;
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -95,6 +110,7 @@ export function CreateCatalogModal({
       name: name.trim(),
       gradingKind: gradingKind!,
       description: description.trim() || undefined,
+      ratingPrompt: gradingKind === 'llm-graded' ? ratingPrompt.trim() : undefined,
       titles: titleLadderDraftToRungs(titles),
     });
 
@@ -113,6 +129,7 @@ export function CreateCatalogModal({
   }
 
   return (
+    <>
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-8"
       onClick={(event) => {
@@ -189,7 +206,10 @@ export function CreateCatalogModal({
                     name="gradingKind"
                     value={option.value}
                     checked={gradingKind === option.value}
-                    onChange={() => setGradingKind(option.value)}
+                    onChange={() => {
+                      setGradingKind(option.value);
+                      if (option.value === 'llm-graded') setRatingPromptModalOpen(true);
+                    }}
                     className="mt-0.5 h-4 w-4 flex-none accent-brand-purple"
                   />
                   <span className="block">
@@ -203,6 +223,21 @@ export function CreateCatalogModal({
               This cannot be changed after the catalog is created.
             </p>
           </fieldset>
+
+          {gradingKind === 'llm-graded' ? (
+            <div className="mt-4 flex items-center justify-between gap-3 rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-3">
+              <p className="text-xs font-semibold text-brand-ink-muted">
+                {ratingPrompt.trim() ? 'Grading rubric set.' : 'Grading rubric required.'}
+              </p>
+              <button
+                type="button"
+                onClick={() => setRatingPromptModalOpen(true)}
+                className="flex-none rounded-brand-md border border-brand-navy-border bg-brand-navy px-3 py-1.5 text-xs font-extrabold text-brand-ink transition hover:border-brand-purple hover:text-brand-purple"
+              >
+                {ratingPrompt.trim() ? 'Edit' : 'Add'}
+              </button>
+            </div>
+          ) : null}
 
           {/* Titles are optional and canSubmit deliberately ignores them: a catalog without a
               ladder is what every catalog looks like today, and requiring names here would turn a
@@ -246,5 +281,22 @@ export function CreateCatalogModal({
         </form>
       </div>
     </div>
+    {ratingPromptModalOpen ? (
+      <RatingPromptModal
+        mode="create"
+        initialValue={ratingPrompt}
+        onCancel={() => {
+          setRatingPromptModalOpen(false);
+          setGradingKind(null);
+          setRatingPrompt('');
+        }}
+        onSave={async (value) => {
+          setRatingPrompt(value);
+          setRatingPromptModalOpen(false);
+          return { ok: true };
+        }}
+      />
+    ) : null}
+    </>
   );
 }

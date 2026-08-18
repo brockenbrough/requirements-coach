@@ -90,6 +90,44 @@ export async function getGradingKind(
 }
 
 /**
+ * activity_type.rating_prompt's length bound (see supabase/schema.sql) — shared by the create
+ * route (POST /api/activities/types) and the edit route (PATCH
+ * /api/instructor/quizzes/{activityType}) so the two caps can't drift apart. Same reasoning as
+ * MAX_SUBMITTED_TEXT_LENGTH in the llm/submissions route: unlike description (display-only), this
+ * text is re-sent to the LLM on every graded submission against this catalog, so it needs a
+ * token-cost bound, not just a UX one.
+ */
+export const MAX_RATING_PROMPT_LENGTH = 4000;
+
+export type RatingPromptValidation =
+  | { ok: true; ratingPrompt: string }
+  | { ok: false; response: Response };
+
+/**
+ * Validates a rating-prompt request-body field, trimmed — required non-blank, capped at
+ * MAX_RATING_PROMPT_LENGTH. Shared by the create and edit routes above so their error responses
+ * (and the length they enforce) can't say different things for the same rule.
+ */
+export function validateRatingPromptText(value: unknown): RatingPromptValidation {
+  if (typeof value !== 'string' || value.trim() === '') {
+    return { ok: false, response: Response.json({ error: 'ratingPrompt is required.' }, { status: 400 }) };
+  }
+
+  const trimmed = value.trim();
+  if (trimmed.length > MAX_RATING_PROMPT_LENGTH) {
+    return {
+      ok: false,
+      response: Response.json(
+        { error: `ratingPrompt must be ${MAX_RATING_PROMPT_LENGTH} characters or fewer.` },
+        { status: 400 },
+      ),
+    };
+  }
+
+  return { ok: true, ratingPrompt: trimmed };
+}
+
+/**
  * Derives the activity_type key POST /api/activities/types stores from the quiz's display name:
  * upper-cased, every run of non-alphanumeric characters collapsed to a single underscore, no
  * leading/trailing underscore. Matches the format of the three built-in keys exactly —
@@ -102,4 +140,37 @@ export function slugifyQuizName(name: string): string {
     .toUpperCase()
     .replace(/[^A-Z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
+}
+
+// Matches activity_type.activity_type varchar(50) in supabase/schema.sql. Shared by every route
+// that derives a key from an instructor-given name (POST /api/activities/types, POST
+// /api/instructor/quizzes/{activityType}/duplicate) so the two can't drift on how long a name is
+// allowed to be.
+export const MAX_ACTIVITY_TYPE_KEY_LENGTH = 50;
+
+export type ActivityTypeKeyValidation = { ok: true; key: string } | { ok: false; response: Response };
+
+/**
+ * slugifyQuizName plus the two failure modes every caller that derives a key from a name has to
+ * check: an empty result (a name with no letters or digits at all) and a key too long for the
+ * column. Extracted for GitHub #478's duplicate-catalog route, which needs the exact same checks
+ * POST /api/activities/types already made inline.
+ */
+export function deriveActivityTypeKey(name: string): ActivityTypeKeyValidation {
+  const key = slugifyQuizName(name);
+
+  if (key === '') {
+    return { ok: false, response: Response.json({ error: 'name must contain at least one letter or number.' }, { status: 400 }) };
+  }
+  if (key.length > MAX_ACTIVITY_TYPE_KEY_LENGTH) {
+    return {
+      ok: false,
+      response: Response.json(
+        { error: `name is too long — the derived key must be ${MAX_ACTIVITY_TYPE_KEY_LENGTH} characters or fewer.` },
+        { status: 400 },
+      ),
+    };
+  }
+
+  return { ok: true, key };
 }

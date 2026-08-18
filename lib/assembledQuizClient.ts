@@ -45,6 +45,10 @@ export type QuizCatalogComposition = {
   /** Which pool totalQuestions/activeCount are counted from — 'mcq' (question rows) or
    *  'llm-graded' (user_story rows). Both kinds support per-quiz exclusion. */
   gradingKind: GradingKind;
+  /** The catalog's own grading rubric (activity_type.rating_prompt) — null for 'mcq', or for an
+   *  'llm-graded' catalog that hasn't set one yet. Read-only here; edited from the catalog's own
+   *  detail page (lib/quizClient.ts's updateRatingPrompt), not this quiz-composition view. */
+  ratingPrompt: string | null;
   totalQuestions: number;
   excludedCount: number;
   activeCount: number;
@@ -130,6 +134,15 @@ export function loadAssembledQuizzes(token: string): Promise<ApiResult<{ quizzes
  * see assembled_quiz.grading_kind's own comment in supabase/schema.sql. questionsPerLevel (GitHub
  * #416) is optional — the route falls back to QUESTIONS_PER_SESSION when it's omitted.
  */
+export type CreatedAssembledQuiz = {
+  id: string;
+  name: string;
+  description: string | null;
+  courseId: string;
+  gradingKind: GradingKind;
+  questionsPerLevel: number;
+};
+
 export function createAssembledQuiz(
   token: string,
   input: {
@@ -140,18 +153,8 @@ export function createAssembledQuiz(
     questionsPerLevel?: number;
     catalogActivityTypes: string[];
   },
-): Promise<
-  ApiResult<{
-    quiz: { id: string; name: string; description: string | null; courseId: string; gradingKind: GradingKind; questionsPerLevel: number };
-  }>
-> {
-  return request<{
-    quiz: { id: string; name: string; description: string | null; courseId: string; gradingKind: GradingKind; questionsPerLevel: number };
-  }>(
-    '/api/instructor/assembled-quizzes',
-    postJson(input),
-    token,
-  );
+): Promise<ApiResult<{ quiz: CreatedAssembledQuiz }>> {
+  return request<{ quiz: CreatedAssembledQuiz }>('/api/instructor/assembled-quizzes', postJson(input), token);
 }
 
 function postJson(payload: unknown): RequestInit {

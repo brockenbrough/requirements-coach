@@ -44,18 +44,25 @@ export async function loadTitleLadder(
 }
 
 /**
- * Writes one catalog's ladder: rungs with a name are upserted, rungs explicitly cleared (titleName
- * null) are deleted. Levels absent from `rungs` are left exactly as they are, so a caller can send
- * a single rung without wiping the other two.
+ * Writes one catalog's ladder: rungs with a name are inserted or updated (see below), rungs
+ * explicitly cleared (titleName null) are deleted. Levels absent from `rungs` are left exactly as
+ * they are, so a caller can send a single rung without wiping the other two.
  *
- * The upsert keys on uq_title_definition_activity_level rather than on title_definition_id, which
- * is what makes "save the form again" idempotent: editing a title updates the existing row instead
- * of inserting a second one for the same level. That identity is load-bearing beyond tidiness —
- * "user".selected_title_definition_id points at these rows, so replacing a row on every save would
- * silently un-wear the title for every student wearing it (the FK is ON DELETE SET NULL).
+ * Editing an existing rung must preserve its title_definition_id rather than replace the row,
+ * because "user".selected_title_definition_id points at it — a student already wearing the title
+ * would silently lose it (or, worse, the save itself would fail) otherwise.
  *
- * A title_definition_id is generated per inserted row and ignored on conflict; Postgres keeps the
- * existing id, which is exactly the behaviour the paragraph above depends on.
+ * This used to be a single upsert keyed on uq_title_definition_activity_level, generating a fresh
+ * title_definition_id for every row and relying on Postgres to "ignore it on conflict" — that
+ * belief was wrong. `ON CONFLICT (activity_type, difficulty_level) DO UPDATE SET ...` puts every
+ * column present in the payload into the SET clause except the conflict target itself, and
+ * title_definition_id isn't part of that target, so it WAS being overwritten with the freshly
+ * generated id on every save. That's an UPDATE to the primary key of a row "user" may already
+ * reference, which fk_user_title_definition (ON DELETE SET NULL, but no ON UPDATE clause)
+ * correctly rejects — "update or delete on table title_definition violates foreign key constraint
+ * fk_user_title_definition" the moment any student had already selected that title. Splitting into
+ * an explicit update (existing rows, id untouched) and insert (new rows, fresh id) avoids the
+ * primary key ever moving for a row that already exists.
  */
 export async function saveTitleLadder(
   supabase: SupabaseClient,
@@ -66,19 +73,52 @@ export async function saveTitleLadder(
   const cleared = rungs.filter((rung) => rung.titleName === null).map((rung) => rung.difficultyLevel);
 
   if (filled.length > 0) {
-    const { error } = await supabase
+    const { data: existingData, error: existingError } = await supabase
       .from('title_definition')
-      .upsert(
-        filled.map((rung) => ({
+      .select('title_definition_id, difficulty_level')
+      .eq('activity_type', activityType)
+      .in(
+        'difficulty_level',
+        filled.map((rung) => rung.difficultyLevel),
+      );
+
+    if (existingError) return { error: existingError };
+
+    const existingIdByLevel = new Map(
+      ((existingData ?? []) as { title_definition_id: string; difficulty_level: number }[]).map((row) => [
+        row.difficulty_level,
+        row.title_definition_id,
+      ]),
+    );
+
+    const toInsert = filled.filter((rung) => !existingIdByLevel.has(rung.difficultyLevel));
+    const toUpdate = filled.filter((rung) => existingIdByLevel.has(rung.difficultyLevel));
+
+    if (toInsert.length > 0) {
+      const { error } = await supabase.from('title_definition').insert(
+        toInsert.map((rung) => ({
           title_definition_id: crypto.randomUUID(),
           activity_type: activityType,
           difficulty_level: rung.difficultyLevel,
           title_name: rung.titleName as string,
         })),
-        { onConflict: 'activity_type,difficulty_level' },
       );
 
-    if (error) return { error };
+      if (error) return { error };
+    }
+
+    // One statement per row rather than a batched call: supabase-js/PostgREST has no bulk-update-
+    // by-differing-values primitive (that's what upsert is for, and upsert is exactly the thing
+    // this function stopped using) — a handful of rows at most (MAX_DIFFICULTY_LEVEL is 3), so the
+    // extra round trips are not a real cost.
+    for (const rung of toUpdate) {
+      const { error } = await supabase
+        .from('title_definition')
+        .update({ title_name: rung.titleName as string })
+        .eq('title_definition_id', existingIdByLevel.get(rung.difficultyLevel));
+
+      if (error) return { error };
+    }
   }
 
   if (cleared.length > 0) {

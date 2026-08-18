@@ -7,16 +7,16 @@ import { AppShell } from '../../../../components/AppShell';
 import { CatalogPromptCard } from '../../../../components/CatalogPromptCard';
 import { ConfirmModal } from '../../../../components/ConfirmModal';
 import { DeleteQuestionModal } from '../../../../components/DeleteQuestionModal';
+import { DuplicateCatalogModal } from '../../../../components/DuplicateCatalogModal';
 import { PromptFormModal } from '../../../../components/PromptFormModal';
 import { QuestionFormModal } from '../../../../components/QuestionFormModal';
-import { deleteCatalog, loadQuizDetail, loadTitleNames, saveTitleLadder, type QuizMeta } from '../../../../lib/quizClient';
-import type { StoredTitleRung } from '../../../../lib/titleAuthoringQueries';
+import { RatingPromptModal } from '../../../../components/RatingPromptModal';
 import {
-  emptyTitleLadderDraft,
-  TitleLadderFields,
-  titleLadderDraftToRungs,
-  type TitleLadderDraft,
-} from '../../../../components/TitleLadderFields';
+  deleteCatalog,
+  loadQuizDetail,
+  updateRatingPrompt,
+  type QuizMeta,
+} from '../../../../lib/quizClient';
 import { createQuestion, updateQuestion } from '../../../../lib/sessionClient';
 import {
   createUserStory,
@@ -32,12 +32,6 @@ import { useRequireRole } from '../../../../lib/useRequireRole';
 
 const LEVEL_OPTIONS = ['all', 1, 2, 3] as const;
 
-/** The stored ladder (only levels that have a title) widened into a full per-level form draft. */
-function titleLadderToDraft(titles: StoredTitleRung[]): TitleLadderDraft {
-  const draft = emptyTitleLadderDraft();
-  for (const rung of titles) draft[rung.difficultyLevel] = rung.titleName;
-  return draft;
-}
 const HIGHLIGHT_MS = 4000;
 const TOAST_MS = 3200;
 
@@ -57,6 +51,15 @@ function TrashIcon() {
       <path d="M8 6V4h8v2" />
       <path d="M19 6l-1 14H6L5 6" />
       <path d="M10 11v6M14 11v6" />
+    </svg>
+  );
+}
+
+function LockIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <rect x="5" y="11" width="14" height="9" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
     </svg>
   );
 }
@@ -111,11 +114,8 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
   const [highlight, setHighlight] = useState<{ id: string; label: string } | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showDeleteCatalog, setShowDeleteCatalog] = useState(false);
-
-  const [titleDraft, setTitleDraft] = useState<TitleLadderDraft>(emptyTitleLadderDraft);
-  const [titleSuggestions, setTitleSuggestions] = useState<string[]>([]);
-  const [savingTitles, setSavingTitles] = useState(false);
-  const [titleError, setTitleError] = useState('');
+  const [ratingPromptModalOpen, setRatingPromptModalOpen] = useState(false);
+  const [duplicateModalOpen, setDuplicateModalOpen] = useState(false);
 
   useEffect(() => {
     if (!token) return;
@@ -131,7 +131,6 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
         setQuiz(result.data.quiz);
         setQuestions(result.data.questions);
         setPrompts(result.data.userStories);
-        setTitleDraft(titleLadderToDraft(result.data.titles));
       } else if (result.status === 404) {
         setNotFound(true);
       } else if (result.status === 403) {
@@ -146,42 +145,14 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
     };
   }, [token, params.activityType, retryCount]);
 
-  // Suggestions only — a failure leaves the title fields working as plain text inputs, so it is
-  // deliberately not surfaced as a page error.
-  useEffect(() => {
-    if (!token) return;
-    let cancelled = false;
-    loadTitleNames(token).then((result) => {
-      if (!cancelled && result.ok) setTitleSuggestions(result.data.titleNames);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [token]);
-
-  async function handleSaveTitles() {
-    if (!token) return;
-    setSavingTitles(true);
-    setTitleError('');
-
-    const result = await saveTitleLadder(token, params.activityType, titleLadderDraftToRungs(titleDraft));
-    setSavingTitles(false);
-
-    if (!result.ok) {
-      setTitleError(result.error);
-      return;
-    }
-
-    // Re-seed from what the server actually stored rather than keeping the local draft — the two
-    // can differ (trimming, a rung cleared to null), and the stored version is the truth.
-    setTitleDraft(titleLadderToDraft(result.data.titles));
-    setToastMessage('Mastery titles saved.');
-  }
-
   if (loading || !authorized) return null;
   if (!token || !profile) return null;
 
   const llmGraded = quiz?.gradingKind === 'llm-graded';
+  // GitHub #478: a built-in example catalog is visible to every instructor now, but strictly
+  // read-only — no Edit toggle, no add/edit/delete, no Delete-catalog button. "Duplicate" is the
+  // only action available on one.
+  const isBuiltIn = quiz?.isBuiltIn ?? false;
   const items = llmGraded ? prompts ?? [] : questions ?? [];
   const visibleQuestions = (questions ?? []).filter((question) => level === 'all' || question.level === level);
   const visiblePrompts = (prompts ?? []).filter((prompt) => level === 'all' || prompt.level === level);
@@ -294,6 +265,20 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
     window.setTimeout(() => setToastMessage(null), TOAST_MS);
   }
 
+  async function handleSaveRatingPrompt(value: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (!token) return { ok: false, error: 'Your session has expired. Please sign in again.' };
+
+    const result = await updateRatingPrompt(token, params.activityType, value);
+    if (!result.ok) return { ok: false, error: result.error };
+
+    setQuiz((current) => (current ? { ...current, ratingPrompt: result.data.ratingPrompt } : current));
+    setRatingPromptModalOpen(false);
+    setToastMessage('Grading rubric updated.');
+    window.setTimeout(() => setToastMessage(null), TOAST_MS);
+
+    return { ok: true };
+  }
+
   async function handleDeleteCatalog(): Promise<{ ok: true } | { ok: false; error: string }> {
     if (!token) return { ok: false, error: 'Your session has expired. Please sign in again.' };
 
@@ -304,6 +289,12 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
 
     router.push('/instructor/quizzes');
     return { ok: true };
+  }
+
+  function handleDuplicated(duplicated: { activityType: string }) {
+    // The new catalog is a normal, fully editable one — hand off to its own detail page rather
+    // than staying on this (still read-only) one.
+    router.push(`/instructor/quizzes/${encodeURIComponent(duplicated.activityType)}`);
   }
 
   return (
@@ -346,40 +337,61 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
                 </p>
               </div>
               <div className="flex flex-none items-center gap-2">
-                {editMode ? (
+                {isBuiltIn ? (
                   <button
                     type="button"
-                    onClick={() => (llmGraded ? setPromptModalState({ mode: 'add' }) : setModalState({ mode: 'add' }))}
+                    onClick={() => setDuplicateModalOpen(true)}
                     className="flex items-center gap-2 rounded-full bg-brand-purple px-5 py-2.5 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark"
                   >
-                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round">
-                      <path d="M12 5v14M5 12h14" />
-                    </svg>
-                    {llmGraded ? 'New Prompt' : 'New Question'}
+                    Duplicate
                   </button>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => setEditMode((current) => !current)}
-                  className={`rounded-full border px-5 py-2.5 text-sm font-extrabold transition ${
-                    editMode
-                      ? 'border-gray-300 bg-white text-gray-600 hover:border-brand-purple hover:text-brand-purple'
-                      : 'border-brand-purple bg-white text-brand-purple hover:bg-brand-purple hover:text-white'
-                  }`}
-                >
-                  {editMode ? 'Done' : 'Edit'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowDeleteCatalog(true)}
-                  aria-label="Delete this catalog"
-                  title="Delete this catalog"
-                  className="flex h-10 w-10 flex-none items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 transition hover:border-brand-danger hover:text-brand-danger"
-                >
-                  <TrashIcon />
-                </button>
+                ) : (
+                  <>
+                    {editMode ? (
+                      <button
+                        type="button"
+                        onClick={() => (llmGraded ? setPromptModalState({ mode: 'add' }) : setModalState({ mode: 'add' }))}
+                        className="flex items-center gap-2 rounded-full bg-brand-purple px-5 py-2.5 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark"
+                      >
+                        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round">
+                          <path d="M12 5v14M5 12h14" />
+                        </svg>
+                        {llmGraded ? 'New Prompt' : 'New Question'}
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => setEditMode((current) => !current)}
+                      className={`rounded-full border px-5 py-2.5 text-sm font-extrabold transition ${
+                        editMode
+                          ? 'border-gray-300 bg-white text-gray-600 hover:border-brand-purple hover:text-brand-purple'
+                          : 'border-brand-purple bg-white text-brand-purple hover:bg-brand-purple hover:text-white'
+                      }`}
+                    >
+                      {editMode ? 'Done' : 'Edit'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowDeleteCatalog(true)}
+                      aria-label="Delete this catalog"
+                      title="Delete this catalog"
+                      className="flex h-10 w-10 flex-none items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 transition hover:border-brand-danger hover:text-brand-danger"
+                    >
+                      <TrashIcon />
+                    </button>
+                  </>
+                )}
               </div>
             </div>
+
+            {isBuiltIn ? (
+              <div className="mb-5 mt-5 flex items-center gap-2.5 rounded-brand-md border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-600">
+                <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-gray-200 text-gray-500">
+                  <LockIcon />
+                </span>
+                This is a built-in example catalog. It's read-only — duplicate it to make your own editable copy.
+              </div>
+            ) : null}
 
             {toastMessage ? (
               <div
@@ -409,53 +421,27 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
               </div>
             ) : null}
 
-            {/* Catalog-level metadata, so it sits above the level filter rather than inside the
-                filtered list — the ladder describes all three levels at once and filtering to one
-                level must not hide the other two rungs. Read-only until the same Edit toggle that
-                governs questions and prompts is on. */}
-            <div className="mb-6 mt-6 rounded-brand-lg border border-gray-100 bg-gray-50 p-5">
-              <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Mastery titles</p>
-
-              {editMode ? (
-                <>
-                  <p className="mb-3 mt-1.5 text-xs font-semibold text-gray-500">
-                    What a student is called once they pass each level. Start typing to reuse a title
-                    that already exists. Students who already passed a level get its title as soon as
-                    you save.
-                  </p>
-                  <TitleLadderFields
-                    draft={titleDraft}
-                    onChange={(lvl, value) => setTitleDraft((current) => ({ ...current, [lvl]: value }))}
-                    suggestions={titleSuggestions}
-                    disabled={savingTitles}
-                  />
-                  {titleError ? <p className="mt-3 text-xs font-bold text-brand-danger">{titleError}</p> : null}
+            {llmGraded ? (
+              <div className="mb-6 mt-6 flex flex-wrap items-start justify-between gap-3 rounded-brand-lg border border-gray-100 bg-gray-50 p-4">
+                <div className="min-w-0 flex-1">
+                  <p className="mb-1 text-xs font-extrabold uppercase tracking-wide text-gray-400">Grading Rubric</p>
+                  {quiz.ratingPrompt ? (
+                    <p className="whitespace-pre-wrap text-sm font-medium text-gray-600">{quiz.ratingPrompt}</p>
+                  ) : (
+                    <p className="text-sm font-medium text-gray-400">Using the built-in default rubric.</p>
+                  )}
+                </div>
+                {isBuiltIn ? null : (
                   <button
                     type="button"
-                    onClick={handleSaveTitles}
-                    disabled={savingTitles}
-                    className="mt-4 rounded-brand-md bg-brand-purple px-5 py-2 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark disabled:opacity-60"
+                    onClick={() => setRatingPromptModalOpen(true)}
+                    className="flex-none rounded-full border border-gray-300 bg-white px-4 py-1.5 text-xs font-extrabold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple"
                   >
-                    {savingTitles ? 'Saving…' : 'Save titles'}
+                    {quiz.ratingPrompt ? 'Edit rubric' : 'Set rubric'}
                   </button>
-                </>
-              ) : (
-                <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                  {LEVEL_OPTIONS.filter((lvl): lvl is 1 | 2 | 3 => lvl !== 'all').map((lvl) => (
-                    <div key={lvl} className="rounded-brand-md border border-gray-200 bg-white px-3.5 py-2.5">
-                      <p className="text-xs font-bold uppercase tracking-wide text-gray-400">{LEVEL_LABEL[lvl]}</p>
-                      <p
-                        className={`mt-0.5 text-sm font-extrabold ${
-                          titleDraft[lvl] ? 'text-brand-navy' : 'text-gray-400'
-                        }`}
-                      >
-                        {titleDraft[lvl] || 'No title yet'}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            ) : null}
 
             <div className="mb-6 mt-6 flex flex-wrap gap-1.5">
               {LEVEL_OPTIONS.map((lvl) => (
@@ -605,6 +591,24 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
           catalogOptions={quizOptions}
           onClose={() => setPromptModalState(null)}
           onSave={handleSavePrompt}
+        />
+      ) : null}
+
+      {ratingPromptModalOpen ? (
+        <RatingPromptModal
+          mode="edit"
+          initialValue={quiz?.ratingPrompt ?? ''}
+          onCancel={() => setRatingPromptModalOpen(false)}
+          onSave={handleSaveRatingPrompt}
+        />
+      ) : null}
+
+      {duplicateModalOpen && quiz ? (
+        <DuplicateCatalogModal
+          catalog={{ activityType: params.activityType, name: quiz.name }}
+          token={token}
+          onClose={() => setDuplicateModalOpen(false)}
+          onCreated={handleDuplicated}
         />
       ) : null}
 

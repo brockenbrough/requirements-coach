@@ -2,6 +2,7 @@ import { getSupabaseClient } from '../../../../lib/supabase';
 import { requireInstructor } from '../../../../lib/instructorAuth';
 import { validateUserStoryInput } from '../../../../lib/userStoryInput';
 import { createUserStory } from '../../../../lib/userStoryAuthoringQueries';
+import { assertCatalogIsEditable } from '../../../../lib/activityTypeQueries';
 import type { InstructorUserStoryEntry } from '../../../../lib/llmActivityTypes';
 
 function getToken(request: Request): string | null {
@@ -76,6 +77,8 @@ export async function GET(request: Request) {
  * - creator_id is taken from the authenticated instructor, never the body. It also decides which
  *   instructor_llm_config grades submissions against this prompt, which is why the seeded
  *   (creator_id NULL) set is ungradable.
+ * - activityType must not be a built-in example catalog (creator_id IS NULL) — 403s otherwise
+ *   (GitHub #478, assertCatalogIsEditable in lib/activityTypeQueries.ts)
  *
  * Two deliberate differences from the questions route, both because user_story is a leaf table:
  * there is no order_number to auto-assign (the column doesn't exist — prompts are ordered by level
@@ -114,6 +117,11 @@ export async function POST(request: Request) {
 
   const validation = await validateUserStoryInput(supabase, { storyText, activityType, difficultyLevel });
   if (!validation.ok) return validation.response;
+
+  // GitHub #478: a built-in example catalog is strictly read-only — no new prompt may be filed
+  // under it, even by an instructor who owns none of its existing prompts.
+  const editable = await assertCatalogIsEditable(supabase, validation.activityType);
+  if (!editable.ok) return editable.response;
 
   const { data: { user }, error: authError } = await supabase.auth.getUser(token!);
   if (authError || !user) return Response.json({ error: 'Invalid or expired token.' }, { status: 401 });

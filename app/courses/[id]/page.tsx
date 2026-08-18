@@ -1,17 +1,19 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../../components/AppShell';
 import { ActivityCard, type ActivityCardData } from '../../../components/ActivityCard';
 import { ActivityCardSkeleton } from '../../../components/ActivityCardSkeleton';
+import { ConfirmModal } from '../../../components/ConfirmModal';
 import { CourseLeaderboard } from '../../../components/CourseLeaderboard';
 import { deriveActivityCardStatus } from '../../../lib/activityCardStatus';
 import { buildCustomActivityDefinition, getActivityByType, type ActivityDefinition, type Difficulty } from '../../../lib/activityContent';
 import { loadAvailableActivities } from '../../../lib/activityDiscoveryClient';
 import { loadCompletedAttempts, loadSessions, loadStudentTitles, type StudentTitle } from '../../../lib/sessionClient';
 import { MAX_DIFFICULTY_LEVEL, nextDifficultyLevel } from '../../../lib/sessionRules';
-import { loadMyCourses } from '../../../lib/studentCourseClient';
+import { leaveCourse, loadMyCourses } from '../../../lib/studentCourseClient';
 import type { JoinableCourse } from '../../../lib/courseTypes';
 import { useRequireRole } from '../../../lib/useRequireRole';
 
@@ -49,6 +51,7 @@ function earnedTitle(entry: StudentTitle | null): string | null {
  */
 export default function CourseQuizzesPage({ params }: { params: { id: string } }) {
   const { token, profile, loading, authorized } = useRequireRole('student');
+  const router = useRouter();
 
   const [course, setCourse] = useState<JoinableCourse | null>(null);
   const [cards, setCards] = useState<CardData[] | null>(null);
@@ -57,6 +60,17 @@ export default function CourseQuizzesPage({ params }: { params: { id: string } }
   const [titlesLoading, setTitlesLoading] = useState(true);
   const [loadStatus, setLoadStatus] = useState<'loading' | 'ok' | 'forbidden' | 'error'>('loading');
   const [retryCount, setRetryCount] = useState(0);
+  const [leaveModalOpen, setLeaveModalOpen] = useState(false);
+
+  async function handleLeave() {
+    if (!token) return { ok: false as const, error: 'You must be signed in to leave a course.' };
+
+    const result = await leaveCourse(token, params.id);
+    if (!result.ok) return result;
+
+    router.push('/activities');
+    return result;
+  }
 
   // Independent of the quiz-list effect below — a failure here just leaves the header saying
   // "This course" rather than blocking the quiz list, the same "each fetch failing costs only
@@ -180,12 +194,26 @@ export default function CourseQuizzesPage({ params }: { params: { id: string } }
           </div>
         ) : (
           <>
-            <h1 className="mb-1.5 text-2xl font-extrabold text-brand-navy">{course?.name ?? 'This course'}</h1>
-            {course?.semester ? (
-              <span className="inline-flex items-center rounded-full bg-brand-purple/10 px-2.5 py-0.5 text-xs font-bold text-brand-purple">
-                {course.semester}
-              </span>
-            ) : null}
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h1 className="mb-1.5 text-2xl font-extrabold text-brand-navy">{course?.name ?? 'This course'}</h1>
+                {course?.semester ? (
+                  <span className="inline-flex items-center rounded-full bg-brand-purple/10 px-2.5 py-0.5 text-xs font-bold text-brand-purple">
+                    {course.semester}
+                  </span>
+                ) : null}
+              </div>
+
+              {course ? (
+                <button
+                  type="button"
+                  onClick={() => setLeaveModalOpen(true)}
+                  className="shrink-0 rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-bold text-brand-danger transition hover:border-brand-danger/40 hover:bg-brand-danger/10"
+                >
+                  Leave course
+                </button>
+              ) : null}
+            </div>
 
             <h3 className="mb-5 mt-6 text-lg font-extrabold text-brand-navy">Quizzes</h3>
 
@@ -228,6 +256,18 @@ export default function CourseQuizzesPage({ params }: { params: { id: string } }
           </>
         )}
       </div>
+
+      {leaveModalOpen ? (
+        <ConfirmModal
+          kicker="Leave course"
+          title={`Leave ${course?.name ?? 'this course'}?`}
+          message="You can rejoin later with the course code."
+          confirmLabel="Leave course"
+          confirmingLabel="Leaving…"
+          onClose={() => setLeaveModalOpen(false)}
+          onConfirm={handleLeave}
+        />
+      ) : null}
     </AppShell>
   );
 }

@@ -47,7 +47,10 @@ export default function InstructorAssembledQuizzesPage() {
         if (cancelled) return;
         if (quizzesResult.ok && catalogsResult.ok && coursesResult.ok) {
           setQuizzes(quizzesResult.data.quizzes);
-          setCatalogs(catalogsResult.data.quizzes);
+          // GitHub #478: a quiz can compose a built-in example catalog too, not just the
+          // instructor's own — composing only links it (assembled_quiz_catalog), it never writes
+          // to the catalog itself, so this doesn't compromise "the original is read-only".
+          setCatalogs([...catalogsResult.data.quizzes, ...catalogsResult.data.exampleCatalogs]);
           setCourses(coursesResult.data.courses);
         } else {
           setLoadFailed(true);

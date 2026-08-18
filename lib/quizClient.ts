@@ -23,9 +23,16 @@ export type QuizSummary = {
   /** How many assembled quizzes (GitHub #360) currently reference this catalog — a catalog has no
    *  course of its own, so this is what the browse page shows instead. */
   quizCount: number;
+  /** GitHub #478: true for one of the built-in example catalogs (creator_id IS NULL) — strictly
+   *  read-only everywhere in the UI; "Duplicate" is the only action available on one. */
+  isBuiltIn: boolean;
 };
 
-export type QuizMeta = Omit<QuizSummary, 'questionCount' | 'quizCount'>;
+export type QuizMeta = Omit<QuizSummary, 'questionCount' | 'quizCount'> & {
+  /** The catalog's own custom grading rubric (activity_type.rating_prompt) — only ever meaningful
+   *  for an llm-graded catalog; null for mcq or an llm-graded catalog that hasn't set one. */
+  ratingPrompt: string | null;
+};
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number; error: string };
 
@@ -52,9 +59,12 @@ async function request<T>(url: string, init: RequestInit, token: string): Promis
   return { ok: true, data: body as T };
 }
 
-/** Every catalog the calling instructor created (GET /api/instructor/quizzes). */
-export function loadQuizzes(token: string): Promise<ApiResult<{ quizzes: QuizSummary[] }>> {
-  return request<{ quizzes: QuizSummary[] }>('/api/instructor/quizzes', { method: 'GET' }, token);
+/**
+ * Every catalog the calling instructor created, plus the built-in example catalogs every
+ * instructor sees (GET /api/instructor/quizzes, GitHub #478).
+ */
+export function loadQuizzes(token: string): Promise<ApiResult<{ quizzes: QuizSummary[]; exampleCatalogs: QuizSummary[] }>> {
+  return request<{ quizzes: QuizSummary[]; exampleCatalogs: QuizSummary[] }>('/api/instructor/quizzes', { method: 'GET' }, token);
 }
 
 /**
@@ -66,12 +76,18 @@ export function loadQuizzes(token: string): Promise<ApiResult<{ quizzes: QuizSum
  * GitHub #379: gradingKind is required here rather than optional-with-a-default, which is the
  * compile-time half of "creation cannot proceed without this choice" — the route enforces the
  * runtime half. It cannot be changed after creation, so there is no update counterpart.
+ *
+ * GitHub #379 follow-up: ratingPrompt is required by the route (not this type) when gradingKind is
+ * 'llm-graded' — an instructor must set a catalog's grading rubric at creation time, same "locked
+ * choice up front" reasoning as gradingKind itself, though unlike gradingKind the rubric text can
+ * still be edited afterward (updateRatingPrompt below).
  */
 export type CreatedQuiz = {
   activityType: string;
   name: string;
   description: string | null;
   gradingKind: GradingKind;
+  ratingPrompt: string | null;
   /** The ladder as authored, only the levels that got a title — [] when none were given. */
   titles: StoredTitleRung[];
 };
@@ -82,6 +98,7 @@ export function createQuiz(
     name: string;
     gradingKind: GradingKind;
     description?: string;
+    ratingPrompt?: string;
     /** Optional mastery title ladder. Omitted or empty creates a catalog with no titles, which is
      *  what every catalog created before this existed looks like. */
     titles?: TitleLadderRungInput[];
@@ -124,6 +141,27 @@ export function loadQuizDetail(token: string, activityType: string): Promise<Api
 }
 
 /**
+ * Updates an llm-graded catalog's own grading rubric (PATCH /api/instructor/quizzes/{activityType},
+ * GitHub #379 follow-up). 400s (surfaced as `error`) for an mcq catalog, since the field is only
+ * ever meaningful for llm-graded ones.
+ */
+export function updateRatingPrompt(
+  token: string,
+  activityType: string,
+  ratingPrompt: string,
+): Promise<ApiResult<{ ratingPrompt: string | null }>> {
+  return request<{ ratingPrompt: string | null }>(
+    `/api/instructor/quizzes/${encodeURIComponent(activityType)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ratingPrompt }),
+    },
+    token,
+  );
+}
+
+/**
  * Replaces one catalog's mastery title ladder (PUT /api/instructor/quizzes/{activityType}/titles).
  *
  * A rung with titleName null clears that level; a level absent from `rungs` is left alone. The
@@ -153,12 +191,48 @@ export function loadTitleNames(token: string): Promise<ApiResult<{ titleNames: s
 /**
  * Deletes a catalog and unlinks it from every assembled quiz it was composed into
  * (DELETE /api/instructor/quizzes/{activityType}). Refuses with a 409 (surfaced as `error`) if a
- * student has already engaged with it.
+ * student has already engaged with it. A built-in example catalog always 403s here — see
+ * duplicateCatalog below for the action that's actually available on one.
  */
 export function deleteCatalog(token: string, activityType: string): Promise<ApiResult<{ activityType: string }>> {
   return request<{ activityType: string }>(
     `/api/instructor/quizzes/${encodeURIComponent(activityType)}`,
     { method: 'DELETE' },
+    token,
+  );
+}
+
+/**
+ * A newly duplicated catalog (POST /api/instructor/quizzes/{activityType}/duplicate) — deliberately
+ * its own type rather than CreatedQuiz: a duplicate never asks for a title ladder up front the way
+ * catalog creation does, and it reports questionCount (the copy's own item count) instead.
+ */
+export type DuplicatedQuiz = {
+  activityType: string;
+  name: string;
+  description: string | null;
+  gradingKind: GradingKind;
+  ratingPrompt: string | null;
+  questionCount: number;
+};
+
+/**
+ * Copies a catalog the caller can view (their own, or a built-in example) into a brand-new,
+ * fully-editable catalog they own — POST /api/instructor/quizzes/{activityType}/duplicate,
+ * GitHub #478's "Duplicate" action. The source is left untouched.
+ */
+export function duplicateCatalog(
+  token: string,
+  activityType: string,
+  input: { name: string },
+): Promise<ApiResult<{ quiz: DuplicatedQuiz }>> {
+  return request<{ quiz: DuplicatedQuiz }>(
+    `/api/instructor/quizzes/${encodeURIComponent(activityType)}/duplicate`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    },
     token,
   );
 }

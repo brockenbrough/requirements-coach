@@ -8,6 +8,7 @@ import { AppShell } from '../../components/AppShell';
 import { ActivityLogTable } from '../../components/ActivityLogTable';
 import {
   InstructorFilters,
+  type CourseFilterValue,
   type InstructorSortOrder,
   type LevelFilterValue,
   type StudentFilterValue,
@@ -76,6 +77,7 @@ function InstructorDashboardContent() {
 
   const [studentId, setStudentId] = useState<StudentFilterValue>('all');
   const [level, setLevel] = useState<LevelFilterValue>('all');
+  const [courseFilterId, setCourseFilterId] = useState<CourseFilterValue>('all');
   const [sort, setSort] = useState<InstructorSortOrder>('newest');
   const [page, setPage] = useState(1);
 
@@ -223,6 +225,9 @@ function InstructorDashboardContent() {
     const rows = (entries ?? []).filter((entry) => {
       if (studentId !== 'all' && entry.studentId !== studentId) return false;
       if (level !== 'all' && entry.level !== level) return false;
+      // A catalog can be linked to more than one course at once (GitHub #474), so "filter to
+      // course X" means "X is among this attempt's courses", not "X is its only course".
+      if (courseFilterId !== 'all' && !entry.courses.some((course) => course.courseId === courseFilterId)) return false;
       return true;
     });
 
@@ -232,7 +237,7 @@ function InstructorDashboardContent() {
       if (sort === 'highest') return b.score - a.score;
       return new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime();
     });
-  }, [entries, studentId, level, sort]);
+  }, [entries, studentId, level, courseFilterId, sort]);
 
   const totalPages = Math.max(1, Math.ceil(filteredSorted.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -245,6 +250,11 @@ function InstructorDashboardContent() {
 
   function handleLevelChange(value: LevelFilterValue) {
     setLevel(value);
+    setPage(1);
+  }
+
+  function handleCourseFilterChange(value: CourseFilterValue) {
+    setCourseFilterId(value);
     setPage(1);
   }
 
@@ -283,8 +293,8 @@ function InstructorDashboardContent() {
                   course={course}
                   classStats={courseClassStatsById?.[course.id] ?? null}
                   activityStats={selectedCourseId === course.id ? courseStats : undefined}
-                  selected={selectedCourseId === course.id}
-                  onSelect={(c) => handleSelectCourse(selectedCourseId === c.id ? null : c.id)}
+                  statsExpanded={selectedCourseId === course.id}
+                  onToggleStats={(c) => handleSelectCourse(selectedCourseId === c.id ? null : c.id)}
                   onDuplicate={setDuplicateSource}
                   onEdit={setEditSource}
                   onDelete={setDeleteSource}
@@ -327,15 +337,19 @@ function InstructorDashboardContent() {
               students={students}
               studentId={studentId}
               level={level}
+              courses={(courses ?? []).map((c) => ({ id: c.id, name: c.name }))}
+              courseId={courseFilterId}
               sort={sort}
               onStudentChange={handleStudentChange}
               onLevelChange={handleLevelChange}
+              onCourseChange={handleCourseFilterChange}
               onSortChange={setSort}
             />
 
             <ActivityLogTable
               entries={pageEntries}
               getStudentName={(entry) => studentNameById.get(entry.studentId) ?? ''}
+              getCourses={(entry) => entry.courses}
               renderDetail={(entry) =>
                 entry.kind === 'ac-submission' ? (
                   <AcSubmissionDetails submission={entry} />

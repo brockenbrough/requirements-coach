@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { checkActivityAccess, getAccessibleCourseForActivity, listActivityTypesForCourses } from '../../lib/activityCourseQueries';
+import {
+  checkActivityAccess,
+  getAccessibleCourseForActivity,
+  listActivityTypesForCourses,
+  listCoursesForActivityTypes,
+} from '../../lib/activityCourseQueries';
 
 type Result = { data?: unknown; error?: unknown };
 
@@ -355,5 +360,107 @@ describe('listActivityTypesForCourses', () => {
     const result = await listActivityTypesForCourses(makeSupabase(), ['course-1']);
 
     expect(result.activities?.map((a) => a.gradingKind)).toEqual(['mcq', 'mcq']);
+  });
+});
+
+// GitHub #474: the reverse direction of listActivityTypesForCourses — "which courses is this
+// catalog linked to", for the Instructor Dashboard's activity log.
+describe('listCoursesForActivityTypes', () => {
+  it('short-circuits to an empty map without querying', async () => {
+    const result = await listCoursesForActivityTypes(makeSupabase(), []);
+
+    expect(result.coursesByActivityType).toEqual(new Map());
+    expect(state.tables).toEqual([]);
+  });
+
+  it('maps a catalog linked to a single course', async () => {
+    queue('assembled_quiz_catalog', {
+      data: [
+        {
+          activity_type: 'CUSTOM_QUIZ',
+          assembled_quiz: { course_id: 'course-1', course: { course_name: 'Intro to SE' } },
+        },
+      ],
+      error: null,
+    });
+
+    const result = await listCoursesForActivityTypes(makeSupabase(), ['CUSTOM_QUIZ']);
+
+    expect(result.coursesByActivityType?.get('CUSTOM_QUIZ')).toEqual([{ courseId: 'course-1', courseName: 'Intro to SE' }]);
+    expect(state.filters).toContainEqual({ table: 'assembled_quiz_catalog', column: 'activity_type', value: ['CUSTOM_QUIZ'] });
+  });
+
+  // Unlike listActivityTypesForCourses, this deliberately does NOT collapse to one course — a
+  // catalog composed into more than one quiz across different courses is a real case, and the
+  // instructor reviewing an attempt needs to see all of them, not just the first found.
+  it('keeps every course a catalog is linked to, not just the first', async () => {
+    queue('assembled_quiz_catalog', {
+      data: [
+        {
+          activity_type: 'CUSTOM_QUIZ',
+          assembled_quiz: { course_id: 'course-1', course: { course_name: 'Intro to SE' } },
+        },
+        {
+          activity_type: 'CUSTOM_QUIZ',
+          assembled_quiz: { course_id: 'course-2', course: { course_name: 'Advanced SE' } },
+        },
+      ],
+      error: null,
+    });
+
+    const result = await listCoursesForActivityTypes(makeSupabase(), ['CUSTOM_QUIZ']);
+
+    expect(result.coursesByActivityType?.get('CUSTOM_QUIZ')).toEqual([
+      { courseId: 'course-1', courseName: 'Intro to SE' },
+      { courseId: 'course-2', courseName: 'Advanced SE' },
+    ]);
+  });
+
+  it('deduplicates the same course reached through more than one assembled quiz', async () => {
+    queue('assembled_quiz_catalog', {
+      data: [
+        {
+          activity_type: 'CUSTOM_QUIZ',
+          assembled_quiz: { course_id: 'course-1', course: { course_name: 'Intro to SE' } },
+        },
+        {
+          activity_type: 'CUSTOM_QUIZ',
+          assembled_quiz: { course_id: 'course-1', course: { course_name: 'Intro to SE' } },
+        },
+      ],
+      error: null,
+    });
+
+    const result = await listCoursesForActivityTypes(makeSupabase(), ['CUSTOM_QUIZ']);
+
+    expect(result.coursesByActivityType?.get('CUSTOM_QUIZ')).toEqual([{ courseId: 'course-1', courseName: 'Intro to SE' }]);
+  });
+
+  it('has no entry for a catalog with no assembled_quiz link at all', async () => {
+    queue('assembled_quiz_catalog', { data: [], error: null });
+
+    const result = await listCoursesForActivityTypes(makeSupabase(), ['UNLINKED_QUIZ']);
+
+    expect(result.coursesByActivityType?.has('UNLINKED_QUIZ')).toBe(false);
+    expect(result.coursesByActivityType?.get('UNLINKED_QUIZ') ?? []).toEqual([]);
+  });
+
+  it('falls back to a placeholder name if the embedded course is missing', async () => {
+    queue('assembled_quiz_catalog', {
+      data: [{ activity_type: 'CUSTOM_QUIZ', assembled_quiz: { course_id: 'course-1', course: null } }],
+      error: null,
+    });
+
+    const result = await listCoursesForActivityTypes(makeSupabase(), ['CUSTOM_QUIZ']);
+
+    expect(result.coursesByActivityType?.get('CUSTOM_QUIZ')).toEqual([{ courseId: 'course-1', courseName: 'Unknown course' }]);
+  });
+
+  it('surfaces a query error', async () => {
+    queue('assembled_quiz_catalog', { data: null, error: { message: 'db down' } });
+
+    const result = await listCoursesForActivityTypes(makeSupabase(), ['CUSTOM_QUIZ']);
+
+    expect(result).toEqual({ coursesByActivityType: null, error: { message: 'db down' } });
   });
 });

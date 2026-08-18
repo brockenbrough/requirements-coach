@@ -17,6 +17,10 @@ const h = vi.hoisted(() => {
         state.filters.push({ table, column, value });
         return builder;
       },
+      is: (column: string, value: unknown) => {
+        state.filters.push({ table, column, value });
+        return builder;
+      },
       order: (column: string, opts?: { ascending?: boolean }) => {
         state.orders.push({ table, column, ascending: opts?.ascending ?? true });
         return builder;
@@ -161,6 +165,7 @@ describe('GET /api/instructor/quizzes', () => {
         gradingKind: 'mcq',
         questionCount: 0,
         quizCount: 0,
+        isBuiltIn: false,
       },
     ]);
   });
@@ -243,5 +248,63 @@ describe('GET /api/instructor/quizzes', () => {
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error).toBe('DB down');
+  });
+
+  // GitHub #478: every instructor also sees the built-in example catalogs, separate from their own.
+  describe('exampleCatalogs (GitHub #478)', () => {
+    it('returns the built-in catalogs (creator_id IS NULL), flagged isBuiltIn, alongside the caller\'s own', async () => {
+      queueRole('instructor');
+      queue('activity_type', { data: [], error: null }); // mine
+      queue('activity_type', { data: [quizRow()], error: null }); // examples
+
+      const res = await GET(req());
+      expect(res.status).toBe(200);
+      const body = await res.json();
+
+      expect(body.exampleCatalogs).toEqual([
+        {
+          activityType: 'IDENTIFY_WEAK_USER_STORIES',
+          name: 'Identify Weak User Stories',
+          description: null,
+          authorName: 'Built-in',
+          gradingKind: 'mcq',
+          questionCount: 36,
+          quizCount: 0,
+          isBuiltIn: true,
+        },
+      ]);
+    });
+
+    it('queries the example catalogs with .is(creator_id, null), independent of the "mine" filter', async () => {
+      queueRole('instructor');
+      queue('activity_type', { data: [], error: null });
+      queue('activity_type', { data: [], error: null });
+
+      await GET(req());
+
+      expect(h.state.filters).toContainEqual({ table: 'activity_type', column: 'creator_id', value: null });
+    });
+
+    it('flags a quiz the caller created as isBuiltIn: false', async () => {
+      queueRole('instructor');
+      queue('activity_type', { data: [quizRow({ creator_id: 'instructor-1', creator: null })], error: null });
+      queue('activity_type', { data: [], error: null });
+
+      const res = await GET(req());
+      const body = await res.json();
+
+      expect(body.quizzes[0].isBuiltIn).toBe(false);
+    });
+
+    it('returns 500 when the example-catalogs query fails, after the "mine" query already succeeded', async () => {
+      queueRole('instructor');
+      queue('activity_type', { data: [], error: null }); // mine
+      queue('activity_type', { data: null, error: { message: 'DB down' } }); // examples
+
+      const res = await GET(req());
+      expect(res.status).toBe(500);
+      const body = await res.json();
+      expect(body.error).toBe('DB down');
+    });
   });
 });

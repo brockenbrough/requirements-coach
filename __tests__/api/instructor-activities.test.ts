@@ -185,6 +185,51 @@ describe('GET /api/instructor/activities', () => {
     });
   });
 
+  // GitHub #474: the Instructor Dashboard's activity log needs to show which course(s) each
+  // attempt's catalog is linked to.
+  it('attaches every course each session’s catalog is linked to', async () => {
+    queueRole('instructor');
+    queueOwnedActivityTypeSummaries([{ activityType: 'IDENTIFY_WEAK_USER_STORIES', name: 'Identify Weak User Stories', gradingKind: 'mcq' }]);
+    queue('session_log', { data: [sessionRow()], error: null });
+    queue('session_to_question', { data: [], error: null });
+    queue('answered_question_log', { data: [], error: null });
+    queue('assembled_quiz_catalog', {
+      data: [
+        {
+          activity_type: 'IDENTIFY_WEAK_USER_STORIES',
+          assembled_quiz: { course_id: 'course-1', course: { course_name: 'Requirements 101' } },
+        },
+        {
+          activity_type: 'IDENTIFY_WEAK_USER_STORIES',
+          assembled_quiz: { course_id: 'course-2', course: { course_name: 'Requirements 201' } },
+        },
+      ],
+      error: null,
+    });
+
+    const response = await GET(request('valid-token'));
+    const body = await response.json();
+
+    expect(body.sessions[0].courses).toEqual([
+      { courseId: 'course-1', courseName: 'Requirements 101' },
+      { courseId: 'course-2', courseName: 'Requirements 201' },
+    ]);
+  });
+
+  it('reports an empty courses list for a catalog not linked to any course yet', async () => {
+    queueRole('instructor');
+    queueOwnedActivityTypeSummaries([{ activityType: 'IDENTIFY_WEAK_USER_STORIES', name: 'Identify Weak User Stories', gradingKind: 'mcq' }]);
+    queue('session_log', { data: [sessionRow()], error: null });
+    queue('session_to_question', { data: [], error: null });
+    queue('answered_question_log', { data: [], error: null });
+    queue('assembled_quiz_catalog', { data: [], error: null });
+
+    const response = await GET(request('valid-token'));
+    const body = await response.json();
+
+    expect(body.sessions[0].courses).toEqual([]);
+  });
+
   it('returns the instructor’s owned activity types alongside the sessions', async () => {
     queueRole('instructor');
     queueOwnedActivityTypeSummaries([

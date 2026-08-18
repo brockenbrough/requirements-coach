@@ -30,6 +30,9 @@ export type SessionListEntry = SessionRecord & {
   nextPosition: number | null;
 };
 
+/** One course a catalog is currently linked to via some assembled_quiz. */
+export type ActivityCourseRef = { courseId: string; courseName: string };
+
 /**
  * The same entry as returned by the class-wide instructor endpoint, plus who it belongs to
  * (GitHub #173). studentName is already a display name — the server derives it from first/last
@@ -38,6 +41,12 @@ export type SessionListEntry = SessionRecord & {
 export type InstructorActivityEntry = SessionListEntry & {
   studentId: string;
   studentName: string;
+  /**
+   * Every course this session's catalog is currently linked to via some assembled_quiz — GitHub
+   * #474. Empty means "not linked to any course yet", not an error; a catalog can be linked to
+   * more than one course at once, so this is a list, not a single name.
+   */
+  courses: ActivityCourseRef[];
 };
 
 /**

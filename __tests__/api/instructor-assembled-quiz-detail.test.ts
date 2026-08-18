@@ -136,7 +136,7 @@ describe('GET /api/instructor/assembled-quizzes/[quizId]', () => {
     queue('assembled_quiz', { data: quizRow(), error: null });
     queue('course', { data: { course_name: 'Software Requirements' }, error: null });
     queue('assembled_quiz_catalog', {
-      data: [{ activity_type: 'CATALOG_A', catalog: { quiz_name: 'Catalog A', description: 'About A' } }],
+      data: [{ activity_type: 'CATALOG_A', catalog: { quiz_name: 'Catalog A', description: 'About A', rating_prompt: null } }],
       error: null,
     });
     queue('question', {
@@ -171,6 +171,7 @@ describe('GET /api/instructor/assembled-quizzes/[quizId]', () => {
         name: 'Catalog A',
         description: 'About A',
         gradingKind: 'mcq',
+        ratingPrompt: null,
         totalQuestions: 5,
         excludedCount: 1,
         activeCount: 4,
@@ -218,7 +219,12 @@ describe('GET /api/instructor/assembled-quizzes/[quizId]', () => {
     queue('assembled_quiz', { data: quizRow(), error: null });
     queue('course', { data: { course_name: 'Software Requirements' }, error: null });
     queue('assembled_quiz_catalog', {
-      data: [{ activity_type: 'CATALOG_LLM', catalog: { quiz_name: 'Catalog LLM', description: 'About LLM', grading_kind: 'llm-graded' } }],
+      data: [
+        {
+          activity_type: 'CATALOG_LLM',
+          catalog: { quiz_name: 'Catalog LLM', description: 'About LLM', grading_kind: 'llm-graded', rating_prompt: 'Score strictness: high.' },
+        },
+      ],
       error: null,
     });
     queue('question', { data: [], error: null });
@@ -241,6 +247,7 @@ describe('GET /api/instructor/assembled-quizzes/[quizId]', () => {
         name: 'Catalog LLM',
         description: 'About LLM',
         gradingKind: 'llm-graded',
+        ratingPrompt: 'Score strictness: high.',
         totalQuestions: 2,
         excludedCount: 0,
         activeCount: 2,

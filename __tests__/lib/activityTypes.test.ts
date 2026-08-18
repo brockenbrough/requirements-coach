@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   GRADING_KINDS,
+  MAX_RATING_PROMPT_LENGTH,
   getGradingKind,
   isActivityType,
   isGradingKind,
   slugifyQuizName,
+  validateRatingPromptText,
 } from '../../lib/activityTypes';
 
 type Result = { data?: unknown; error?: unknown };
@@ -144,6 +146,38 @@ describe('isActivityType', () => {
 
     expect(result).toEqual({ valid: true, error: null });
     expect(state.selects).toEqual([{ table: 'activity_type', columns: 'activity_type' }]);
+  });
+});
+
+describe('validateRatingPromptText', () => {
+  it('accepts and trims a normal string', () => {
+    const result = validateRatingPromptText('  Score strictly on API-contract completeness.  ');
+    expect(result).toEqual({ ok: true, ratingPrompt: 'Score strictly on API-contract completeness.' });
+  });
+
+  it('rejects a missing, non-string, or blank value with a message naming the field', async () => {
+    for (const value of [undefined, null, 42, '', '   ']) {
+      const result = validateRatingPromptText(value);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.response.status).toBe(400);
+        expect((await result.response.json()).error).toMatch(/ratingPrompt/);
+      }
+    }
+  });
+
+  it('rejects text longer than MAX_RATING_PROMPT_LENGTH, naming the limit', async () => {
+    const result = validateRatingPromptText('x'.repeat(MAX_RATING_PROMPT_LENGTH + 1));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(400);
+      expect((await result.response.json()).error).toMatch(String(MAX_RATING_PROMPT_LENGTH));
+    }
+  });
+
+  it('accepts text at exactly the length cap', () => {
+    const result = validateRatingPromptText('x'.repeat(MAX_RATING_PROMPT_LENGTH));
+    expect(result.ok).toBe(true);
   });
 });
 

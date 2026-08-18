@@ -8,6 +8,8 @@ import { AddQuizQuestionsModal } from '../../../../components/AddQuizQuestionsMo
 import { ConfirmModal } from '../../../../components/ConfirmModal';
 import { QuestionFormModal } from '../../../../components/QuestionFormModal';
 import { PromptFormModal } from '../../../../components/PromptFormModal';
+import { RatingPromptModal } from '../../../../components/RatingPromptModal';
+import { TitleLadderModal } from '../../../../components/TitleLadderModal';
 import {
   createAndPickQuestionForQuiz,
   createAndPickUserStoryForQuiz,
@@ -23,7 +25,7 @@ import {
   type QuizExtraUserStorySummary,
   type QuizLevelCoverage,
 } from '../../../../lib/assembledQuizClient';
-import { loadQuizzes, type QuizSummary } from '../../../../lib/quizClient';
+import { loadQuizzes, updateRatingPrompt, type QuizSummary } from '../../../../lib/quizClient';
 import type { ActivityType } from '../../../../lib/activityTypes';
 import type { QuizQuestion } from '../../../../lib/quizQuestionTypes';
 import type { UserStoryDraft } from '../../../../lib/llmActivityClient';
@@ -46,6 +48,21 @@ const LEVEL_LABEL: Record<1 | 2 | 3, string> = { 1: 'Easy', 2: 'Medium', 3: 'Har
  * app/instructor/assembled-quizzes/[quizId]/catalogs/[activityType]/page.tsx, the "copy of the
  * catalog in the context of this quiz" view (requirement 3) where individual questions get
  * excluded/included.
+ *
+ * For an llm-graded quiz, a "Grading Rubrics" section (below "From catalogs") shows one row per
+ * linked catalog with its own activity_type.rating_prompt and a "Set rubric"/"Edit rubric" button,
+ * opening components/RatingPromptModal.tsx in "edit" mode (PATCH
+ * /api/instructor/quizzes/{activityType}). Per catalog, not per quiz — the rubric is a property of
+ * the catalog itself, not of any one quiz that composes it, since more than one quiz can compose
+ * the same catalog (see activity_type.rating_prompt's own comment in supabase/schema.sql).
+ *
+ * "Mastery Titles" (below "From catalogs", for either grading kind) is the same per-catalog-row
+ * shape, moved here from app/instructor/quizzes/[activityType]/page.tsx's own inline section — a
+ * title ladder is still a property of the catalog (title_definition keys on activity_type), not of
+ * the quiz, so PUT /api/instructor/quizzes/{activityType}/titles is unchanged; only where the
+ * instructor opens the editor from moved. See components/TitleLadderModal.tsx for why it fetches
+ * its own initial ladder on open rather than reading a value already loaded here, unlike the
+ * rubric's initialValue.
  */
 export default function AssembledQuizDetailPage({ params }: { params: { quizId: string } }) {
   const { token, loading, authorized } = useRequireRole('instructor');
@@ -67,6 +84,8 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
   const [addingCatalog, setAddingCatalog] = useState(false);
   const [addError, setAddError] = useState('');
   const [catalogToRemove, setCatalogToRemove] = useState<QuizCatalogComposition | null>(null);
+  const [ratingPromptTarget, setRatingPromptTarget] = useState<QuizCatalogComposition | null>(null);
+  const [titleLadderTarget, setTitleLadderTarget] = useState<QuizCatalogComposition | null>(null);
   const [showDeleteQuiz, setShowDeleteQuiz] = useState(false);
   const [showAddQuestionsModal, setShowAddQuestionsModal] = useState(false);
   const [showCreateItemModal, setShowCreateItemModal] = useState(false);
@@ -112,7 +131,9 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
       setExtraUserStories(detailResult.data.extraUserStories);
       setActiveCatalogQuestionIds(detailResult.data.activeCatalogQuestionIds);
       setActiveCatalogUserStoryIds(detailResult.data.activeCatalogUserStoryIds);
-      setAllCatalogs(catalogsResult.data.quizzes);
+      // GitHub #478: a built-in example catalog can be added to a quiz's composition too — linking
+      // only writes to assembled_quiz_catalog, never to the catalog itself.
+      setAllCatalogs([...catalogsResult.data.quizzes, ...catalogsResult.data.exampleCatalogs]);
     });
 
     return () => {
@@ -160,6 +181,7 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
         // added.gradingKind/questionCount already account for the catalog's kind (lib/quizClient.ts's
         // QuizSummary — questionCount is prompts for llm-graded, questions for mcq).
         gradingKind: added?.gradingKind ?? 'mcq',
+        ratingPrompt: null,
         totalQuestions: added?.questionCount ?? 0,
         excludedCount: 0,
         activeCount: added?.questionCount ?? 0,
@@ -168,6 +190,24 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
     setSelectedCatalogToAdd('');
     showToast(`"${added?.name ?? selectedCatalogToAdd}" added to this quiz.`);
     setRetryCount((count) => count + 1); // re-fetch level coverage, which the optimistic insert above can't compute correctly
+  }
+
+  async function handleSaveCatalogRatingPrompt(value: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (!token || !ratingPromptTarget) return { ok: false, error: 'Your session has expired. Please sign in again.' };
+
+    const result = await updateRatingPrompt(token, ratingPromptTarget.activityType, value);
+    if (!result.ok) return { ok: false, error: result.error };
+
+    const activityType = ratingPromptTarget.activityType;
+    setCatalogs((current) =>
+      (current ?? []).map((catalog) =>
+        catalog.activityType === activityType ? { ...catalog, ratingPrompt: result.data.ratingPrompt } : catalog,
+      ),
+    );
+    setRatingPromptTarget(null);
+    showToast('Grading rubric updated.');
+
+    return { ok: true };
   }
 
   async function handleRemoveExtraQuestion(question: QuizExtraQuestionSummary) {
@@ -366,6 +406,67 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
               )}
             </div>
 
+            {catalogs.length > 0 ? (
+              <>
+                <p className="mb-3 text-xs font-extrabold uppercase tracking-wide text-gray-400">Mastery Titles</p>
+                <p className="mb-4 text-xs font-semibold text-gray-500">
+                  What a student is called once they pass each level of a catalog. Set per catalog — more than
+                  one quiz can compose the same catalog, so its ladder isn&apos;t specific to this quiz alone.
+                </p>
+                <div className="mb-6 space-y-3">
+                  {catalogs.map((catalog) => (
+                    <div
+                      key={catalog.activityType}
+                      className="flex flex-wrap items-center justify-between gap-3 rounded-brand-lg border border-gray-100 bg-gray-50 p-4"
+                    >
+                      <p className="min-w-0 flex-1 font-semibold text-brand-navy">{catalog.name}</p>
+                      <button
+                        type="button"
+                        onClick={() => setTitleLadderTarget(catalog)}
+                        className="flex-none rounded-full border border-gray-300 bg-white px-4 py-1.5 text-xs font-extrabold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple"
+                      >
+                        Edit titles
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : null}
+
+            {quiz.gradingKind === 'llm-graded' && catalogs.length > 0 ? (
+              <>
+                <p className="mb-3 text-xs font-extrabold uppercase tracking-wide text-gray-400">Grading Rubrics</p>
+                <p className="mb-4 text-xs font-semibold text-gray-500">
+                  Each catalog's own grading rubric — a submission is scored against whichever catalog its prompt
+                  came from. Changing one only affects submissions graded afterward.
+                </p>
+                <div className="mb-6 space-y-3">
+                  {catalogs.map((catalog) => (
+                    <div
+                      key={catalog.activityType}
+                      className="flex flex-wrap items-start justify-between gap-3 rounded-brand-lg border border-gray-100 bg-gray-50 p-4"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="mb-1 text-xs font-extrabold text-gray-500">{catalog.name}</p>
+                        {catalog.ratingPrompt ? (
+                          <p className="whitespace-pre-wrap text-sm font-medium text-gray-600">{catalog.ratingPrompt}</p>
+                        ) : (
+                          <p className="text-sm font-medium text-gray-400">Using the built-in default rubric.</p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setRatingPromptTarget(catalog)}
+                        className="flex-none rounded-full border border-gray-300 bg-white px-4 py-1.5 text-xs font-extrabold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple"
+                      >
+                        {catalog.ratingPrompt ? 'Edit rubric' : 'Set rubric'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : null}
+
             <p className="mb-3 text-xs font-extrabold uppercase tracking-wide text-gray-400">Add a catalog</p>
             <div className="flex flex-wrap items-center gap-3 rounded-brand-lg border border-gray-100 bg-gray-50 p-4">
               <select
@@ -549,6 +650,28 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
 
             router.push('/instructor/assembled-quizzes');
             return { ok: true as const };
+          }}
+        />
+      ) : null}
+
+      {ratingPromptTarget ? (
+        <RatingPromptModal
+          mode="edit"
+          initialValue={ratingPromptTarget.ratingPrompt ?? ''}
+          onCancel={() => setRatingPromptTarget(null)}
+          onSave={handleSaveCatalogRatingPrompt}
+        />
+      ) : null}
+
+      {titleLadderTarget && token ? (
+        <TitleLadderModal
+          token={token}
+          activityType={titleLadderTarget.activityType}
+          catalogName={titleLadderTarget.name}
+          onClose={() => setTitleLadderTarget(null)}
+          onSaved={() => {
+            setTitleLadderTarget(null);
+            showToast('Mastery titles saved.');
           }}
         />
       ) : null}

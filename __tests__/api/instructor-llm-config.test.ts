@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type Result = { data?: unknown; error?: unknown };
 
@@ -67,6 +67,12 @@ vi.mock('../../lib/supabase', () => ({
 }));
 
 import { GET, POST } from '../../app/api/instructor/llm-config/route';
+import { decryptSecret } from '../../lib/secretEncryption';
+
+// A real 32-byte key so POST's encryptSecret call succeeds by default — same pattern
+// __tests__/api/auth.test.ts uses for INSTRUCTOR_SIGNUP_CODE, saved/restored around every test.
+const VALID_ENCRYPTION_KEY = Buffer.alloc(32, 3).toString('base64');
+const ORIGINAL_ENCRYPTION_KEY = process.env.LLM_CONFIG_ENCRYPTION_KEY;
 
 function req(body: unknown, token: string | null = 'valid-token') {
   return new Request('http://localhost/api/instructor/llm-config', {
@@ -103,6 +109,12 @@ beforeEach(() => {
   h.state.inserts = [];
   h.state.updates = [];
   h.state.filters = [];
+  process.env.LLM_CONFIG_ENCRYPTION_KEY = VALID_ENCRYPTION_KEY;
+});
+
+afterEach(() => {
+  if (ORIGINAL_ENCRYPTION_KEY === undefined) delete process.env.LLM_CONFIG_ENCRYPTION_KEY;
+  else process.env.LLM_CONFIG_ENCRYPTION_KEY = ORIGINAL_ENCRYPTION_KEY;
 });
 
 describe('POST /api/instructor/llm-config', () => {
@@ -118,13 +130,28 @@ describe('POST /api/instructor/llm-config', () => {
     expect(JSON.stringify(body)).not.toContain('sk-secret');
 
     expect(h.state.inserts).toHaveLength(1);
-    expect(h.state.inserts[0].payload).toMatchObject({
+    const insertedPayload = h.state.inserts[0].payload as { api_key: string; [key: string]: unknown };
+    expect(insertedPayload).toMatchObject({
       user_id: 'instructor-1',
       provider: 'CLAUDE',
       model: 'claude-opus-5',
-      api_key: 'sk-secret',
       is_active: false,
     });
+    // The stored api_key is never the raw plaintext — it's ciphertext that decrypts back to it.
+    expect(insertedPayload.api_key).not.toBe('sk-secret');
+    expect(decryptSecret(insertedPayload.api_key)).toBe('sk-secret');
+  });
+
+  it('answers 500 without writing anything when LLM_CONFIG_ENCRYPTION_KEY is not configured', async () => {
+    delete process.env.LLM_CONFIG_ENCRYPTION_KEY;
+    queueRole('instructor');
+
+    const res = await POST(req({ provider: 'CLAUDE', apiKey: 'sk-secret', model: 'claude-opus-5' }));
+    const body = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(body.error).toBe('LLM key storage is not configured.');
+    expect(h.state.inserts).toHaveLength(0);
   });
 
   it('deactivates any previously active row when setActive is true', async () => {

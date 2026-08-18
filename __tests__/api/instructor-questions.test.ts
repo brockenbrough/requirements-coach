@@ -168,6 +168,20 @@ describe('POST /api/instructor/questions', () => {
     expect(res.status).toBe(400);
   });
 
+  // GitHub #478: a built-in example catalog (creator_id IS NULL) is strictly read-only — no new
+  // question may be filed under it, even though the activityType itself is valid.
+  it('rejects adding a question to a built-in example catalog with 403', async () => {
+    queueRole('instructor');
+    queueValidActivityType();
+    queue('activity_type', { data: { creator_id: null }, error: null }); // assertCatalogIsEditable
+
+    const res = await POST(postRequest(validBody()));
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error).toMatch(/built-in example catalog/);
+    expect(h.state.tables).not.toContain('question');
+  });
+
   it('rejects an invalid difficultyLevel with 400', async () => {
     queueRole('instructor');
     queueValidActivityType();

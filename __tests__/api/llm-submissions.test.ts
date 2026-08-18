@@ -63,7 +63,14 @@ vi.mock('../../lib/llm/factory', async (importOriginal) => {
   return { ...actual, getLLMProvider: vi.fn() };
 });
 
+// Mocked rather than exercised for real (that's __tests__/lib/secretEncryption.test.ts's job) —
+// this route test stays focused on routing/authorization. Defaults to an identity function so
+// CONFIG.api_key below still flows through to getLLMProvider unchanged; individual tests can
+// override it to simulate a decrypt failure.
+vi.mock('../../lib/secretEncryption', () => ({ decryptSecret: vi.fn((value: string) => value) }));
+
 import { getLLMProvider } from '../../lib/llm/factory';
+import { decryptSecret } from '../../lib/secretEncryption';
 import { POST } from '../../app/api/activities/[activityType]/llm/submissions/route';
 
 const ACTIVITY = 'WRITE_ACCEPTANCE_CRITERIA';
@@ -99,6 +106,7 @@ const STORY = {
   story_text: 'As a user, I want to log in with email.',
   creator_id: 'instructor-1',
   difficulty_level: 1,
+  catalog: { rating_prompt: null },
 };
 
 const CONFIG = { provider: 'CLAUDE', api_key: 'sk-test', model: 'claude-opus-5' };
@@ -157,6 +165,8 @@ beforeEach(() => {
   rateAcceptanceCriteria.mockResolvedValue({ score: 8, feedback: 'Clear and testable.' });
   vi.mocked(getLLMProvider).mockReset();
   vi.mocked(getLLMProvider).mockReturnValue({ rateAcceptanceCriteria } as never);
+  vi.mocked(decryptSecret).mockReset();
+  vi.mocked(decryptSecret).mockImplementation((value: string) => value);
 });
 
 describe('POST /api/activities/[activityType]/llm/submissions', () => {
@@ -292,6 +302,18 @@ describe('POST /api/activities/[activityType]/llm/submissions', () => {
     expect(response.status).toBe(500);
   });
 
+  it('returns 500 without calling the provider when the stored api_key cannot be decrypted', async () => {
+    queueUpToLLM();
+    vi.mocked(decryptSecret).mockReturnValue(null);
+
+    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body.error).toBe('Configured LLM provider key could not be read.');
+    expect(getLLMProvider).not.toHaveBeenCalled();
+  });
+
   it('returns 502 when the LLM provider request fails', async () => {
     queueUpToLLM();
     rateAcceptanceCriteria.mockRejectedValue(new Error('provider timeout'));
@@ -410,5 +432,27 @@ describe('POST /api/activities/[activityType]/llm/submissions', () => {
     )!.payload as Record<string, unknown>;
     expect(sessionCompletion).toMatchObject({ status: 'completed' });
     expect(sessionCompletion.ended_at).toBeTruthy();
+  });
+
+  // Custom rubric resolution (activity_type.rating_prompt via the story's catalog embed) — the
+  // route only has to pass it through to the provider. The RATING_RUBRIC-vs-custom-rubric
+  // substitution itself is buildRatingPrompt's own unit-test responsibility
+  // (__tests__/lib/promptUtils.test.ts).
+  it("passes the catalog's custom rating_prompt through to the LLM provider", async () => {
+    queueUpToLLM({ story: { ...STORY, catalog: { rating_prompt: 'Custom rubric text.' } } });
+    queueSuccessfulWrite(submissionRow('story-1'));
+
+    await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
+
+    expect(rateAcceptanceCriteria).toHaveBeenCalledWith(STORY.story_text, 'x', 'Custom rubric text.');
+  });
+
+  it("passes no custom rubric when the catalog's rating_prompt is null", async () => {
+    queueUpToLLM(); // default STORY: catalog.rating_prompt is null
+    queueSuccessfulWrite(submissionRow('story-1'));
+
+    await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
+
+    expect(rateAcceptanceCriteria).toHaveBeenCalledWith(STORY.story_text, 'x', null);
   });
 });

@@ -13,7 +13,7 @@ import { ActivityLogTable } from '../../../components/ActivityLogTable';
 import { ActivityStatsCards } from '../../../components/ActivityStatsCards';
 import { deriveActivityFilterOptions, resultStateOf, toActivityLogEntry, type ActivityLogEntry } from '../../../lib/activityLogTypes';
 import type { AvailableActivityTitles } from '../../../lib/leaderboardTypes';
-import { loadActivityLog, loadAvailableTitles } from '../../../lib/sessionClient';
+import { loadActivityLog, loadAvailableTitles, type SessionListEntry } from '../../../lib/sessionClient';
 import { useRequireRole } from '../../../lib/useRequireRole';
 
 const PAGE_SIZE = 8;
@@ -23,7 +23,11 @@ export default function ActivityLogPage() {
   // student's own quiz history, not something an instructor account has.
   const { token, profile, loading, authorized } = useRequireRole('student');
 
-  const [entries, setEntries] = useState<ActivityLogEntry[] | null>(null);
+  // Raw sessions, kept separate from the display-ready `entries` derived below — activityName
+  // resolution depends on `nameByType`, which loads independently (see the effect below), so
+  // deriving entries as a useMemo lets a slow/late-arriving name lookup upgrade already-rendered
+  // rows instead of only being applied at the one moment loadActivityLog happened to resolve.
+  const [sessions, setSessions] = useState<SessionListEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [availableTitles, setAvailableTitles] = useState<AvailableActivityTitles[]>([]);
 
@@ -40,14 +44,14 @@ export default function ActivityLogPage() {
 
     loadActivityLog(token, profile.user_id).then((result) => {
       if (cancelled) return;
-      if (result.ok) setEntries(result.data.activities.map(toActivityLogEntry));
+      if (result.ok) setSessions(result.data.activities);
       else setError(result.error);
     });
 
-    // Not blocking, and no dedicated error state: this only ever upgrades a custom quiz's filter
-    // label from its raw activity_type key to the real activity_type.quiz_name (see
-    // deriveActivityFilterOptions below) — a failure just leaves labels at their entries-only
-    // fallback rather than breaking the filter.
+    // Not blocking, and no dedicated error state: this only ever upgrades a custom quiz's entry
+    // and filter labels from the raw activity_type key to a real display name (see
+    // toActivityLogEntry/deriveActivityFilterOptions below) — a failure just leaves labels at
+    // their raw-key fallback rather than breaking the log.
     loadAvailableTitles(token, profile.user_id).then((result) => {
       if (cancelled) return;
       if (result.ok) setAvailableTitles(result.data.activities);
@@ -61,6 +65,14 @@ export default function ActivityLogPage() {
   const nameByType = useMemo(
     () => new Map(availableTitles.map((entry) => [entry.activityType, entry.activityName])),
     [availableTitles],
+  );
+
+  // GitHub #476: entries — what the table actually renders — now go through the same
+  // nameByType lookup the filter dropdown already used, so a custom catalog's real name shows up
+  // consistently instead of only in the filter options.
+  const entries = useMemo(
+    () => (sessions === null ? null : sessions.map((session) => toActivityLogEntry(session, nameByType))),
+    [sessions, nameByType],
   );
 
   const activityOptions = useMemo(

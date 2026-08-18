@@ -1,25 +1,37 @@
 export type StudentFilterValue = 'all' | string;
 export type LevelFilterValue = 'all' | 1 | 2 | 3;
+export type CourseFilterValue = 'all' | string;
 export type InstructorSortOrder = 'newest' | 'oldest' | 'lowest' | 'highest';
 
 const LEVELS: LevelFilterValue[] = ['all', 1, 2, 3];
 
-/** Student dropdown + Level pills + sort, for the Instructor Dashboard (GitHub #82) table. */
+/**
+ * Student dropdown + Level pills + Course dropdown (GitHub #474) + sort, for the Instructor
+ * Dashboard (GitHub #82) table. courses/courseId/onCourseChange are optional the same way
+ * getStudentName/getCourses are on ActivityLogTable — a caller with no courses to offer just
+ * omits them and gets the original course-less filter row back.
+ */
 export function InstructorFilters({
   students,
   studentId,
   level,
+  courses,
+  courseId,
   sort,
   onStudentChange,
   onLevelChange,
+  onCourseChange,
   onSortChange,
 }: {
   students: { id: string; name: string }[];
   studentId: StudentFilterValue;
   level: LevelFilterValue;
+  courses?: { id: string; name: string }[];
+  courseId?: CourseFilterValue;
   sort: InstructorSortOrder;
   onStudentChange: (value: StudentFilterValue) => void;
   onLevelChange: (value: LevelFilterValue) => void;
+  onCourseChange?: (value: CourseFilterValue) => void;
   onSortChange: (value: InstructorSortOrder) => void;
 }) {
   return (
@@ -60,6 +72,24 @@ export function InstructorFilters({
             ))}
           </div>
         </div>
+
+        {courses && onCourseChange ? (
+          <label className="block text-xs font-extrabold uppercase tracking-wide text-gray-400">
+            Course
+            <select
+              value={courseId ?? 'all'}
+              onChange={(event) => onCourseChange(event.target.value)}
+              className="mt-1 block rounded-brand-md border border-gray-300 bg-white px-3.5 py-2 text-sm font-bold text-gray-600 outline-none transition focus:border-brand-purple"
+            >
+              <option value="all">All courses</option>
+              {courses.map((course) => (
+                <option key={course.id} value={course.id}>
+                  {course.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
       </div>
 
       <label className="block text-xs font-extrabold uppercase tracking-wide text-gray-400">

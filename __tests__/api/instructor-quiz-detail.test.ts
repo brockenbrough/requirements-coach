@@ -9,6 +9,7 @@ const h = vi.hoisted(() => {
     orders: [] as { table: string; column: string; ascending: boolean }[],
     filters: [] as { table: string; column: string; value: unknown }[],
     deletes: [] as { table: string; column: string; value: unknown }[],
+    updates: [] as { table: string; payload: unknown }[],
   };
 
   function makeBuilder(table: string, result: Result) {
@@ -18,6 +19,10 @@ const h = vi.hoisted(() => {
       select: () => builder,
       delete: () => {
         isDelete = true;
+        return builder;
+      },
+      update: (payload: unknown) => {
+        state.updates.push({ table, payload });
         return builder;
       },
       eq: (column: string, value: unknown) => {
@@ -63,7 +68,7 @@ vi.mock('../../lib/supabase', () => ({
   }),
 }));
 
-import { DELETE, GET } from '../../app/api/instructor/quizzes/[activityType]/route';
+import { DELETE, GET, PATCH } from '../../app/api/instructor/quizzes/[activityType]/route';
 
 function queueRole(role: string) {
   queue('user', { data: { role }, error: null });
@@ -75,6 +80,7 @@ function quizRow(overrides: Partial<Record<string, unknown>> = {}) {
     quiz_name: 'Identify Weak User Stories',
     description: null,
     grading_kind: 'mcq',
+    rating_prompt: null,
     creator_id: null,
     creator: null,
     ...overrides,
@@ -108,12 +114,27 @@ function delReq(activityType = 'IDENTIFY_WEAK_USER_STORIES', token: string | nul
   );
 }
 
+function patchReq(body: unknown, activityType = 'IDENTIFY_WEAK_USER_STORIES', token: string | null = 'valid-token') {
+  return PATCH(
+    new Request(`http://localhost/api/instructor/quizzes/${activityType}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+    }),
+    { params: { activityType } },
+  );
+}
+
 beforeEach(() => {
   h.state.queues = {};
   h.state.tables = [];
   h.state.orders = [];
   h.state.filters = [];
   h.state.deletes = [];
+  h.state.updates = [];
 });
 
 describe('GET /api/instructor/quizzes/[activityType]', () => {
@@ -169,6 +190,8 @@ describe('GET /api/instructor/quizzes/[activityType]', () => {
       description: null,
       authorName: 'Ada Brockenbrough',
       gradingKind: 'mcq',
+      ratingPrompt: null,
+      isBuiltIn: false,
     });
 
     expect(body.questions).toHaveLength(2);
@@ -209,15 +232,18 @@ describe('GET /api/instructor/quizzes/[activityType]', () => {
     expect(h.state.tables).not.toContain('question');
   });
 
-  it('returns 403 with an empty body for a built-in catalog (creator_id is null)', async () => {
+  // GitHub #478: a built-in example catalog is visible (read-only) to every instructor, not just
+  // whoever created it — there is no creator to match anyway, since creator_id is NULL.
+  it('returns 200 with isBuiltIn: true for a built-in catalog (creator_id is null)', async () => {
     queueRole('instructor');
     queue('activity_type', { data: quizRow(), error: null }); // default creator_id: null
+    queue('question', { data: [questionRow({ user_id: null })], error: null });
 
     const res = await req();
-    expect(res.status).toBe(403);
-    expect(await res.text()).toBe('');
-    expect(h.state.tables).not.toContain('question');
-    expect(h.state.tables).not.toContain('user_story');
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.quiz.isBuiltIn).toBe(true);
+    expect(body.questions[0].ownerId).toBeNull();
   });
 
   it('returns 500 when the catalog lookup fails', async () => {
@@ -302,6 +328,107 @@ describe('GET /api/instructor/quizzes/[activityType] — llm-graded catalogs', (
   });
 });
 
+describe('PATCH /api/instructor/quizzes/[activityType]', () => {
+  it('returns 401 without a token', async () => {
+    const res = await patchReq({ ratingPrompt: 'New rubric.' }, 'IDENTIFY_WEAK_USER_STORIES', null);
+    expect(res.status).toBe(401);
+    expect(h.state.tables).toEqual([]);
+  });
+
+  it('returns 403 with an empty body when the caller is a student', async () => {
+    queueRole('student');
+    const res = await patchReq({ ratingPrompt: 'New rubric.' });
+    expect(res.status).toBe(403);
+    expect(await res.text()).toBe('');
+    expect(h.state.tables).not.toContain('activity_type');
+  });
+
+  it('returns 404 when the activity type matches no catalog', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: null, error: null });
+
+    const res = await patchReq({ ratingPrompt: 'New rubric.' }, 'NOT_REAL');
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error).toBe('Catalog not found.');
+    expect(h.state.updates).toEqual([]);
+  });
+
+  it('returns 403 with an empty body when the catalog was created by another instructor', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'instructor-2' }), error: null });
+
+    const res = await patchReq({ ratingPrompt: 'New rubric.' });
+    expect(res.status).toBe(403);
+    expect(await res.text()).toBe('');
+    expect(h.state.updates).toEqual([]);
+  });
+
+  it('returns 400 when the catalog is mcq (no rubric to set)', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ creator_id: 'instructor-1' }), error: null });
+
+    const res = await patchReq({ ratingPrompt: 'New rubric.' });
+    expect(res.status).toBe(400);
+    expect(h.state.updates).toEqual([]);
+  });
+
+  it('returns 400 when ratingPrompt is missing', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'instructor-1' }), error: null });
+
+    const res = await patchReq({});
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/ratingPrompt/);
+    expect(h.state.updates).toEqual([]);
+  });
+
+  it('returns 400 when ratingPrompt is blank', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'instructor-1' }), error: null });
+
+    const res = await patchReq({ ratingPrompt: '   ' });
+    expect(res.status).toBe(400);
+    expect(h.state.updates).toEqual([]);
+  });
+
+  it('returns 400 when ratingPrompt exceeds the length cap', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'instructor-1' }), error: null });
+
+    const res = await patchReq({ ratingPrompt: 'A'.repeat(4001) });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/4000/);
+    expect(h.state.updates).toEqual([]);
+  });
+
+  it('trims ratingPrompt and saves it, returning the saved value', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'instructor-1' }), error: null });
+    queue('activity_type', { data: { rating_prompt: 'Trimmed rubric.' }, error: null }); // update
+
+    const res = await patchReq({ ratingPrompt: '  Trimmed rubric.  ' });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ ratingPrompt: 'Trimmed rubric.' });
+
+    expect(h.state.updates).toContainEqual({ table: 'activity_type', payload: { rating_prompt: 'Trimmed rubric.' } });
+  });
+
+  it('returns 500 when the update fails', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'instructor-1' }), error: null });
+    queue('activity_type', { data: null, error: { message: 'DB down' } }); // update
+
+    const res = await patchReq({ ratingPrompt: 'New rubric.' });
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe('DB down');
+  });
+});
+
 describe('DELETE /api/instructor/quizzes/[activityType]', () => {
   it('returns 401 without a token', async () => {
     const res = await delReq('IDENTIFY_WEAK_USER_STORIES', null);
@@ -367,6 +494,7 @@ describe('DELETE /api/instructor/quizzes/[activityType]', () => {
     queueRole('instructor');
     queue('activity_type', { data: quizRow({ creator_id: 'instructor-1' }), error: null });
     queue('session_log', { data: null, error: null });
+    queue('assembled_quiz_catalog', { data: [], error: null }); // linkage check — no quiz links
     queue('question', { data: [{ question_id: 'q-1' }], error: null });
     queue('daily_challenge_attempt', { data: { daily_challenge_attempt_id: 'attempt-1' }, error: null });
 
@@ -377,10 +505,37 @@ describe('DELETE /api/instructor/quizzes/[activityType]', () => {
     expect(h.state.deletes).toEqual([]);
   });
 
+  it('returns 409 and deletes nothing when the catalog is still composed into one or more assembled quizzes', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ creator_id: 'instructor-1' }), error: null });
+    queue('session_log', { data: null, error: null });
+    queue('assembled_quiz_catalog', {
+      data: [
+        { assembled_quiz: { assembled_quiz_id: 'quiz-1', quiz_name: 'Sprint 1 Quiz', course: { course_name: 'CS 101' } } },
+        { assembled_quiz: { assembled_quiz_id: 'quiz-2', quiz_name: 'Midterm Review', course: { course_name: 'CS 201' } } },
+      ],
+      error: null,
+    });
+
+    const res = await delReq();
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toContain('"Sprint 1 Quiz" (CS 101)');
+    expect(body.error).toContain('"Midterm Review" (CS 201)');
+    expect(body.quizzes).toEqual([
+      { quizId: 'quiz-1', quizName: 'Sprint 1 Quiz', courseName: 'CS 101' },
+      { quizId: 'quiz-2', quizName: 'Midterm Review', courseName: 'CS 201' },
+    ]);
+    expect(h.state.tables).not.toContain('question');
+    expect(h.state.tables).not.toContain('user_story');
+    expect(h.state.deletes).toEqual([]);
+  });
+
   it('deletes an unused mcq catalog\'s questions/answers, unlinks it from every quiz, and deletes the catalog', async () => {
     queueRole('instructor');
     queue('activity_type', { data: quizRow({ creator_id: 'instructor-1' }), error: null }); // getQuizByActivityType
     queue('session_log', { data: null, error: null });
+    queue('assembled_quiz_catalog', { data: [], error: null }); // linkage check — no quiz links
     queue('question', { data: [{ question_id: 'q-1' }, { question_id: 'q-2' }], error: null }); // select ids
     queue('daily_challenge_attempt', { data: null, error: null });
     queue('question_to_answer', { data: [{ answer_id: 'a-1' }, { answer_id: 'a-2' }], error: null }); // select answer ids
@@ -408,6 +563,7 @@ describe('DELETE /api/instructor/quizzes/[activityType]', () => {
     queueRole('instructor');
     queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'instructor-1' }), error: null });
     queue('session_log', { data: null, error: null });
+    queue('assembled_quiz_catalog', { data: [], error: null }); // linkage check — no quiz links
     queue('user_story', { data: null, error: null }); // delete
     queue('title_definition', { data: null, error: null });
     queue('assembled_quiz_catalog', { data: null, error: null });
@@ -426,6 +582,7 @@ describe('DELETE /api/instructor/quizzes/[activityType]', () => {
     queueRole('instructor');
     queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'instructor-1' }), error: null });
     queue('session_log', { data: null, error: null });
+    queue('assembled_quiz_catalog', { data: [], error: null }); // linkage check — no quiz links
     queue('user_story', { data: null, error: null });
     queue('title_definition', { data: null, error: null });
     queue('assembled_quiz_catalog', { data: null, error: null });
@@ -441,6 +598,7 @@ describe('DELETE /api/instructor/quizzes/[activityType]', () => {
     queueRole('instructor');
     queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'instructor-1' }), error: null });
     queue('session_log', { data: null, error: null });
+    queue('assembled_quiz_catalog', { data: [], error: null }); // linkage check — no quiz links
     queue('user_story', { data: null, error: null });
     queue('title_definition', { data: null, error: null });
     queue('assembled_quiz_catalog', { data: null, error: null });
