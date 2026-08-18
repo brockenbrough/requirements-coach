@@ -21,16 +21,15 @@ import { QuizProgressBar } from './QuizProgressBar';
  * and there's someone enrolled to have progress; see the progressPercent comment below for why
  * "passed" is the metric.
  *
- * Two click modes on the info area, chosen by whether onSelect is passed:
- * - No onSelect (app/instructor/courses/page.tsx): a plain Link straight to the course detail
- *   page, like Moodle's own card.
- * - onSelect (the instructor dashboard's "My Courses"): the area becomes a toggle button instead
- *   — clicking it expands/collapses this course's per-quiz Class Average / Pass Rate / Attempted
- *   stats inline, inside the card itself (GitHub #423; these used to render in a separate
- *   InstructorActivityStats block below the whole card grid, one course's worth of numbers
- *   headed only by quiz name with no visual tie back to its card — moving them into the card they
- *   describe is the entire fix). The kebab menu's own "View course" item still provides real
- *   navigation in this mode, since the card itself no longer does.
+ * The info area is always a Link straight to the course detail page, like Moodle's own card — the
+ * whole card body navigates, on every page that renders it. A separate small expand button (top
+ * right, beside the kebab menu) is what toggles this course's per-quiz Class Average / Pass Rate /
+ * Attempted stats inline, inside the card itself (GitHub #423; these used to render in a separate
+ * InstructorActivityStats block below the whole card grid, one course's worth of numbers headed
+ * only by quiz name with no visual tie back to its card — moving them into the card they describe
+ * is the entire fix). The button is independent of navigation by design: clicking it must never
+ * follow the card's Link, so it stopPropagation()s/preventDefault()s the same way
+ * CourseCardMenu's own trigger does.
  */
 export function CourseCard({
   course,
@@ -39,23 +38,24 @@ export function CourseCard({
   onDuplicate,
   onEdit,
   onDelete,
-  selected,
-  onSelect,
+  statsExpanded,
+  onToggleStats,
 }: {
   course: CourseSummary;
   classStats?: CourseClassStatsData | null;
   /**
    * Per-quiz Class Average / Pass Rate / Attempted for this course, GitHub #423. `undefined`
    * renders nothing (matches classStats' convention above) — the caller passes this only for the
-   * currently-selected card, since the data is fetched on demand per course, not batched for the
+   * currently-expanded card, since the data is fetched on demand per course, not batched for the
    * whole grid the way classStats is. `null` is "fetch in flight," `[]` is "no quizzes assigned."
    */
   activityStats?: CourseActivityStats[] | null;
   onDuplicate?: (course: CourseSummary) => void;
   onEdit?: (course: CourseSummary) => void;
   onDelete?: (course: CourseSummary) => void;
-  selected?: boolean;
-  onSelect?: (course: CourseSummary) => void;
+  statsExpanded?: boolean;
+  /** Renders the expand button only when passed — a page that never fetches stats gets no button. */
+  onToggleStats?: (course: CourseSummary) => void;
 }) {
   const coverSrc = resolveCourseCoverSrc(course);
 
@@ -147,22 +147,47 @@ export function CourseCard({
   return (
     <div
       className={`group relative overflow-hidden rounded-brand-lg border bg-white shadow-sm transition hover:shadow-md ${
-        selected ? 'border-brand-purple' : 'border-gray-100 hover:border-brand-purple/40'
+        statsExpanded ? 'border-brand-purple' : 'border-gray-100 hover:border-brand-purple/40'
       }`}
     >
-      {onSelect ? (
-        <button type="button" onClick={() => onSelect(course)} aria-pressed={selected ?? false} className="block w-full text-left">
-          {info}
-        </button>
-      ) : (
-        <Link href={`/instructor/courses/${encodeURIComponent(course.id)}`} className="block text-left">
-          {info}
-        </Link>
-      )}
+      <Link href={`/instructor/courses/${encodeURIComponent(course.id)}`} className="block text-left">
+        {info}
+      </Link>
 
-      <div className="absolute right-3 top-3">
+      <div className="absolute right-3 top-3 flex items-center gap-2">
+        {onToggleStats ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onToggleStats(course);
+            }}
+            aria-expanded={statsExpanded ?? false}
+            aria-label={statsExpanded ? 'Hide course statistics' : 'Show course statistics'}
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-white/40 bg-black/35 text-white backdrop-blur-sm transition hover:bg-black/55"
+          >
+            <ChevronIcon expanded={statsExpanded ?? false} />
+          </button>
+        ) : null}
         <CourseCardMenu course={course} onDuplicate={onDuplicate} onEdit={onEdit} onDelete={onDelete} />
       </div>
     </div>
+  );
+}
+
+function ChevronIcon({ expanded }: { expanded: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={`h-4 w-4 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M6 9l6 6 6-6" />
+    </svg>
   );
 }

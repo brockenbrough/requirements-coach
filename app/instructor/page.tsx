@@ -283,8 +283,8 @@ function InstructorDashboardContent() {
                   course={course}
                   classStats={courseClassStatsById?.[course.id] ?? null}
                   activityStats={selectedCourseId === course.id ? courseStats : undefined}
-                  selected={selectedCourseId === course.id}
-                  onSelect={(c) => handleSelectCourse(selectedCourseId === c.id ? null : c.id)}
+                  statsExpanded={selectedCourseId === course.id}
+                  onToggleStats={(c) => handleSelectCourse(selectedCourseId === c.id ? null : c.id)}
                   onDuplicate={setDuplicateSource}
                   onEdit={setEditSource}
                   onDelete={setDeleteSource}
