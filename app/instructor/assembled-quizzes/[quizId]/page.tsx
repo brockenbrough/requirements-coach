@@ -9,6 +9,7 @@ import { ConfirmModal } from '../../../../components/ConfirmModal';
 import { QuestionFormModal } from '../../../../components/QuestionFormModal';
 import { PromptFormModal } from '../../../../components/PromptFormModal';
 import { RatingPromptModal } from '../../../../components/RatingPromptModal';
+import { TitleLadderModal } from '../../../../components/TitleLadderModal';
 import {
   createAndPickQuestionForQuiz,
   createAndPickUserStoryForQuiz,
@@ -54,6 +55,14 @@ const LEVEL_LABEL: Record<1 | 2 | 3, string> = { 1: 'Easy', 2: 'Medium', 3: 'Har
  * /api/instructor/quizzes/{activityType}). Per catalog, not per quiz — the rubric is a property of
  * the catalog itself, not of any one quiz that composes it, since more than one quiz can compose
  * the same catalog (see activity_type.rating_prompt's own comment in supabase/schema.sql).
+ *
+ * "Mastery Titles" (below "From catalogs", for either grading kind) is the same per-catalog-row
+ * shape, moved here from app/instructor/quizzes/[activityType]/page.tsx's own inline section — a
+ * title ladder is still a property of the catalog (title_definition keys on activity_type), not of
+ * the quiz, so PUT /api/instructor/quizzes/{activityType}/titles is unchanged; only where the
+ * instructor opens the editor from moved. See components/TitleLadderModal.tsx for why it fetches
+ * its own initial ladder on open rather than reading a value already loaded here, unlike the
+ * rubric's initialValue.
  */
 export default function AssembledQuizDetailPage({ params }: { params: { quizId: string } }) {
   const { token, loading, authorized } = useRequireRole('instructor');
@@ -76,6 +85,7 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
   const [addError, setAddError] = useState('');
   const [catalogToRemove, setCatalogToRemove] = useState<QuizCatalogComposition | null>(null);
   const [ratingPromptTarget, setRatingPromptTarget] = useState<QuizCatalogComposition | null>(null);
+  const [titleLadderTarget, setTitleLadderTarget] = useState<QuizCatalogComposition | null>(null);
   const [showDeleteQuiz, setShowDeleteQuiz] = useState(false);
   const [showAddQuestionsModal, setShowAddQuestionsModal] = useState(false);
   const [showCreateItemModal, setShowCreateItemModal] = useState(false);
@@ -394,6 +404,33 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
               )}
             </div>
 
+            {catalogs.length > 0 ? (
+              <>
+                <p className="mb-3 text-xs font-extrabold uppercase tracking-wide text-gray-400">Mastery Titles</p>
+                <p className="mb-4 text-xs font-semibold text-gray-500">
+                  What a student is called once they pass each level of a catalog. Set per catalog — more than
+                  one quiz can compose the same catalog, so its ladder isn&apos;t specific to this quiz alone.
+                </p>
+                <div className="mb-6 space-y-3">
+                  {catalogs.map((catalog) => (
+                    <div
+                      key={catalog.activityType}
+                      className="flex flex-wrap items-center justify-between gap-3 rounded-brand-lg border border-gray-100 bg-gray-50 p-4"
+                    >
+                      <p className="min-w-0 flex-1 font-semibold text-brand-navy">{catalog.name}</p>
+                      <button
+                        type="button"
+                        onClick={() => setTitleLadderTarget(catalog)}
+                        className="flex-none rounded-full border border-gray-300 bg-white px-4 py-1.5 text-xs font-extrabold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple"
+                      >
+                        Edit titles
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : null}
+
             {quiz.gradingKind === 'llm-graded' && catalogs.length > 0 ? (
               <>
                 <p className="mb-3 text-xs font-extrabold uppercase tracking-wide text-gray-400">Grading Rubrics</p>
@@ -621,6 +658,19 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
           initialValue={ratingPromptTarget.ratingPrompt ?? ''}
           onCancel={() => setRatingPromptTarget(null)}
           onSave={handleSaveCatalogRatingPrompt}
+        />
+      ) : null}
+
+      {titleLadderTarget && token ? (
+        <TitleLadderModal
+          token={token}
+          activityType={titleLadderTarget.activityType}
+          catalogName={titleLadderTarget.name}
+          onClose={() => setTitleLadderTarget(null)}
+          onSaved={() => {
+            setTitleLadderTarget(null);
+            showToast('Mastery titles saved.');
+          }}
         />
       ) : null}
 

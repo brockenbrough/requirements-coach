@@ -2,23 +2,30 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 type Result = { data?: unknown; error?: unknown };
 
-// Same harness as __tests__/api/instructor-quiz-detail.test.ts, extended with upsert/delete —
-// PUT writes the ladder through both.
+// Same harness as __tests__/api/instructor-quiz-detail.test.ts, extended with insert/update/delete
+// — PUT writes the ladder through saveTitleLadder's select-then-insert-or-update-then-delete
+// sequence (lib/titleAuthoringQueries.ts).
 const h = vi.hoisted(() => {
   const state = {
     queues: {} as Record<string, Result[]>,
     tables: [] as string[],
-    upserts: [] as { table: string; payload: unknown; options: unknown }[],
+    inserts: [] as { table: string; payload: unknown }[],
+    updates: [] as { table: string; payload: unknown; filters: { column: string; value: unknown }[] }[],
     deletes: [] as { table: string; filters: { column: string; value: unknown }[] }[],
   };
 
   function makeBuilder(table: string, result: Result) {
     const filters: { column: string; value: unknown }[] = [];
+    let pendingUpdatePayload: unknown = null;
 
     const builder: Record<string, unknown> = {
       select: () => builder,
-      upsert: (payload: unknown, options: unknown) => {
-        state.upserts.push({ table, payload, options });
+      insert: (payload: unknown) => {
+        state.inserts.push({ table, payload });
+        return builder;
+      },
+      update: (payload: unknown) => {
+        pendingUpdatePayload = payload;
         return builder;
       },
       delete: () => {
@@ -27,6 +34,7 @@ const h = vi.hoisted(() => {
       },
       eq: (column: string, value: unknown) => {
         filters.push({ column, value });
+        if (pendingUpdatePayload !== null) state.updates.push({ table, payload: pendingUpdatePayload, filters: [...filters] });
         return builder;
       },
       in: (column: string, value: unknown) => {
@@ -101,7 +109,8 @@ function req(body: unknown, token: string | null = 'valid-token') {
 beforeEach(() => {
   h.state.queues = {};
   h.state.tables = [];
-  h.state.upserts = [];
+  h.state.inserts = [];
+  h.state.updates = [];
   h.state.deletes = [];
 });
 
@@ -125,7 +134,7 @@ describe('PUT /api/instructor/quizzes/{activityType}/titles', () => {
     const res = await req({ titles: [{ difficultyLevel: 1, titleName: 'Story Apprentice' }] });
 
     expect(res.status).toBe(404);
-    expect(h.state.upserts).toHaveLength(0);
+    expect(h.state.inserts).toHaveLength(0);
   });
 
   // 404-then-403, the ordering findOwnedCourse established: existence first, then ownership.
@@ -137,7 +146,7 @@ describe('PUT /api/instructor/quizzes/{activityType}/titles', () => {
 
     expect(res.status).toBe(403);
     expect(await res.text()).toBe('');
-    expect(h.state.upserts).toHaveLength(0);
+    expect(h.state.inserts).toHaveLength(0);
   });
 
   // A built-in catalog has creator_id NULL, so nobody owns it and nobody can rename its ladder.
@@ -159,10 +168,11 @@ describe('PUT /api/instructor/quizzes/{activityType}/titles', () => {
     expect(h.state.tables).not.toContain('activity_type');
   });
 
-  it('saves the ladder and returns it as stored', async () => {
+  it('saves a new rung and returns it as stored', async () => {
     queueRole('instructor');
     queue('activity_type', { data: quizRow(), error: null });
-    queue('title_definition', { data: null, error: null }); // the upsert
+    queue('title_definition', { data: [], error: null }); // saveTitleLadder's existing-rows lookup: none yet
+    queue('title_definition', { data: null, error: null }); // the insert
     queue('title_definition', {
       data: [{ difficulty_level: 1, title_name: 'Story Apprentice' }],
       error: null,
@@ -172,7 +182,37 @@ describe('PUT /api/instructor/quizzes/{activityType}/titles', () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ titles: [{ difficultyLevel: 1, titleName: 'Story Apprentice' }] });
-    expect(h.state.upserts[0].options).toEqual({ onConflict: 'activity_type,difficulty_level' });
+    expect(h.state.inserts).toHaveLength(1);
+    expect(h.state.updates).toHaveLength(0);
+  });
+
+  // GitHub #464 follow-up regression: renaming an already-selected title must UPDATE the existing
+  // row in place, never touch its id — that's what used to violate fk_user_title_definition.
+  it('renames an existing rung by updating it in place, without touching its id', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow(), error: null });
+    queue('title_definition', {
+      data: [{ title_definition_id: 'existing-id', difficulty_level: 1 }],
+      error: null,
+    }); // saveTitleLadder's existing-rows lookup: already has a row at level 1
+    queue('title_definition', { data: null, error: null }); // the update
+    queue('title_definition', {
+      data: [{ difficulty_level: 1, title_name: 'Renamed Title' }],
+      error: null,
+    }); // the re-read
+
+    const res = await req({ titles: [{ difficultyLevel: 1, titleName: 'Renamed Title' }] });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ titles: [{ difficultyLevel: 1, titleName: 'Renamed Title' }] });
+    expect(h.state.inserts).toHaveLength(0);
+    expect(h.state.updates).toEqual([
+      {
+        table: 'title_definition',
+        payload: { title_name: 'Renamed Title' },
+        filters: [{ column: 'title_definition_id', value: 'existing-id' }],
+      },
+    ]);
   });
 
   it('clears a rung sent as an empty string', async () => {
@@ -184,7 +224,8 @@ describe('PUT /api/instructor/quizzes/{activityType}/titles', () => {
     const res = await req({ titles: [{ difficultyLevel: 2, titleName: '' }] });
 
     expect(res.status).toBe(200);
-    expect(h.state.upserts).toHaveLength(0);
+    expect(h.state.inserts).toHaveLength(0);
+    expect(h.state.updates).toHaveLength(0);
     expect(h.state.deletes[0].filters).toEqual([
       { column: 'activity_type', value: ACTIVITY_TYPE },
       { column: 'difficulty_level', value: [2] },

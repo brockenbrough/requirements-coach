@@ -6,24 +6,26 @@ const h = vi.hoisted(() => {
   const state = {
     queues: {} as Record<string, Result[]>,
     tables: [] as string[],
+    // Title authoring writes through saveTitleLadder's select-then-insert-or-update, and a failed
+    // ladder insert rolls the catalog back with a delete — none of this existed on this builder
+    // before.
     inserts: [] as { table: string; payload: unknown }[],
-    // Title authoring writes through an upsert, and a failed ladder insert rolls the catalog back
-    // with a delete — neither existed on this builder before.
-    upserts: [] as { table: string; payload: unknown }[],
+    updates: [] as { table: string; payload: unknown; filters: { column: string; value: unknown }[] }[],
     deletes: [] as { table: string; filters: { column: string; value: unknown }[] }[],
     user: { id: 'instructor-1' } as { id: string } | null,
   };
 
   function makeBuilder(table: string, result: Result) {
     const filters: { column: string; value: unknown }[] = [];
+    let pendingUpdatePayload: unknown = null;
 
     const builder: Record<string, unknown> = {
       insert: (payload: unknown) => {
         state.inserts.push({ table, payload });
         return builder;
       },
-      upsert: (payload: unknown) => {
-        state.upserts.push({ table, payload });
+      update: (payload: unknown) => {
+        pendingUpdatePayload = payload;
         return builder;
       },
       delete: () => {
@@ -33,6 +35,7 @@ const h = vi.hoisted(() => {
       select: () => builder,
       eq: (column: string, value: unknown) => {
         filters.push({ column, value });
+        if (pendingUpdatePayload !== null) state.updates.push({ table, payload: pendingUpdatePayload, filters: [...filters] });
         return builder;
       },
       in: (column: string, value: unknown) => {
@@ -103,7 +106,7 @@ beforeEach(() => {
   h.state.queues = {};
   h.state.tables = [];
   h.state.inserts = [];
-  h.state.upserts = [];
+  h.state.updates = [];
   h.state.deletes = [];
   h.state.user = { id: 'instructor-1' };
 });
@@ -347,7 +350,8 @@ describe('POST /api/activities/types — mastery titles', () => {
   it('writes the ladder alongside the catalog', async () => {
     queueRole('instructor');
     queue('activity_type', { data: activityTypeRow(), error: null });
-    queue('title_definition', { data: null, error: null });
+    queue('title_definition', { data: [], error: null }); // saveTitleLadder's existing-rows lookup: a brand-new catalog has none
+    queue('title_definition', { data: null, error: null }); // the insert
 
     const res = await POST(
       makeRequest(
@@ -361,11 +365,12 @@ describe('POST /api/activities/types — mastery titles', () => {
     );
 
     expect(res.status).toBe(201);
-    const upsert = h.state.upserts.find((entry) => entry.table === 'title_definition');
-    expect(upsert?.payload).toEqual([
+    const insert = h.state.inserts.find((entry) => entry.table === 'title_definition');
+    expect(insert?.payload).toEqual([
       expect.objectContaining({ activity_type: 'MY_CUSTOM_QUIZ', difficulty_level: 1, title_name: 'Story Apprentice' }),
       expect.objectContaining({ activity_type: 'MY_CUSTOM_QUIZ', difficulty_level: 2, title_name: 'Story Analyst' }),
     ]);
+    expect(h.state.updates).toHaveLength(0);
   });
 
   it('creates the catalog without touching title_definition when no titles are given', async () => {
@@ -396,7 +401,8 @@ describe('POST /api/activities/types — mastery titles', () => {
     expect(res.status).toBe(201);
     // Only clears were requested and there is nothing to clear on a catalog created a moment ago,
     // so the ladder write is a no-op rather than a delete.
-    expect(h.state.upserts).toHaveLength(0);
+    expect(h.state.inserts.filter((entry) => entry.table === 'title_definition')).toHaveLength(0);
+    expect(h.state.updates).toHaveLength(0);
   });
 
   // Rollback by hand — there is no transaction. Leaving the catalog behind would be worse than
@@ -404,7 +410,8 @@ describe('POST /api/activities/types — mastery titles', () => {
   it('deletes the just-created catalog when the ladder insert fails', async () => {
     queueRole('instructor');
     queue('activity_type', { data: activityTypeRow(), error: null });
-    queue('title_definition', { data: null, error: { message: 'ladder exploded' } });
+    queue('title_definition', { data: [], error: null }); // saveTitleLadder's existing-rows lookup
+    queue('title_definition', { data: null, error: { message: 'ladder exploded' } }); // the insert
 
     const res = await POST(
       makeRequest(validBody({ titles: [{ difficultyLevel: 1, titleName: 'Story Apprentice' }] })),
