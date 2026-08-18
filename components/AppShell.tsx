@@ -210,9 +210,39 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const { token, profile, signOut, score } = useUser();
+  const { token, profile, loading: profileLoading, signOut, score } = useUser();
   const { active: tourActive, startTour } = useOnboardingTour();
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // GitHub #441: a signed-in account with no "user" row yet (fresh registration, or the
+  // create-profile form was navigated away from before it was submitted) blocks every other nav
+  // destination instead of silently letting the click through — several student pages read
+  // fields off the profile and rendered a blank screen when it didn't exist. `!profileLoading` is
+  // required so the warning can't flash true for the one render before the profile fetch resolves.
+  const profileIncomplete = !profileLoading && !profile;
+  const [showProfileNotice, setShowProfileNotice] = useState(false);
+
+  // Clears itself once the profile exists (right after "Create profile" succeeds) rather than
+  // lingering as stale state, and auto-dismisses a few seconds after a blocked click so it reads
+  // as a response to that click, not a permanent banner.
+  useEffect(() => {
+    if (!profileIncomplete) {
+      setShowProfileNotice(false);
+      return;
+    }
+    if (!showProfileNotice) return;
+    const id = setTimeout(() => setShowProfileNotice(false), 5000);
+    return () => clearTimeout(id);
+  }, [profileIncomplete, showProfileNotice]);
+
+  function handleNavClick(event: React.MouseEvent<HTMLAnchorElement>, key: NavKey) {
+    if (profileIncomplete && key !== 'profile') {
+      event.preventDefault();
+      setShowProfileNotice(true);
+      return;
+    }
+    closeDrawer();
+  }
 
   // GitHub #318: the tour highlights sidebar nav items, which are translated off-screen behind
   // the mobile off-canvas drawer until it's opened — force it open for the duration of the tour
@@ -333,18 +363,36 @@ export function AppShell({
           </div>
         )}
 
+        {/* GitHub #441: appears in place of navigating when a locked item is clicked below —
+            blocks the click instead of silently redirecting to /profile with no explanation. */}
+        {showProfileNotice ? (
+          <div
+            role="alert"
+            className="mb-3 rounded-[10px] border border-red-400/60 bg-red-500/10 px-3 py-2.5 text-xs font-bold text-red-300"
+          >
+            Please complete your profile first — everything else unlocks once it&apos;s done.
+          </div>
+        ) : null}
+
         <nav data-tour="nav" className="mb-5 flex flex-col gap-1">
           {visibleNavItems.map((item) => {
             const Icon = NAV_ICONS[item.key];
             const isActive = active === item.key;
+            const isLocked = profileIncomplete && item.key !== 'profile';
             return (
               <Link
                 key={item.key}
                 href={item.href}
-                onClick={closeDrawer}
+                onClick={(event) => handleNavClick(event, item.key)}
+                aria-disabled={isLocked}
+                title={isLocked ? 'Complete your profile first' : undefined}
                 data-tour={`nav-${item.key}`}
                 className={`flex min-h-[44px] items-center gap-2.5 rounded-[10px] px-3 py-2.5 text-sm font-bold ${
-                  isActive ? 'bg-[#7C4DFF] text-white' : 'text-[#A79FC9] hover:bg-[#241f52] hover:text-white'
+                  isLocked
+                    ? 'cursor-not-allowed text-[#A79FC9]/40'
+                    : isActive
+                      ? 'bg-[#7C4DFF] text-white'
+                      : 'text-[#A79FC9] hover:bg-[#241f52] hover:text-white'
                 }`}
               >
                 <Icon />
