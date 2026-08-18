@@ -256,7 +256,7 @@ export default function DailyChallengePage() {
           <>
             <BackToDashboardLink />
             <div className="mb-5 flex items-center justify-between">
-              <span className="text-xs font-extrabold uppercase tracking-wide text-[#FFD666]">Daily Challenge · 2x points</span>
+              <span className="text-xs font-extrabold uppercase tracking-wide text-brand-danger">Daily Challenge · 2x points</span>
               <span className="rounded-full bg-[#241f52] px-3 py-1 text-sm font-extrabold text-white">
                 {remainingMs === null ? '…' : formatRemaining(remainingMs)}
               </span>
