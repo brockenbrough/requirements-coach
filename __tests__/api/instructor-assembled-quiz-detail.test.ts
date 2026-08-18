@@ -8,7 +8,6 @@ const h = vi.hoisted(() => {
     tables: [] as string[],
     deletes: [] as { table: string; column: string; value: unknown }[],
     filters: [] as { table: string; column: string; value: unknown }[],
-    updates: [] as { table: string; payload: unknown }[],
   };
 
   function makeBuilder(table: string, result: Result) {
@@ -18,10 +17,6 @@ const h = vi.hoisted(() => {
       select: () => builder,
       delete: () => {
         isDelete = true;
-        return builder;
-      },
-      update: (payload: unknown) => {
-        state.updates.push({ table, payload });
         return builder;
       },
       eq: (column: string, value: unknown) => {
@@ -63,7 +58,7 @@ vi.mock('../../lib/supabase', () => ({
   }),
 }));
 
-import { DELETE, GET, PATCH } from '../../app/api/instructor/assembled-quizzes/[quizId]/route';
+import { DELETE, GET } from '../../app/api/instructor/assembled-quizzes/[quizId]/route';
 
 function queueRole(role: string) {
   queue('user', { data: { role }, error: null });
@@ -77,7 +72,6 @@ function quizRow(overrides: Partial<Record<string, unknown>> = {}) {
     course_id: 'course-1',
     creator_id: 'instructor-1',
     grading_kind: 'mcq',
-    rating_prompt: null,
     created_at: '2026-08-14T10:00:00',
     ...overrides,
   };
@@ -96,23 +90,11 @@ function delReq(quizId = 'quiz-1', token: string | null = 'valid-token') {
   );
 }
 
-function patchReq(body: unknown, quizId = 'quiz-1', token: string | null = 'valid-token') {
-  return PATCH(
-    new Request(`http://localhost/api/instructor/assembled-quizzes/${quizId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify(body),
-    }),
-    { params: { quizId } },
-  );
-}
-
 beforeEach(() => {
   h.state.queues = {};
   h.state.tables = [];
   h.state.deletes = [];
   h.state.filters = [];
-  h.state.updates = [];
 });
 
 describe('GET /api/instructor/assembled-quizzes/[quizId]', () => {
@@ -153,7 +135,7 @@ describe('GET /api/instructor/assembled-quizzes/[quizId]', () => {
     queue('assembled_quiz', { data: quizRow(), error: null });
     queue('course', { data: { course_name: 'Software Requirements' }, error: null });
     queue('assembled_quiz_catalog', {
-      data: [{ activity_type: 'CATALOG_A', catalog: { quiz_name: 'Catalog A', description: 'About A' } }],
+      data: [{ activity_type: 'CATALOG_A', catalog: { quiz_name: 'Catalog A', description: 'About A', rating_prompt: null } }],
       error: null,
     });
     queue('question', {
@@ -179,7 +161,6 @@ describe('GET /api/instructor/assembled-quizzes/[quizId]', () => {
       courseId: 'course-1',
       courseName: 'Software Requirements',
       gradingKind: 'mcq',
-      ratingPrompt: null,
     });
 
     expect(body.catalogs).toEqual([
@@ -188,6 +169,7 @@ describe('GET /api/instructor/assembled-quizzes/[quizId]', () => {
         name: 'Catalog A',
         description: 'About A',
         gradingKind: 'mcq',
+        ratingPrompt: null,
         totalQuestions: 5,
         excludedCount: 1,
         activeCount: 4,
@@ -208,7 +190,12 @@ describe('GET /api/instructor/assembled-quizzes/[quizId]', () => {
     queue('assembled_quiz', { data: quizRow(), error: null });
     queue('course', { data: { course_name: 'Software Requirements' }, error: null });
     queue('assembled_quiz_catalog', {
-      data: [{ activity_type: 'CATALOG_LLM', catalog: { quiz_name: 'Catalog LLM', description: 'About LLM', grading_kind: 'llm-graded' } }],
+      data: [
+        {
+          activity_type: 'CATALOG_LLM',
+          catalog: { quiz_name: 'Catalog LLM', description: 'About LLM', grading_kind: 'llm-graded', rating_prompt: 'Score strictness: high.' },
+        },
+      ],
       error: null,
     });
     queue('question', { data: [], error: null });
@@ -231,6 +218,7 @@ describe('GET /api/instructor/assembled-quizzes/[quizId]', () => {
         name: 'Catalog LLM',
         description: 'About LLM',
         gradingKind: 'llm-graded',
+        ratingPrompt: 'Score strictness: high.',
         totalQuestions: 2,
         excludedCount: 0,
         activeCount: 2,
@@ -238,19 +226,6 @@ describe('GET /api/instructor/assembled-quizzes/[quizId]', () => {
     ]);
 
     expect(body.levelCoverage).toContainEqual({ level: 1, available: 2, required: 4, sufficient: false });
-  });
-
-  it("returns the quiz's own grading rubric for an llm-graded quiz", async () => {
-    queueRole('instructor');
-    queue('assembled_quiz', { data: quizRow({ grading_kind: 'llm-graded', rating_prompt: 'Score strictness: high.' }), error: null });
-    queue('course', { data: { course_name: 'Software Requirements' }, error: null });
-    queue('assembled_quiz_catalog', { data: [], error: null });
-
-    const res = await req();
-    expect(res.status).toBe(200);
-    const body = await res.json();
-
-    expect(body.quiz).toMatchObject({ gradingKind: 'llm-graded', ratingPrompt: 'Score strictness: high.' });
   });
 
   it('returns an empty composition for a quiz with no linked catalogs', async () => {
@@ -349,108 +324,6 @@ describe('DELETE /api/instructor/assembled-quizzes/[quizId]', () => {
     queue('assembled_quiz', { data: null, error: { message: 'DB down' } });
 
     const res = await delReq();
-    expect(res.status).toBe(500);
-    const body = await res.json();
-    expect(body.error).toBe('DB down');
-  });
-});
-
-describe('PATCH /api/instructor/assembled-quizzes/[quizId]', () => {
-  it('returns 401 without a token', async () => {
-    const res = await patchReq({ ratingPrompt: 'x' }, 'quiz-1', null);
-    expect(res.status).toBe(401);
-    expect(h.state.tables).toEqual([]);
-  });
-
-  it('returns 403 with an empty body when the caller is a student', async () => {
-    queueRole('student');
-    const res = await patchReq({ ratingPrompt: 'x' });
-    expect(res.status).toBe(403);
-    expect(await res.text()).toBe('');
-  });
-
-  it('returns 404 when the quiz does not exist', async () => {
-    queueRole('instructor');
-    queue('assembled_quiz', { data: null, error: null });
-
-    const res = await patchReq({ ratingPrompt: 'x' });
-    expect(res.status).toBe(404);
-  });
-
-  it("returns 403 with an empty body when the caller doesn't own the quiz", async () => {
-    queueRole('instructor');
-    queue('assembled_quiz', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'someone-else' }), error: null });
-
-    const res = await patchReq({ ratingPrompt: 'x' });
-    expect(res.status).toBe(403);
-    expect(await res.text()).toBe('');
-    expect(h.state.updates).toEqual([]);
-  });
-
-  it('returns 400 for an mcq quiz, which has no rubric to configure', async () => {
-    queueRole('instructor');
-    queue('assembled_quiz', { data: quizRow({ grading_kind: 'mcq' }), error: null });
-
-    const res = await patchReq({ ratingPrompt: 'x' });
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.error).toMatch(/LLM-graded/i);
-    expect(h.state.updates).toEqual([]);
-  });
-
-  it('returns 400 when ratingPrompt is missing', async () => {
-    queueRole('instructor');
-    queue('assembled_quiz', { data: quizRow({ grading_kind: 'llm-graded' }), error: null });
-
-    const res = await patchReq({});
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.error).toMatch(/ratingPrompt/);
-    expect(h.state.updates).toEqual([]);
-  });
-
-  it('returns 400 when ratingPrompt is blank', async () => {
-    queueRole('instructor');
-    queue('assembled_quiz', { data: quizRow({ grading_kind: 'llm-graded' }), error: null });
-
-    const res = await patchReq({ ratingPrompt: '   ' });
-    expect(res.status).toBe(400);
-    expect(h.state.updates).toEqual([]);
-  });
-
-  it('returns 400 when ratingPrompt exceeds the shared length cap', async () => {
-    queueRole('instructor');
-    queue('assembled_quiz', { data: quizRow({ grading_kind: 'llm-graded' }), error: null });
-
-    const res = await patchReq({ ratingPrompt: 'x'.repeat(4001) });
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.error).toMatch(/4000/);
-    expect(h.state.updates).toEqual([]);
-  });
-
-  it('trims and stores a valid rubric, returning it', async () => {
-    queueRole('instructor');
-    queue('assembled_quiz', { data: quizRow({ grading_kind: 'llm-graded' }), error: null });
-    queue('assembled_quiz', { data: { rating_prompt: 'Score strictness: high.' }, error: null });
-
-    const res = await patchReq({ ratingPrompt: '  Score strictness: high.  ' });
-    expect(res.status).toBe(200);
-
-    const body = await res.json();
-    expect(body.ratingPrompt).toBe('Score strictness: high.');
-
-    const update = h.state.updates.find((u) => u.table === 'assembled_quiz');
-    expect(update?.payload).toEqual({ rating_prompt: 'Score strictness: high.' });
-    expect(h.state.filters).toContainEqual({ table: 'assembled_quiz', column: 'assembled_quiz_id', value: 'quiz-1' });
-  });
-
-  it('returns 500 when the update query fails', async () => {
-    queueRole('instructor');
-    queue('assembled_quiz', { data: quizRow({ grading_kind: 'llm-graded' }), error: null });
-    queue('assembled_quiz', { data: null, error: { message: 'DB down' } });
-
-    const res = await patchReq({ ratingPrompt: 'x' });
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error).toBe('DB down');

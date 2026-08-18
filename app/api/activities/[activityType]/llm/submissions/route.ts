@@ -16,10 +16,10 @@ type UserStoryRow = {
   story_text: string;
   creator_id: string;
   difficulty_level: 1 | 2 | 3;
+  catalog: { rating_prompt: string | null } | null;
 };
 type LLMConfigRow = { provider: string; api_key: string; model: string };
 type SessionRow = { session_id: string; status: string; cumulative_score: number; max_score: number };
-type SessionQuizLinkRow = { assembled_quiz_id: string | null };
 
 const UNIQUE_VIOLATION = "23505";
 
@@ -56,11 +56,9 @@ function getToken(request: Request): string | null {
  *   - After grading, checks whether every story is now answered. If so, marks the session
  *     completed and returns sessionCompleted: true with the totals.
  *
- * Grading rubric: the LLM prompt substitutes the quiz's own assembled_quiz.rating_prompt for the
- * built-in RATING_RUBRIC (lib/llm/promptUtils.ts) whenever one is set — resolved via
- * session_log.assembled_quiz_id, the quiz whose composition actually granted this session access
- * at start time (POST .../llm/sessions), not re-derived from the story's activityType, since a
- * catalog can be reachable through more than one accessible quiz at once.
+ * Grading rubric: the LLM prompt substitutes the story's own catalog's custom rating_prompt
+ * (activity_type.rating_prompt) for the built-in RATING_RUBRIC (lib/llm/promptUtils.ts) whenever
+ * one is set — read via the catalog embed on the user_story fetch below.
  */
 export async function POST(request: Request, { params }: { params: { activityType: string } }) {
   const token = getToken(request);
@@ -123,12 +121,9 @@ export async function POST(request: Request, { params }: { params: { activityTyp
   // wrong-activity session id is indistinguishable from a non-existent one. Now that more than
   // one activity can be LLM-graded, matching params.activityType rather than a fixed literal is
   // what keeps one activity's session id from being usable against another's endpoint.
-  // assembled_quiz_id rides along on this same select (not part of the shared SESSION_COLUMNS
-  // constant, since most callers of that constant have no use for it) — it's what let this route
-  // resolve the quiz whose rating_prompt should grade this submission, further down.
   const { data: session, error: sessionError } = await supabase
     .from("session_log")
-    .select(`${SESSION_COLUMNS}, assembled_quiz_id`)
+    .select(SESSION_COLUMNS)
     .eq("session_id", sessionId)
     .eq("user_id", user.id)
     .eq("activity_type", activityType)
@@ -137,7 +132,7 @@ export async function POST(request: Request, { params }: { params: { activityTyp
   if (sessionError) return Response.json({ error: sessionError.message }, { status: 500 });
   if (!session) return Response.json({ error: "Session not found." }, { status: 404 });
 
-  const sessionRow = session as SessionRow & SessionQuizLinkRow;
+  const sessionRow = session as SessionRow;
 
   if (sessionRow.status !== "in-progress") {
     return Response.json(
@@ -177,7 +172,7 @@ export async function POST(request: Request, { params }: { params: { activityTyp
 
   const { data: story, error: storyError } = await supabase
     .from("user_story")
-    .select("user_story_id, story_text, creator_id, difficulty_level")
+    .select("user_story_id, story_text, creator_id, difficulty_level, catalog:activity_type(rating_prompt)")
     .eq("user_story_id", userStoryId)
     .maybeSingle();
 
@@ -233,24 +228,9 @@ export async function POST(request: Request, { params }: { params: { activityTyp
     return Response.json({ error: insertError.message }, { status: 500 });
   }
 
-  // The rubric belongs to the quiz that granted this session access, not to the story's own
-  // catalog (see assembled_quiz.rating_prompt's own comment in supabase/schema.sql) — resolved
-  // via the assembled_quiz_id this session was started with, not re-derived from activityType,
-  // since a catalog can be reachable through more than one accessible quiz at once.
-  let ratingPrompt: string | null = null;
-  if (sessionRow.assembled_quiz_id) {
-    const { data: quizRow, error: quizError } = await supabase
-      .from("assembled_quiz")
-      .select("rating_prompt")
-      .eq("assembled_quiz_id", sessionRow.assembled_quiz_id)
-      .maybeSingle();
-    if (quizError) return Response.json({ error: quizError.message }, { status: 500 });
-    ratingPrompt = (quizRow as { rating_prompt: string | null } | null)?.rating_prompt ?? null;
-  }
-
   let rating;
   try {
-    rating = await provider.rateAcceptanceCriteria(storyRow.story_text, submittedText, ratingPrompt);
+    rating = await provider.rateAcceptanceCriteria(storyRow.story_text, submittedText, storyRow.catalog?.rating_prompt);
   } catch (err) {
     const message = err instanceof Error ? err.message : "The LLM provider request failed.";
     return Response.json({ error: message }, { status: 502 });

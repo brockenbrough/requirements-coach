@@ -113,7 +113,6 @@ export type AssembledQuizRecord = {
   description: string | null;
   courseId: string;
   gradingKind: GradingKind;
-  ratingPrompt: string | null;
 };
 
 /**
@@ -126,10 +125,6 @@ export type AssembledQuizRecord = {
  * gradingKind is required, not inferred from catalogActivityTypes — the caller (the POST route)
  * already validated every catalog matches it, and locking the value in here rather than deriving
  * it is what makes the column meaningful once catalogs are later added/removed.
- *
- * ratingPrompt is the quiz's own grading rubric (assembled_quiz.rating_prompt) — required by the
- * route when gradingKind is 'llm-graded', null otherwise; see that column's own comment in
- * supabase/schema.sql for why it lives on the quiz rather than on any of its linked catalogs.
  */
 export async function createAssembledQuiz(
   supabase: SupabaseClient,
@@ -139,7 +134,6 @@ export async function createAssembledQuiz(
     courseId: string;
     creatorId: string;
     gradingKind: GradingKind;
-    ratingPrompt: string | null;
     catalogActivityTypes: string[];
   },
 ): Promise<{ quiz: AssembledQuizRecord | null; error: { message: string } | null }> {
@@ -152,7 +146,6 @@ export async function createAssembledQuiz(
     course_id: params.courseId,
     creator_id: params.creatorId,
     grading_kind: params.gradingKind,
-    rating_prompt: params.ratingPrompt,
   });
 
   if (quizError) return { quiz: null, error: quizError };
@@ -176,7 +169,6 @@ export async function createAssembledQuiz(
       description: params.description,
       courseId: params.courseId,
       gradingKind: params.gradingKind,
-      ratingPrompt: params.ratingPrompt,
     },
     error: null,
   };
@@ -189,12 +181,11 @@ type AssembledQuizMetaRow = {
   course_id: string;
   creator_id: string;
   grading_kind: string;
-  rating_prompt: string | null;
   created_at: string;
 };
 
 const ASSEMBLED_QUIZ_COLUMNS =
-  'assembled_quiz_id, quiz_name, description, course_id, creator_id, grading_kind, rating_prompt, created_at';
+  'assembled_quiz_id, quiz_name, description, course_id, creator_id, grading_kind, created_at';
 
 export type OwnedAssembledQuizResult =
   | { status: 'ok'; quiz: AssembledQuizMetaRow }
@@ -226,35 +217,6 @@ export async function findOwnedAssembledQuiz(
   if (quiz.creator_id !== instructorId) return { status: 'forbidden' };
 
   return { status: 'ok', quiz };
-}
-
-/**
- * Sets or revises an llm-graded quiz's grading rubric after creation — the query PATCH
- * /api/instructor/assembled-quizzes/{quizId} runs once the route's own ownership and grading-kind
- * checks (via findOwnedAssembledQuiz above) have already passed. Unlike gradingKind, which is
- * locked forever, the rubric can be revised any number of times — every submission graded
- * afterward uses the new wording; a session that already resolved this quiz's rating_prompt
- * before the change keeps grading against whatever was current at each submission's own time.
- *
- * Scoped by assembled_quiz_id alone (its primary key) — the caller has already proven ownership,
- * so this has no creator_id check of its own to duplicate the route's.
- */
-export async function updateAssembledQuizRatingPrompt(
-  supabase: SupabaseClient,
-  quizId: string,
-  ratingPrompt: string,
-) {
-  const { data, error } = await supabase
-    .from('assembled_quiz')
-    .update({ rating_prompt: ratingPrompt })
-    .eq('assembled_quiz_id', quizId)
-    .select('rating_prompt')
-    .maybeSingle();
-
-  if (error) return { ratingPrompt: null, error };
-
-  const row = data as { rating_prompt: string | null } | null;
-  return { ratingPrompt: row?.rating_prompt ?? null, error: null };
 }
 
 /** One course name lookup, for the quiz detail route's header — findOwnedAssembledQuiz's own row has no join. */
@@ -556,6 +518,10 @@ export type QuizCatalogComposition = {
   /** Which pool totalQuestions/activeCount are counted from — question rows for 'mcq', user_story
    *  rows for 'llm-graded'. A catalog only ever fills one pool, same as QuizSummary's own field. */
   gradingKind: GradingKind;
+  /** The catalog's own grading rubric (activity_type.rating_prompt) — null for 'mcq', or for an
+   *  'llm-graded' catalog that hasn't set one yet. Read-only here; edited from the catalog's own
+   *  detail page (PATCH /api/instructor/quizzes/{activityType}), not this quiz-composition view. */
+  ratingPrompt: string | null;
   totalQuestions: number;
   excludedCount: number;
   activeCount: number;
@@ -572,7 +538,7 @@ function buildLevelCoverage(availableQuestions: readonly { difficulty_level: num
 
 type LinkedCatalogRow = {
   activity_type: string;
-  catalog: { quiz_name: string; description: string | null; grading_kind: string } | null;
+  catalog: { quiz_name: string; description: string | null; grading_kind: string; rating_prompt: string | null } | null;
 };
 type PoolQuestionRow = { question_id: string; activity_type: string; difficulty_level: number };
 type PoolUserStoryRow = { user_story_id: string; activity_type: string; difficulty_level: number };
@@ -662,7 +628,7 @@ function compositionFailure(error: { message: string }): GetQuizCompositionResul
 export async function getQuizComposition(supabase: SupabaseClient, quizId: string): Promise<GetQuizCompositionResult> {
   const { data: linkRows, error: linkError } = await supabase
     .from('assembled_quiz_catalog')
-    .select('activity_type, catalog:activity_type(quiz_name, description, grading_kind)')
+    .select('activity_type, catalog:activity_type(quiz_name, description, grading_kind, rating_prompt)')
     .eq('assembled_quiz_id', quizId);
 
   if (linkError) return compositionFailure(linkError);
@@ -720,6 +686,7 @@ export async function getQuizComposition(supabase: SupabaseClient, quizId: strin
           name: link.catalog?.quiz_name ?? link.activity_type,
           description: link.catalog?.description ?? null,
           gradingKind,
+          ratingPrompt: link.catalog?.rating_prompt ?? null,
           totalQuestions: catalogStories.length,
           excludedCount,
           activeCount: catalogStories.length - excludedCount,
@@ -734,6 +701,7 @@ export async function getQuizComposition(supabase: SupabaseClient, quizId: strin
         name: link.catalog?.quiz_name ?? link.activity_type,
         description: link.catalog?.description ?? null,
         gradingKind,
+        ratingPrompt: null,
         totalQuestions: catalogQuestions.length,
         excludedCount,
         activeCount: catalogQuestions.length - excludedCount,
@@ -1027,7 +995,7 @@ export async function listAllUserStoriesForPicker(supabase: SupabaseClient, inst
 
 /**
  * GitHub #362: copies every assembled_quiz belonging to `sourceCourseId` onto `targetCourseId` —
- * same quiz_name/description/rating_prompt, the same linked catalogs (assembled_quiz_catalog), the
+ * same quiz_name/description, the same linked catalogs (assembled_quiz_catalog), the
  * same per-quiz question exclusions (quiz_excluded_question) and hand-picked questions
  * (assembled_quiz_extra_question, GitHub #380), and the same llm-graded prompt exclusions/
  * hand-picks (quiz_excluded_user_story/assembled_quiz_extra_user_story), all re-pointed at freshly
@@ -1049,7 +1017,7 @@ export async function duplicateQuizzesForCourse(
 ): Promise<{ copiedCount: number; error: { message: string } | null }> {
   const { data, error: sourceError } = await supabase
     .from('assembled_quiz')
-    .select('assembled_quiz_id, quiz_name, description, grading_kind, rating_prompt')
+    .select('assembled_quiz_id, quiz_name, description, grading_kind')
     .eq('course_id', params.sourceCourseId);
 
   if (sourceError) return { copiedCount: 0, error: sourceError };
@@ -1059,7 +1027,6 @@ export async function duplicateQuizzesForCourse(
     quiz_name: string;
     description: string | null;
     grading_kind: string;
-    rating_prompt: string | null;
   };
   const sourceQuizzes = (data ?? []) as SourceQuizRow[];
   let copiedCount = 0;
@@ -1086,10 +1053,6 @@ export async function duplicateQuizzesForCourse(
       courseId: params.targetCourseId,
       creatorId: params.creatorId,
       gradingKind: sourceQuiz.grading_kind === 'llm-graded' ? 'llm-graded' : 'mcq',
-      // The rubric is a property of the quiz itself now (assembled_quiz.rating_prompt), so a
-      // duplicated quiz carries it over just like quiz_name/description — the copy should grade
-      // exactly like the original until an instructor deliberately changes one or the other.
-      ratingPrompt: sourceQuiz.rating_prompt,
       catalogActivityTypes: activityTypes ?? [],
     });
     if (createError || !newQuiz) return { copiedCount, error: createError };

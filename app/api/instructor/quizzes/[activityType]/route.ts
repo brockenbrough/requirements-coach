@@ -1,10 +1,12 @@
 import { getSupabaseClient } from '../../../../../lib/supabase';
 import { requireInstructor } from '../../../../../lib/instructorAuth';
+import { validateRatingPromptText } from '../../../../../lib/activityTypes';
 import {
   deleteCatalog,
   getQuizByActivityType,
   listCatalogQuestions,
   listCatalogUserStories,
+  updateCatalogRatingPrompt,
 } from '../../../../../lib/activityTypeQueries';
 
 function getToken(request: Request): string | null {
@@ -69,6 +71,68 @@ export async function GET(request: Request, { params }: { params: { activityType
   }
 
   return Response.json({ quiz, questions, userStories: [] }, { status: 200 });
+}
+
+/**
+ * PATCH /api/instructor/quizzes/:activityType — updates an llm-graded catalog's own grading
+ * rubric (activity_type.rating_prompt), GitHub #379 follow-up. Same 404-then-403 ownership check
+ * as GET/DELETE above. Unlike gradingKind itself, this field is editable any time after creation.
+ *
+ * Body: { ratingPrompt: string } — validated by validateRatingPromptText (lib/activityTypes.ts),
+ * the same rule POST /api/activities/types enforces at creation time.
+ *
+ * - 401 missing/invalid bearer token
+ * - 403 caller isn't an instructor, or doesn't own this catalog (no body either way)
+ * - 404 activityType matches no catalog
+ * - 400 the catalog is 'mcq' (this field is only ever meaningful for 'llm-graded'), or ratingPrompt
+ *   is missing/blank/too long
+ * - 200 { ratingPrompt }
+ * - 500 Supabase not configured, or a query fails
+ */
+export async function PATCH(request: Request, { params }: { params: { activityType: string } }) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
+
+  const guard = await requireInstructor(supabase, getToken(request));
+  if (!guard.ok) {
+    return guard.status === 403
+      ? new Response(null, { status: 403 })
+      : Response.json(
+          { error: guard.status === 401 ? 'Unauthorized' : 'Supabase credentials are not configured.' },
+          { status: guard.status },
+        );
+  }
+
+  const { activityType } = params;
+
+  const { quiz, creatorId, error: quizError } = await getQuizByActivityType(supabase, activityType);
+  if (quizError) return Response.json({ error: quizError.message }, { status: 500 });
+  if (!quiz) return Response.json({ error: 'Catalog not found.' }, { status: 404 });
+  if (creatorId !== guard.user_id) return new Response(null, { status: 403 });
+
+  if (quiz.gradingKind !== 'llm-graded') {
+    return Response.json({ error: 'Only an llm-graded catalog has a grading rubric.' }, { status: 400 });
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return Response.json({ error: 'Invalid JSON body.' }, { status: 400 });
+  }
+
+  const { ratingPrompt } = (body ?? {}) as { ratingPrompt?: unknown };
+  const validation = validateRatingPromptText(ratingPrompt);
+  if (!validation.ok) return validation.response;
+
+  const { ratingPrompt: saved, error: updateError } = await updateCatalogRatingPrompt(
+    supabase,
+    activityType,
+    validation.ratingPrompt,
+  );
+  if (updateError) return Response.json({ error: updateError.message }, { status: 500 });
+
+  return Response.json({ ratingPrompt: saved }, { status: 200 });
 }
 
 /**

@@ -287,65 +287,6 @@ describe('POST /api/instructor/assembled-quizzes', () => {
     expect(res.status).toBe(400);
   });
 
-  // The rubric belongs to the quiz (assembled_quiz.rating_prompt), not any catalog it composes —
-  // required, with no default, only when the quiz's own gradingKind is 'llm-graded'.
-  it('returns 400 when ratingPrompt is missing for an llm-graded quiz, without touching assembled_quiz', async () => {
-    queueRole('instructor');
-    const res = await POST(postRequest(validBody({ gradingKind: 'llm-graded' })));
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.error).toMatch(/ratingPrompt/);
-    expect(h.state.tables).not.toContain('assembled_quiz');
-  });
-
-  it('returns 400 when ratingPrompt is blank/whitespace-only for an llm-graded quiz', async () => {
-    queueRole('instructor');
-    const res = await POST(postRequest(validBody({ gradingKind: 'llm-graded', ratingPrompt: '   ' })));
-    expect(res.status).toBe(400);
-    expect(h.state.tables).not.toContain('assembled_quiz');
-  });
-
-  it('returns 400 when ratingPrompt exceeds the shared length cap', async () => {
-    queueRole('instructor');
-    const res = await POST(postRequest(validBody({ gradingKind: 'llm-graded', ratingPrompt: 'x'.repeat(4001) })));
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.error).toMatch(/4000/);
-  });
-
-  it('does not require ratingPrompt for an mcq quiz, and stores null', async () => {
-    queueRole('instructor');
-    queueOwnedCourse();
-    queueValidCatalogs(['IDENTIFY_WEAK_USER_STORIES', 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA']);
-    queue('assembled_quiz', { data: null, error: null });
-    queue('assembled_quiz_catalog', { data: null, error: null });
-
-    const res = await POST(postRequest(validBody()));
-    expect(res.status).toBe(201);
-
-    const quizInsert = h.state.inserts.find((i) => i.table === 'assembled_quiz');
-    expect(quizInsert?.payload).toMatchObject({ rating_prompt: null });
-  });
-
-  it('stores and returns a trimmed ratingPrompt for an llm-graded quiz', async () => {
-    queueRole('instructor');
-    queueOwnedCourse();
-    queueValidCatalogs(['IDENTIFY_WEAK_USER_STORIES', 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA'], 'llm-graded');
-    queue('assembled_quiz', { data: null, error: null });
-    queue('assembled_quiz_catalog', { data: null, error: null });
-
-    const res = await POST(
-      postRequest(validBody({ gradingKind: 'llm-graded', ratingPrompt: '  Score strictness: high.  ' })),
-    );
-    expect(res.status).toBe(201);
-
-    const quizInsert = h.state.inserts.find((i) => i.table === 'assembled_quiz');
-    expect(quizInsert?.payload).toMatchObject({ rating_prompt: 'Score strictness: high.' });
-
-    const body = await res.json();
-    expect(body.quiz.ratingPrompt).toBe('Score strictness: high.');
-  });
-
   it('returns 400 when a selected catalog\'s grading_kind does not match the submitted gradingKind', async () => {
     queueRole('instructor');
     queueOwnedCourse();

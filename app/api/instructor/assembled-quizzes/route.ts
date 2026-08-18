@@ -2,7 +2,7 @@ import { getSupabaseClient } from '../../../../lib/supabase';
 import { requireInstructor } from '../../../../lib/instructorAuth';
 import { findOwnedCourse } from '../../../../lib/courseQueries';
 import { createAssembledQuiz, listAssembledQuizzesForInstructor } from '../../../../lib/assembledQuizQueries';
-import { isGradingKind, validateRatingPromptText } from '../../../../lib/activityTypes';
+import { isGradingKind } from '../../../../lib/activityTypes';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -46,7 +46,7 @@ export async function GET(request: Request) {
  * POST /api/instructor/assembled-quizzes — composes a quiz from one or more question catalogs
  * for one of the caller's own courses (GitHub #360).
  *
- * Body: { name, description?, courseId, gradingKind, ratingPrompt?, catalogActivityTypes: string[] }
+ * Body: { name, description?, courseId, gradingKind, catalogActivityTypes: string[] }
  * - name required, non-blank
  * - courseId must name a course the caller owns — findOwnedCourse's same 404-then-403 ordering
  *   GET/PATCH/DELETE /api/instructor/courses/{id} already use (GitHub #241), checked before the
@@ -54,17 +54,11 @@ export async function GET(request: Request) {
  * - gradingKind is required and locked forever once set (assembled_quiz.grading_kind, mirroring
  *   activity_type.grading_kind's own "decided at creation, never edited" rule) — it is what lets
  *   the composition page's "Create new question"/"Add prompt" always know which one to offer.
- * - ratingPrompt is required, with no default, only when gradingKind is 'llm-graded' — the quiz's
- *   own grading rubric (assembled_quiz.rating_prompt, see supabase/schema.sql), replacing the
- *   built-in RATING_RUBRIC for every submission graded through this quiz. Unlike gradingKind it
- *   isn't locked forever: PATCH /api/instructor/assembled-quizzes/{quizId} can revise it later.
- *   validateRatingPromptText (lib/activityTypes.ts) is the same validator every rating-prompt
- *   field in the app uses, so the length cap/blank-check can't drift between call sites.
  * - catalogActivityTypes must have at least one entry, and every entry must be a real catalog
  *   (activity_type row) whose own grading_kind matches the submitted gradingKind — checked with
  *   one bulk query rather than N.
  *
- * Returns 201 with { quiz: { id, name, description, courseId, gradingKind, ratingPrompt } }.
+ * Returns 201 with { quiz: { id, name, description, courseId, gradingKind } }.
  */
 export async function POST(request: Request) {
   const supabase = getSupabaseClient();
@@ -87,12 +81,11 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Invalid JSON body.' }, { status: 400 });
   }
 
-  const { name, description, courseId, gradingKind, ratingPrompt, catalogActivityTypes } = (body ?? {}) as {
+  const { name, description, courseId, gradingKind, catalogActivityTypes } = (body ?? {}) as {
     name?: unknown;
     description?: unknown;
     courseId?: unknown;
     gradingKind?: unknown;
-    ratingPrompt?: unknown;
     catalogActivityTypes?: unknown;
   };
 
@@ -107,13 +100,6 @@ export async function POST(request: Request) {
   }
   if (!isGradingKind(gradingKind)) {
     return Response.json({ error: 'gradingKind must be "mcq" or "llm-graded".' }, { status: 400 });
-  }
-  // See the docblock above: required with no default for an llm-graded quiz, ignored for mcq.
-  let validatedRatingPrompt: string | null = null;
-  if (gradingKind === 'llm-graded') {
-    const validation = validateRatingPromptText(ratingPrompt);
-    if (!validation.ok) return validation.response;
-    validatedRatingPrompt = validation.ratingPrompt;
   }
   if (!Array.isArray(catalogActivityTypes) || catalogActivityTypes.length === 0) {
     return Response.json({ error: 'At least one catalog must be selected.' }, { status: 400 });
@@ -153,7 +139,6 @@ export async function POST(request: Request) {
     courseId,
     creatorId: guard.user_id,
     gradingKind,
-    ratingPrompt: validatedRatingPrompt,
     catalogActivityTypes: uniqueCatalogIds,
   });
 

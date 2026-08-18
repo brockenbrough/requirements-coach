@@ -78,12 +78,30 @@ CREATE TABLE "user" (
 -- split is (see CLAUDE.md). DEFAULT 'mcq' matches every activity_type created before this column
 -- existed (see the migration note near the bottom of this file for the WRITE_ACCEPTANCE_CRITERIA
 -- backfill).
+--
+-- rating_prompt: an instructor's custom grading rubric for an llm-graded catalog, substituted for
+-- RATING_RUBRIC (lib/llm/promptUtils.ts) in the prompt sent to the LLM for every submission
+-- against this catalog. Nullable, and only ever meaningful when grading_kind = 'llm-graded' — the
+-- same "column doesn't apply to every kind" shape as the question/user_story split above, and for
+-- the same reason: a CHECK constraint can't express "required when llm-graded, unused otherwise,"
+-- so that pairing is enforced by POST /api/activities/types (required in the request body for a
+-- new llm-graded catalog, with no default — the kind itself is not editable afterwards, so a
+-- silently-missing rubric would be a wrong catalog rather than a fixable one) rather than by the
+-- column. Deliberately per-catalog, not per-quiz: an assembled_quiz can compose more than one
+-- llm-graded catalog at once, and each keeps grading against its own rubric — a student session
+-- always draws user_story rows from exactly one catalog, so the right rubric for any given
+-- submission is always the one on that story's own activity_type, never ambiguous even when a
+-- quiz composes several catalogs. Every catalog created before this column existed (the seeded
+-- WRITE_ACCEPTANCE_CRITERIA row, and any instructor-created llm-graded catalog that predates it)
+-- is NULL forever as of this change — there is no backfill — and buildRatingPrompt falls back to
+-- the built-in RATING_RUBRIC whenever this is null, which is exactly those rows' behavior today.
 -- ---------------------------------------------------------------------
 CREATE TABLE activity_type (
     activity_type varchar(50) NOT NULL,
     quiz_name     text        NOT NULL,
     description   text,
     grading_kind  text        NOT NULL DEFAULT 'mcq',
+    rating_prompt text,
     creator_id    uuid,
     PRIMARY KEY (activity_type));
 
@@ -284,18 +302,6 @@ CREATE TABLE student_course (
 -- "locked forever" convention activity_type.grading_kind already uses. Before this, a quiz
 -- could link catalogs of both kinds at once with nothing to say which one its "Create new
 -- question"/"Add prompt" composition actions should offer.
---
--- rating_prompt: the quiz's own custom grading rubric, substituted for RATING_RUBRIC
--- (lib/llm/promptUtils.ts) in the prompt sent to the LLM for every submission graded through this
--- quiz. Deliberately on assembled_quiz, not on activity_type (an earlier iteration tried the
--- catalog-level column and moved it here instead) — a rubric describes how *this quiz* wants
--- answers graded, not an intrinsic property of the catalog's question pool, and a catalog can be
--- composed into more than one quiz at once (assembled_quiz_catalog is a plain m:n join) with no
--- reason those quizzes would want the same grading rubric. Nullable, and only ever meaningful
--- when grading_kind = 'llm-graded' — same "can't be expressed as a CHECK, enforced at the route
--- instead" reasoning as grading_kind's own comment above. Required, with no default, when
--- creating a new llm-graded quiz (POST /api/instructor/assembled-quizzes); editable afterward
--- (PATCH /api/instructor/assembled-quizzes/{quizId}), unlike grading_kind itself.
 CREATE TABLE assembled_quiz (
     assembled_quiz_id uuid      NOT NULL,
     quiz_name         text      NOT NULL,
@@ -303,7 +309,6 @@ CREATE TABLE assembled_quiz (
     course_id         uuid      NOT NULL,
     creator_id        uuid      NOT NULL,
     grading_kind      text      NOT NULL DEFAULT 'mcq',
-    rating_prompt     text,
     created_at        timestamp NOT NULL DEFAULT now(),
     PRIMARY KEY (assembled_quiz_id));
 
@@ -407,18 +412,6 @@ CREATE TABLE assembled_quiz_extra_user_story (
 -- be the only place with real merge conflicts across devices. The next
 -- question is derived as the first position in session_to_question
 -- without a matching row in answered_question_log.
---
--- assembled_quiz_id: which assembled quiz's composition actually granted access when this
--- session was started — the same value getAccessibleCourseForActivity already resolves at
--- session-start time to filter quiz_excluded_question/quiz_excluded_user_story, just persisted
--- instead of discarded. Nullable and ON DELETE SET NULL (see the FK below): a catalog can be
--- reachable through more than one accessible quiz at once, so this pins down *which one* actually
--- granted this particular session, most importantly so POST .../llm/submissions can resolve the
--- right assembled_quiz.rating_prompt to grade against — re-deriving "some" accessible quiz at
--- grading time instead could silently pick a different quiz (with a different rubric) than the
--- one the session was actually started through. Only ever set for an llm-graded session today
--- (the MCQ path resolves the same link but has no per-quiz field that needs it later); nothing
--- stops a future MCQ use from writing it too.
 -- =====================================================================
 
 CREATE TABLE session_log (
@@ -432,7 +425,6 @@ CREATE TABLE session_log (
     cumulative_score  int4        NOT NULL DEFAULT 0,
     max_score         int4        NOT NULL DEFAULT 100,
     passed            bool        NOT NULL DEFAULT false,
-    assembled_quiz_id uuid,
     PRIMARY KEY (session_id));
 
 -- The 4 drawn questions, analogous to question_to_answer.
@@ -569,12 +561,6 @@ ALTER TABLE quiz_excluded_user_story ADD CONSTRAINT fk_quiz_excluded_user_story_
 
 ALTER TABLE assembled_quiz_extra_user_story ADD CONSTRAINT fk_assembled_quiz_extra_user_story_quiz FOREIGN KEY (assembled_quiz_id) REFERENCES assembled_quiz (assembled_quiz_id) ON DELETE CASCADE;
 ALTER TABLE assembled_quiz_extra_user_story ADD CONSTRAINT fk_assembled_quiz_extra_user_story_user_story FOREIGN KEY (user_story_id) REFERENCES user_story (user_story_id) ON DELETE CASCADE;
-
--- ON DELETE SET NULL, deliberately not CASCADE: a session's own history (score, answers,
--- completion) has nothing to do with whether the quiz that once granted access still exists —
--- deleting a quiz must not delete a student's attempt record. Losing the link only means a
--- completed session's rubric provenance can no longer be traced; it was already graded by then.
-ALTER TABLE session_log ADD CONSTRAINT fk_session_log_assembled_quiz FOREIGN KEY (assembled_quiz_id) REFERENCES assembled_quiz (assembled_quiz_id) ON DELETE SET NULL;
 
 ALTER TABLE title_definition ADD CONSTRAINT fk_title_definition_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
 -- Who authored the story, for attribution/moderation.
@@ -1282,18 +1268,17 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 --
 -- and unlink (DELETE FROM assembled_quiz_catalog ...) the mismatched rows by hand.
 
--- Custom grading rubric, per quiz: assembled_quiz.rating_prompt plus session_log.assembled_quiz_id.
--- An earlier iteration of this feature put the rubric on activity_type (per catalog) instead —
--- if your database still has that column, drop it as part of this same migration:
+-- Custom grading rubric, per catalog: activity_type.rating_prompt. An earlier iteration of this
+-- feature put the rubric on assembled_quiz (per quiz) instead — if your database still has that
+-- column (and session_log.assembled_quiz_id, added alongside it), drop both as part of this same
+-- migration:
 --
---   ALTER TABLE activity_type DROP COLUMN IF EXISTS rating_prompt;
---   ALTER TABLE assembled_quiz ADD COLUMN IF NOT EXISTS rating_prompt text;
---   ALTER TABLE session_log ADD COLUMN IF NOT EXISTS assembled_quiz_id uuid;
---   ALTER TABLE session_log ADD CONSTRAINT fk_session_log_assembled_quiz
---     FOREIGN KEY (assembled_quiz_id) REFERENCES assembled_quiz (assembled_quiz_id) ON DELETE SET NULL;
+--   ALTER TABLE activity_type ADD COLUMN IF NOT EXISTS rating_prompt text;
+--   ALTER TABLE assembled_quiz DROP COLUMN IF EXISTS rating_prompt;
+--   ALTER TABLE session_log DROP CONSTRAINT IF EXISTS fk_session_log_assembled_quiz;
+--   ALTER TABLE session_log DROP COLUMN IF EXISTS assembled_quiz_id;
 --
--- Additive only, no backfill possible for either new column: every existing quiz has no custom
--- rubric until an instructor sets one (buildRatingPrompt, lib/llm/promptUtils.ts, already falls
--- back to the built-in RATING_RUBRIC whenever it's null), and every existing session_log row has
--- no way to know in hindsight which quiz actually granted it access — both are exactly the
--- "unchanged behavior for pre-migration rows" state the null default already gives for free.
+-- Additive only, no backfill possible: every catalog created before this column existed has no
+-- custom rubric until an instructor sets one (buildRatingPrompt, lib/llm/promptUtils.ts, already
+-- falls back to the built-in RATING_RUBRIC whenever it's null) — exactly the "unchanged behavior
+-- for pre-migration rows" state the null default already gives for free.

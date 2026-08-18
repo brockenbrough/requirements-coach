@@ -33,11 +33,6 @@ export type AssembledQuizDetail = {
   courseId: string;
   courseName: string;
   gradingKind: GradingKind;
-  /** assembled_quiz.rating_prompt — this quiz's own grading rubric, replacing the built-in
-   *  RATING_RUBRIC for every llm-graded submission graded through it. null for an 'mcq' quiz, or
-   *  for an 'llm-graded' one that hasn't set one yet (never true for a freshly created quiz —
-   *  required at creation — only for one that predates this field). */
-  ratingPrompt: string | null;
 };
 
 export type QuizCatalogComposition = {
@@ -47,6 +42,10 @@ export type QuizCatalogComposition = {
   /** Which pool totalQuestions/activeCount are counted from — 'mcq' (question rows) or
    *  'llm-graded' (user_story rows). Both kinds support per-quiz exclusion. */
   gradingKind: GradingKind;
+  /** The catalog's own grading rubric (activity_type.rating_prompt) — null for 'mcq', or for an
+   *  'llm-graded' catalog that hasn't set one yet. Read-only here; edited from the catalog's own
+   *  detail page (lib/quizClient.ts's updateRatingPrompt), not this quiz-composition view. */
+  ratingPrompt: string | null;
   totalQuestions: number;
   excludedCount: number;
   activeCount: number;
@@ -129,10 +128,7 @@ export function loadAssembledQuizzes(token: string): Promise<ApiResult<{ quizzes
 /**
  * Composes a quiz from one or more catalogs for one of the caller's own courses
  * (POST /api/instructor/assembled-quizzes). gradingKind is required and locked forever once set —
- * see assembled_quiz.grading_kind's own comment in supabase/schema.sql. ratingPrompt is required
- * by the route when gradingKind is 'llm-graded' (the quiz's own grading rubric,
- * assembled_quiz.rating_prompt) — unlike gradingKind, it's editable afterward via
- * updateAssembledQuizRatingPrompt below.
+ * see assembled_quiz.grading_kind's own comment in supabase/schema.sql.
  */
 export type CreatedAssembledQuiz = {
   id: string;
@@ -140,7 +136,6 @@ export type CreatedAssembledQuiz = {
   description: string | null;
   courseId: string;
   gradingKind: GradingKind;
-  ratingPrompt: string | null;
 };
 
 export function createAssembledQuiz(
@@ -150,29 +145,10 @@ export function createAssembledQuiz(
     description?: string;
     courseId: string;
     gradingKind: GradingKind;
-    ratingPrompt?: string;
     catalogActivityTypes: string[];
   },
 ): Promise<ApiResult<{ quiz: CreatedAssembledQuiz }>> {
   return request<{ quiz: CreatedAssembledQuiz }>('/api/instructor/assembled-quizzes', postJson(input), token);
-}
-
-/**
- * Sets or revises an llm-graded quiz's grading rubric after creation
- * (PATCH /api/instructor/assembled-quizzes/{quizId}) — the follow-up to createAssembledQuiz's own
- * once-at-creation rubric, now editable any number of times. 400s (surfaced as `error`) for an
- * 'mcq' quiz, which has no rubric to configure.
- */
-export function updateAssembledQuizRatingPrompt(
-  token: string,
-  quizId: string,
-  ratingPrompt: string,
-): Promise<ApiResult<{ ratingPrompt: string }>> {
-  return request<{ ratingPrompt: string }>(quizPath(quizId), {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ratingPrompt }),
-  }, token);
 }
 
 function postJson(payload: unknown): RequestInit {

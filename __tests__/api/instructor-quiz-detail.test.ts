@@ -9,6 +9,7 @@ const h = vi.hoisted(() => {
     orders: [] as { table: string; column: string; ascending: boolean }[],
     filters: [] as { table: string; column: string; value: unknown }[],
     deletes: [] as { table: string; column: string; value: unknown }[],
+    updates: [] as { table: string; payload: unknown }[],
   };
 
   function makeBuilder(table: string, result: Result) {
@@ -18,6 +19,10 @@ const h = vi.hoisted(() => {
       select: () => builder,
       delete: () => {
         isDelete = true;
+        return builder;
+      },
+      update: (payload: unknown) => {
+        state.updates.push({ table, payload });
         return builder;
       },
       eq: (column: string, value: unknown) => {
@@ -63,7 +68,7 @@ vi.mock('../../lib/supabase', () => ({
   }),
 }));
 
-import { DELETE, GET } from '../../app/api/instructor/quizzes/[activityType]/route';
+import { DELETE, GET, PATCH } from '../../app/api/instructor/quizzes/[activityType]/route';
 
 function queueRole(role: string) {
   queue('user', { data: { role }, error: null });
@@ -75,6 +80,7 @@ function quizRow(overrides: Partial<Record<string, unknown>> = {}) {
     quiz_name: 'Identify Weak User Stories',
     description: null,
     grading_kind: 'mcq',
+    rating_prompt: null,
     creator_id: null,
     creator: null,
     ...overrides,
@@ -108,12 +114,27 @@ function delReq(activityType = 'IDENTIFY_WEAK_USER_STORIES', token: string | nul
   );
 }
 
+function patchReq(body: unknown, activityType = 'IDENTIFY_WEAK_USER_STORIES', token: string | null = 'valid-token') {
+  return PATCH(
+    new Request(`http://localhost/api/instructor/quizzes/${activityType}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+    }),
+    { params: { activityType } },
+  );
+}
+
 beforeEach(() => {
   h.state.queues = {};
   h.state.tables = [];
   h.state.orders = [];
   h.state.filters = [];
   h.state.deletes = [];
+  h.state.updates = [];
 });
 
 describe('GET /api/instructor/quizzes/[activityType]', () => {
@@ -169,6 +190,7 @@ describe('GET /api/instructor/quizzes/[activityType]', () => {
       description: null,
       authorName: 'Ada Brockenbrough',
       gradingKind: 'mcq',
+      ratingPrompt: null,
     });
 
     expect(body.questions).toHaveLength(2);
@@ -296,6 +318,107 @@ describe('GET /api/instructor/quizzes/[activityType] — llm-graded catalogs', (
     queue('user_story', { data: null, error: { message: 'DB down' } });
 
     const res = await req('WRITE_ACCEPTANCE_CRITERIA');
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe('DB down');
+  });
+});
+
+describe('PATCH /api/instructor/quizzes/[activityType]', () => {
+  it('returns 401 without a token', async () => {
+    const res = await patchReq({ ratingPrompt: 'New rubric.' }, 'IDENTIFY_WEAK_USER_STORIES', null);
+    expect(res.status).toBe(401);
+    expect(h.state.tables).toEqual([]);
+  });
+
+  it('returns 403 with an empty body when the caller is a student', async () => {
+    queueRole('student');
+    const res = await patchReq({ ratingPrompt: 'New rubric.' });
+    expect(res.status).toBe(403);
+    expect(await res.text()).toBe('');
+    expect(h.state.tables).not.toContain('activity_type');
+  });
+
+  it('returns 404 when the activity type matches no catalog', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: null, error: null });
+
+    const res = await patchReq({ ratingPrompt: 'New rubric.' }, 'NOT_REAL');
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error).toBe('Catalog not found.');
+    expect(h.state.updates).toEqual([]);
+  });
+
+  it('returns 403 with an empty body when the catalog was created by another instructor', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'instructor-2' }), error: null });
+
+    const res = await patchReq({ ratingPrompt: 'New rubric.' });
+    expect(res.status).toBe(403);
+    expect(await res.text()).toBe('');
+    expect(h.state.updates).toEqual([]);
+  });
+
+  it('returns 400 when the catalog is mcq (no rubric to set)', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ creator_id: 'instructor-1' }), error: null });
+
+    const res = await patchReq({ ratingPrompt: 'New rubric.' });
+    expect(res.status).toBe(400);
+    expect(h.state.updates).toEqual([]);
+  });
+
+  it('returns 400 when ratingPrompt is missing', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'instructor-1' }), error: null });
+
+    const res = await patchReq({});
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/ratingPrompt/);
+    expect(h.state.updates).toEqual([]);
+  });
+
+  it('returns 400 when ratingPrompt is blank', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'instructor-1' }), error: null });
+
+    const res = await patchReq({ ratingPrompt: '   ' });
+    expect(res.status).toBe(400);
+    expect(h.state.updates).toEqual([]);
+  });
+
+  it('returns 400 when ratingPrompt exceeds the length cap', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'instructor-1' }), error: null });
+
+    const res = await patchReq({ ratingPrompt: 'A'.repeat(4001) });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/4000/);
+    expect(h.state.updates).toEqual([]);
+  });
+
+  it('trims ratingPrompt and saves it, returning the saved value', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'instructor-1' }), error: null });
+    queue('activity_type', { data: { rating_prompt: 'Trimmed rubric.' }, error: null }); // update
+
+    const res = await patchReq({ ratingPrompt: '  Trimmed rubric.  ' });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ ratingPrompt: 'Trimmed rubric.' });
+
+    expect(h.state.updates).toContainEqual({ table: 'activity_type', payload: { rating_prompt: 'Trimmed rubric.' } });
+  });
+
+  it('returns 500 when the update fails', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'instructor-1' }), error: null });
+    queue('activity_type', { data: null, error: { message: 'DB down' } }); // update
+
+    const res = await patchReq({ ratingPrompt: 'New rubric.' });
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error).toBe('DB down');

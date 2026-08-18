@@ -18,14 +18,13 @@ import {
   removeExtraQuestionFromQuiz,
   removeExtraUserStoryFromQuiz,
   unlinkCatalogFromQuiz,
-  updateAssembledQuizRatingPrompt,
   type AssembledQuizDetail,
   type QuizCatalogComposition,
   type QuizExtraQuestionSummary,
   type QuizExtraUserStorySummary,
   type QuizLevelCoverage,
 } from '../../../../lib/assembledQuizClient';
-import { loadQuizzes, type QuizSummary } from '../../../../lib/quizClient';
+import { loadQuizzes, updateRatingPrompt, type QuizSummary } from '../../../../lib/quizClient';
 import type { ActivityType } from '../../../../lib/activityTypes';
 import type { QuizQuestion } from '../../../../lib/quizQuestionTypes';
 import type { UserStoryDraft } from '../../../../lib/llmActivityClient';
@@ -49,12 +48,12 @@ const LEVEL_LABEL: Record<1 | 2 | 3, string> = { 1: 'Easy', 2: 'Medium', 3: 'Har
  * catalog in the context of this quiz" view (requirement 3) where individual questions get
  * excluded/included.
  *
- * For an llm-graded quiz, a "Grading Rubric" section (below "From catalogs") shows this quiz's own
- * assembled_quiz.rating_prompt with a "Set rubric"/"Edit rubric" button, opening
- * components/RatingPromptModal.tsx in "edit" mode (PATCH /api/instructor/assembled-quizzes/{quizId}).
- * One control for the whole quiz, not per catalog — unlike the composition below it, the rubric is
- * a property of the quiz itself, not of any one of the catalogs it draws from (see that column's
- * own comment in supabase/schema.sql for why it lives here rather than on activity_type).
+ * For an llm-graded quiz, a "Grading Rubrics" section (below "From catalogs") shows one row per
+ * linked catalog with its own activity_type.rating_prompt and a "Set rubric"/"Edit rubric" button,
+ * opening components/RatingPromptModal.tsx in "edit" mode (PATCH
+ * /api/instructor/quizzes/{activityType}). Per catalog, not per quiz — the rubric is a property of
+ * the catalog itself, not of any one quiz that composes it, since more than one quiz can compose
+ * the same catalog (see activity_type.rating_prompt's own comment in supabase/schema.sql).
  */
 export default function AssembledQuizDetailPage({ params }: { params: { quizId: string } }) {
   const { token, loading, authorized } = useRequireRole('instructor');
@@ -76,7 +75,7 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
   const [addingCatalog, setAddingCatalog] = useState(false);
   const [addError, setAddError] = useState('');
   const [catalogToRemove, setCatalogToRemove] = useState<QuizCatalogComposition | null>(null);
-  const [ratingPromptModalOpen, setRatingPromptModalOpen] = useState(false);
+  const [ratingPromptTarget, setRatingPromptTarget] = useState<QuizCatalogComposition | null>(null);
   const [showDeleteQuiz, setShowDeleteQuiz] = useState(false);
   const [showAddQuestionsModal, setShowAddQuestionsModal] = useState(false);
   const [showCreateItemModal, setShowCreateItemModal] = useState(false);
@@ -170,6 +169,7 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
         // added.gradingKind/questionCount already account for the catalog's kind (lib/quizClient.ts's
         // QuizSummary — questionCount is prompts for llm-graded, questions for mcq).
         gradingKind: added?.gradingKind ?? 'mcq',
+        ratingPrompt: null,
         totalQuestions: added?.questionCount ?? 0,
         excludedCount: 0,
         activeCount: added?.questionCount ?? 0,
@@ -180,14 +180,19 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
     setRetryCount((count) => count + 1); // re-fetch level coverage, which the optimistic insert above can't compute correctly
   }
 
-  async function handleSaveQuizRatingPrompt(value: string): Promise<{ ok: true } | { ok: false; error: string }> {
-    if (!token) return { ok: false, error: 'Your session has expired. Please sign in again.' };
+  async function handleSaveCatalogRatingPrompt(value: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (!token || !ratingPromptTarget) return { ok: false, error: 'Your session has expired. Please sign in again.' };
 
-    const result = await updateAssembledQuizRatingPrompt(token, params.quizId, value);
+    const result = await updateRatingPrompt(token, ratingPromptTarget.activityType, value);
     if (!result.ok) return { ok: false, error: result.error };
 
-    setQuiz((current) => (current ? { ...current, ratingPrompt: result.data.ratingPrompt } : current));
-    setRatingPromptModalOpen(false);
+    const activityType = ratingPromptTarget.activityType;
+    setCatalogs((current) =>
+      (current ?? []).map((catalog) =>
+        catalog.activityType === activityType ? { ...catalog, ratingPrompt: result.data.ratingPrompt } : catalog,
+      ),
+    );
+    setRatingPromptTarget(null);
     showToast('Grading rubric updated.');
 
     return { ok: true };
@@ -389,28 +394,36 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
               )}
             </div>
 
-            {quiz.gradingKind === 'llm-graded' ? (
+            {quiz.gradingKind === 'llm-graded' && catalogs.length > 0 ? (
               <>
-                <p className="mb-3 text-xs font-extrabold uppercase tracking-wide text-gray-400">Grading Rubric</p>
+                <p className="mb-3 text-xs font-extrabold uppercase tracking-wide text-gray-400">Grading Rubrics</p>
                 <p className="mb-4 text-xs font-semibold text-gray-500">
-                  Every submission graded through this quiz is scored against this rubric. Changing it only affects
-                  submissions graded afterward.
+                  Each catalog's own grading rubric — a submission is scored against whichever catalog its prompt
+                  came from. Changing one only affects submissions graded afterward.
                 </p>
-                <div className="mb-6 flex flex-wrap items-start justify-between gap-3 rounded-brand-lg border border-gray-100 bg-gray-50 p-4">
-                  <div className="min-w-0 flex-1">
-                    {quiz.ratingPrompt ? (
-                      <p className="whitespace-pre-wrap text-sm font-medium text-gray-600">{quiz.ratingPrompt}</p>
-                    ) : (
-                      <p className="text-sm font-medium text-gray-400">Using the built-in default rubric.</p>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setRatingPromptModalOpen(true)}
-                    className="flex-none rounded-full border border-gray-300 bg-white px-4 py-1.5 text-xs font-extrabold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple"
-                  >
-                    {quiz.ratingPrompt ? 'Edit rubric' : 'Set rubric'}
-                  </button>
+                <div className="mb-6 space-y-3">
+                  {catalogs.map((catalog) => (
+                    <div
+                      key={catalog.activityType}
+                      className="flex flex-wrap items-start justify-between gap-3 rounded-brand-lg border border-gray-100 bg-gray-50 p-4"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="mb-1 text-xs font-extrabold text-gray-500">{catalog.name}</p>
+                        {catalog.ratingPrompt ? (
+                          <p className="whitespace-pre-wrap text-sm font-medium text-gray-600">{catalog.ratingPrompt}</p>
+                        ) : (
+                          <p className="text-sm font-medium text-gray-400">Using the built-in default rubric.</p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setRatingPromptTarget(catalog)}
+                        className="flex-none rounded-full border border-gray-300 bg-white px-4 py-1.5 text-xs font-extrabold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple"
+                      >
+                        {catalog.ratingPrompt ? 'Edit rubric' : 'Set rubric'}
+                      </button>
+                    </div>
+                  ))}
                 </div>
               </>
             ) : null}
@@ -602,12 +615,12 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
         />
       ) : null}
 
-      {ratingPromptModalOpen ? (
+      {ratingPromptTarget ? (
         <RatingPromptModal
           mode="edit"
-          initialValue={quiz?.ratingPrompt ?? ''}
-          onCancel={() => setRatingPromptModalOpen(false)}
-          onSave={handleSaveQuizRatingPrompt}
+          initialValue={ratingPromptTarget.ratingPrompt ?? ''}
+          onCancel={() => setRatingPromptTarget(null)}
+          onSave={handleSaveCatalogRatingPrompt}
         />
       ) : null}
 
