@@ -11,7 +11,13 @@ import {
 } from "../../../../../../lib/llmActivityQueries";
 import type { SupabaseClient } from "../../../../../../lib/sessionQueries";
 
-type UserStoryRow = { user_story_id: string; story_text: string; creator_id: string; difficulty_level: 1 | 2 | 3 };
+type UserStoryRow = {
+  user_story_id: string;
+  story_text: string;
+  creator_id: string;
+  difficulty_level: 1 | 2 | 3;
+  catalog: { rating_prompt: string | null } | null;
+};
 type LLMConfigRow = { provider: string; api_key: string; model: string };
 type SessionRow = { session_id: string; status: string; cumulative_score: number; max_score: number };
 
@@ -49,6 +55,10 @@ function getToken(request: Request): string | null {
  *     rejected.
  *   - After grading, checks whether every story is now answered. If so, marks the session
  *     completed and returns sessionCompleted: true with the totals.
+ *
+ * Grading rubric: the LLM prompt substitutes the story's own catalog's custom rating_prompt
+ * (activity_type.rating_prompt) for the built-in RATING_RUBRIC (lib/llm/promptUtils.ts) whenever
+ * one is set — read via the catalog embed on the user_story fetch below.
  */
 export async function POST(request: Request, { params }: { params: { activityType: string } }) {
   const token = getToken(request);
@@ -121,9 +131,12 @@ export async function POST(request: Request, { params }: { params: { activityTyp
 
   if (sessionError) return Response.json({ error: sessionError.message }, { status: 500 });
   if (!session) return Response.json({ error: "Session not found." }, { status: 404 });
-  if ((session as SessionRow).status !== "in-progress") {
+
+  const sessionRow = session as SessionRow;
+
+  if (sessionRow.status !== "in-progress") {
     return Response.json(
-      { error: `Session is ${(session as SessionRow).status}.`, session },
+      { error: `Session is ${sessionRow.status}.`, session },
       { status: 409 },
     );
   }
@@ -159,14 +172,15 @@ export async function POST(request: Request, { params }: { params: { activityTyp
 
   const { data: story, error: storyError } = await supabase
     .from("user_story")
-    .select("user_story_id, story_text, creator_id, difficulty_level")
+    .select("user_story_id, story_text, creator_id, difficulty_level, catalog:activity_type(rating_prompt)")
     .eq("user_story_id", userStoryId)
     .maybeSingle();
 
   if (storyError) return Response.json({ error: storyError.message }, { status: 500 });
   if (!story) return Response.json({ error: "User story not found." }, { status: 404 });
 
-  const creatorId = (story as UserStoryRow).creator_id;
+  const storyRow = story as unknown as UserStoryRow;
+  const creatorId = storyRow.creator_id;
   if (!creatorId)
     return Response.json(
       { error: "The instructor who created this prompt has not configured an LLM provider." },
@@ -216,10 +230,7 @@ export async function POST(request: Request, { params }: { params: { activityTyp
 
   let rating;
   try {
-    rating = await provider.rateAcceptanceCriteria(
-      (story as UserStoryRow).story_text,
-      submittedText,
-    );
+    rating = await provider.rateAcceptanceCriteria(storyRow.story_text, submittedText, storyRow.catalog?.rating_prompt);
   } catch (err) {
     const message = err instanceof Error ? err.message : "The LLM provider request failed.";
     return Response.json({ error: message }, { status: 502 });
@@ -231,7 +242,7 @@ export async function POST(request: Request, { params }: { params: { activityTyp
   // a Medium (level 2) prompt rated 7/10 earns round(7/10 * 40) = 28 points. Stored separately
   // from llm_score so the raw rating keeps driving feedback/statistics unchanged — see
   // submission.awarded_score's own comment in supabase/schema.sql.
-  const awardedScore = awardedScoreForRating(rating.score, (story as UserStoryRow).difficulty_level);
+  const awardedScore = awardedScoreForRating(rating.score, storyRow.difficulty_level);
 
   const { error: updateError } = await supabase
     .from("submission")

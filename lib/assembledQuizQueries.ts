@@ -531,6 +531,10 @@ export type QuizCatalogComposition = {
   /** Which pool totalQuestions/activeCount are counted from — question rows for 'mcq', user_story
    *  rows for 'llm-graded'. A catalog only ever fills one pool, same as QuizSummary's own field. */
   gradingKind: GradingKind;
+  /** The catalog's own grading rubric (activity_type.rating_prompt) — null for 'mcq', or for an
+   *  'llm-graded' catalog that hasn't set one yet. Read-only here; edited from the catalog's own
+   *  detail page (PATCH /api/instructor/quizzes/{activityType}), not this quiz-composition view. */
+  ratingPrompt: string | null;
   totalQuestions: number;
   excludedCount: number;
   activeCount: number;
@@ -553,7 +557,7 @@ function buildLevelCoverage(
 
 type LinkedCatalogRow = {
   activity_type: string;
-  catalog: { quiz_name: string; description: string | null; grading_kind: string } | null;
+  catalog: { quiz_name: string; description: string | null; grading_kind: string; rating_prompt: string | null } | null;
 };
 type PoolQuestionRow = { question_id: string; activity_type: string; difficulty_level: number };
 type PoolUserStoryRow = { user_story_id: string; activity_type: string; difficulty_level: number };
@@ -648,7 +652,7 @@ export async function getQuizComposition(
 ): Promise<GetQuizCompositionResult> {
   const { data: linkRows, error: linkError } = await supabase
     .from('assembled_quiz_catalog')
-    .select('activity_type, catalog:activity_type(quiz_name, description, grading_kind)')
+    .select('activity_type, catalog:activity_type(quiz_name, description, grading_kind, rating_prompt)')
     .eq('assembled_quiz_id', quizId);
 
   if (linkError) return compositionFailure(linkError);
@@ -706,6 +710,7 @@ export async function getQuizComposition(
           name: link.catalog?.quiz_name ?? link.activity_type,
           description: link.catalog?.description ?? null,
           gradingKind,
+          ratingPrompt: link.catalog?.rating_prompt ?? null,
           totalQuestions: catalogStories.length,
           excludedCount,
           activeCount: catalogStories.length - excludedCount,
@@ -720,6 +725,7 @@ export async function getQuizComposition(
         name: link.catalog?.quiz_name ?? link.activity_type,
         description: link.catalog?.description ?? null,
         gradingKind,
+        ratingPrompt: null,
         totalQuestions: catalogQuestions.length,
         excludedCount,
         activeCount: catalogQuestions.length - excludedCount,

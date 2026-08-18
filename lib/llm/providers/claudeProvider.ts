@@ -16,13 +16,17 @@ export class ClaudeProvider implements LLMProvider {
     this.model = model?.trim() || DEFAULT_MODEL;
   }
 
-  async rateAcceptanceCriteria(userStory: string, submittedText: string): Promise<LLMRatingResult> {
+  async rateAcceptanceCriteria(
+    userStory: string,
+    submittedText: string,
+    customRubric?: string | null,
+  ): Promise<LLMRatingResult> {
     const response = await this.client.messages.create({
       model: this.model,
       max_tokens: 1024,
       thinking: { type: 'disabled' },
       output_config: { effort: 'low', format: { type: 'json_schema', schema: RATING_JSON_SCHEMA } },
-      messages: [{ role: 'user', content: buildRatingPrompt(userStory, submittedText) }],
+      messages: [{ role: 'user', content: buildRatingPrompt(userStory, submittedText, customRubric) }],
     });
 
     const textBlock = response.content.find((block) => block.type === 'text');

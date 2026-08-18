@@ -4,7 +4,13 @@ export type LLMRatingResult = {
 };
 
 export interface LLMProvider {
-  rateAcceptanceCriteria(userStory: string, submittedText: string): Promise<LLMRatingResult>;
+  // customRubric is a catalog's own activity_type.rating_prompt, forwarded straight to
+  // buildRatingPrompt — see its own doc comment (lib/llm/promptUtils.ts) for the fallback rule.
+  rateAcceptanceCriteria(
+    userStory: string,
+    submittedText: string,
+    customRubric?: string | null,
+  ): Promise<LLMRatingResult>;
 }
 
 // The set of providers an instructor can configure (instructor_llm_config.provider). Kept in one

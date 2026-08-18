@@ -25,7 +25,11 @@ export type QuizSummary = {
   quizCount: number;
 };
 
-export type QuizMeta = Omit<QuizSummary, 'questionCount' | 'quizCount'>;
+export type QuizMeta = Omit<QuizSummary, 'questionCount' | 'quizCount'> & {
+  /** The catalog's own custom grading rubric (activity_type.rating_prompt) — only ever meaningful
+   *  for an llm-graded catalog; null for mcq or an llm-graded catalog that hasn't set one. */
+  ratingPrompt: string | null;
+};
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number; error: string };
 
@@ -66,12 +70,18 @@ export function loadQuizzes(token: string): Promise<ApiResult<{ quizzes: QuizSum
  * GitHub #379: gradingKind is required here rather than optional-with-a-default, which is the
  * compile-time half of "creation cannot proceed without this choice" — the route enforces the
  * runtime half. It cannot be changed after creation, so there is no update counterpart.
+ *
+ * GitHub #379 follow-up: ratingPrompt is required by the route (not this type) when gradingKind is
+ * 'llm-graded' — an instructor must set a catalog's grading rubric at creation time, same "locked
+ * choice up front" reasoning as gradingKind itself, though unlike gradingKind the rubric text can
+ * still be edited afterward (updateRatingPrompt below).
  */
 export type CreatedQuiz = {
   activityType: string;
   name: string;
   description: string | null;
   gradingKind: GradingKind;
+  ratingPrompt: string | null;
   /** The ladder as authored, only the levels that got a title — [] when none were given. */
   titles: StoredTitleRung[];
 };
@@ -82,6 +92,7 @@ export function createQuiz(
     name: string;
     gradingKind: GradingKind;
     description?: string;
+    ratingPrompt?: string;
     /** Optional mastery title ladder. Omitted or empty creates a catalog with no titles, which is
      *  what every catalog created before this existed looks like. */
     titles?: TitleLadderRungInput[];
@@ -119,6 +130,27 @@ export function loadQuizDetail(token: string, activityType: string): Promise<Api
   return request<QuizDetail>(
     `/api/instructor/quizzes/${encodeURIComponent(activityType)}`,
     { method: 'GET' },
+    token,
+  );
+}
+
+/**
+ * Updates an llm-graded catalog's own grading rubric (PATCH /api/instructor/quizzes/{activityType},
+ * GitHub #379 follow-up). 400s (surfaced as `error`) for an mcq catalog, since the field is only
+ * ever meaningful for llm-graded ones.
+ */
+export function updateRatingPrompt(
+  token: string,
+  activityType: string,
+  ratingPrompt: string,
+): Promise<ApiResult<{ ratingPrompt: string | null }>> {
+  return request<{ ratingPrompt: string | null }>(
+    `/api/instructor/quizzes/${encodeURIComponent(activityType)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ratingPrompt }),
+    },
     token,
   );
 }

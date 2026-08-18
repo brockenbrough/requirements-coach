@@ -99,6 +99,7 @@ const STORY = {
   story_text: 'As a user, I want to log in with email.',
   creator_id: 'instructor-1',
   difficulty_level: 1,
+  catalog: { rating_prompt: null },
 };
 
 const CONFIG = { provider: 'CLAUDE', api_key: 'sk-test', model: 'claude-opus-5' };
@@ -410,5 +411,27 @@ describe('POST /api/activities/[activityType]/llm/submissions', () => {
     )!.payload as Record<string, unknown>;
     expect(sessionCompletion).toMatchObject({ status: 'completed' });
     expect(sessionCompletion.ended_at).toBeTruthy();
+  });
+
+  // Custom rubric resolution (activity_type.rating_prompt via the story's catalog embed) — the
+  // route only has to pass it through to the provider. The RATING_RUBRIC-vs-custom-rubric
+  // substitution itself is buildRatingPrompt's own unit-test responsibility
+  // (__tests__/lib/promptUtils.test.ts).
+  it("passes the catalog's custom rating_prompt through to the LLM provider", async () => {
+    queueUpToLLM({ story: { ...STORY, catalog: { rating_prompt: 'Custom rubric text.' } } });
+    queueSuccessfulWrite(submissionRow('story-1'));
+
+    await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
+
+    expect(rateAcceptanceCriteria).toHaveBeenCalledWith(STORY.story_text, 'x', 'Custom rubric text.');
+  });
+
+  it("passes no custom rubric when the catalog's rating_prompt is null", async () => {
+    queueUpToLLM(); // default STORY: catalog.rating_prompt is null
+    queueSuccessfulWrite(submissionRow('story-1'));
+
+    await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
+
+    expect(rateAcceptanceCriteria).toHaveBeenCalledWith(STORY.story_text, 'x', null);
   });
 });

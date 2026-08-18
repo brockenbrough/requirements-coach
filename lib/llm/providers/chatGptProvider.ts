@@ -11,7 +11,11 @@ export class ChatGptProvider implements LLMProvider {
     this.model = model?.trim() || DEFAULT_MODEL;
   }
 
-  async rateAcceptanceCriteria(userStory: string, submittedText: string): Promise<LLMRatingResult> {
+  async rateAcceptanceCriteria(
+    userStory: string,
+    submittedText: string,
+    customRubric?: string | null,
+  ): Promise<LLMRatingResult> {
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -20,7 +24,7 @@ export class ChatGptProvider implements LLMProvider {
       },
       body: JSON.stringify({
         model: this.model,
-        messages: [{ role: 'user', content: buildRatingPrompt(userStory, submittedText) }],
+        messages: [{ role: 'user', content: buildRatingPrompt(userStory, submittedText, customRubric) }],
         response_format: {
           type: 'json_schema',
           json_schema: { name: 'acceptance_criteria_rating', schema: RATING_JSON_SCHEMA },

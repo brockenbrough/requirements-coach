@@ -32,6 +32,7 @@ type QuizRow = {
   quiz_name: string;
   description: string | null;
   grading_kind: string;
+  rating_prompt: string | null;
   creator_id: string | null;
   creator: { first_name: string | null; last_name: string | null; username: string | null } | null;
   question: { count: number }[] | null;
@@ -104,7 +105,12 @@ export async function listQuizzesWithAuthorAndCount(supabase: SupabaseClient, in
   return { quizzes, error: null };
 }
 
-export type QuizMeta = Omit<QuizSummary, 'questionCount' | 'quizCount'>;
+export type QuizMeta = Omit<QuizSummary, 'questionCount' | 'quizCount'> & {
+  /** GitHub #379 follow-up: the catalog's own custom grading rubric — see the header comment on
+   *  activity_type.rating_prompt in supabase/schema.sql. Only ever meaningful for an llm-graded
+   *  catalog; null for mcq (and for any llm-graded catalog that hasn't set one). */
+  ratingPrompt: string | null;
+};
 
 /**
  * GitHub #359: one catalog's own metadata (name/description/author), for the catalog detail page
@@ -124,7 +130,7 @@ export async function getQuizByActivityType(supabase: SupabaseClient, activityTy
   const { data, error } = await supabase
     .from('activity_type')
     .select(
-      'activity_type, quiz_name, description, grading_kind, creator_id, creator:creator_id(first_name, last_name, username)',
+      'activity_type, quiz_name, description, grading_kind, rating_prompt, creator_id, creator:creator_id(first_name, last_name, username)',
     )
     .eq('activity_type', activityType)
     .maybeSingle();
@@ -140,9 +146,27 @@ export async function getQuizByActivityType(supabase: SupabaseClient, activityTy
     description: row.description,
     authorName: authorNameOf(row),
     gradingKind: gradingKindOf(row),
+    ratingPrompt: row.rating_prompt,
   };
 
   return { quiz, creatorId: row.creator_id, error: null };
+}
+
+/**
+ * GitHub #379 follow-up: updates a catalog's own grading rubric (activity_type.rating_prompt) —
+ * the write behind PATCH /api/instructor/quizzes/{activityType}. Returns the saved value (not the
+ * whole row) since that's all the route needs to hand back.
+ */
+export async function updateCatalogRatingPrompt(supabase: SupabaseClient, activityType: string, ratingPrompt: string) {
+  const { data, error } = await supabase
+    .from('activity_type')
+    .update({ rating_prompt: ratingPrompt })
+    .eq('activity_type', activityType)
+    .select('rating_prompt')
+    .maybeSingle();
+
+  if (error) return { ratingPrompt: null, error };
+  return { ratingPrompt: (data as { rating_prompt: string } | null)?.rating_prompt ?? null, error: null };
 }
 
 /**

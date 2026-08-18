@@ -119,9 +119,9 @@ export async function GET(request: Request, { params }: { params: { quizId: stri
  * No student session ever references an assembled_quiz — GitHub #360 deliberately stopped short
  * of a session/play route for one (session_log.activity_type only ever points at a catalog, and
  * there is no assembled_quiz_id column anywhere in session_log), so there is no history to lose
- * and nothing to soft-delete: a plain hard delete is complete and correct as of today. If a
- * future issue wires up real student attempts against an assembled quiz, that issue is what needs
- * to revisit this — not this one.
+ * and nothing to soft-delete: a plain hard delete is complete and correct. If a future issue wires
+ * up real student attempts against an assembled quiz, that issue is what needs to revisit this
+ * delete's behavior, not this one.
  *
  * Returns 200 with { quizId }.
  */

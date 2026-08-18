@@ -11,8 +11,13 @@ import type { CatalogUserStory } from '../lib/llmActivityTypes';
  * block is existing, working code and leaving it untouched is the cheapest guarantee that adding
  * the LLM-graded branch can't regress the MCQ one.
  *
- * There is no answer-options list and no explanation: an LLM-graded prompt is the whole item, and
- * the grading rubric lives in lib/llm/promptUtils.ts rather than per prompt.
+ * There is no answer-options list and no explanation: an LLM-graded prompt is the whole item. The
+ * grading rubric is a property of the catalog itself (activity_type.rating_prompt), not any one
+ * prompt, so it isn't shown on individual prompt cards — it has its own "Grading Rubric" section on
+ * the catalog's detail page (app/instructor/quizzes/[activityType]/page.tsx, above the level
+ * filter), with a "Set rubric"/"Edit rubric" button opening components/RatingPromptModal.tsx in
+ * "edit" mode, plus the same view/edit per catalog row in the "Grading Rubrics" section of any
+ * assembled-quiz that composes it (app/instructor/assembled-quizzes/[quizId]/page.tsx).
  */
 export function CatalogPromptCard({
   prompt,

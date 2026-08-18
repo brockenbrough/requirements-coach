@@ -90,6 +90,7 @@ function activityTypeRow(overrides: Partial<Record<string, unknown>> = {}) {
     quiz_name: 'My Custom Quiz',
     description: null,
     grading_kind: 'mcq',
+    rating_prompt: null,
     ...overrides,
   };
 }
@@ -165,16 +166,84 @@ describe('POST /api/activities/types', () => {
 
   it('stores llm-graded when that kind is chosen, and reports it back', async () => {
     queueRole('instructor');
-    queue('activity_type', { data: activityTypeRow({ grading_kind: 'llm-graded' }), error: null });
+    queue('activity_type', {
+      data: activityTypeRow({ grading_kind: 'llm-graded', rating_prompt: 'Score strictness: high.' }),
+      error: null,
+    });
 
-    const res = await POST(makeRequest(validBody({ gradingKind: 'llm-graded' })));
+    const res = await POST(
+      makeRequest(validBody({ gradingKind: 'llm-graded', ratingPrompt: 'Score strictness: high.' })),
+    );
     expect(res.status).toBe(201);
 
     const insert = h.state.inserts.find((i) => i.table === 'activity_type');
-    expect(insert?.payload).toMatchObject({ grading_kind: 'llm-graded' });
+    expect(insert?.payload).toMatchObject({ grading_kind: 'llm-graded', rating_prompt: 'Score strictness: high.' });
 
     const body = await res.json();
     expect(body.quiz.gradingKind).toBe('llm-graded');
+    expect(body.quiz.ratingPrompt).toBe('Score strictness: high.');
+  });
+
+  // GitHub #379 follow-up: the instructor must set the catalog's own grading rubric up front,
+  // since every submission against this catalog will be graded with it.
+  it('returns 400 when ratingPrompt is missing for an llm-graded catalog, without touching activity_type', async () => {
+    queueRole('instructor');
+    const res = await POST(makeRequest(validBody({ gradingKind: 'llm-graded' })));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/ratingPrompt/);
+    expect(h.state.tables).not.toContain('activity_type');
+  });
+
+  it('returns 400 when ratingPrompt is blank for an llm-graded catalog', async () => {
+    queueRole('instructor');
+    const res = await POST(makeRequest(validBody({ gradingKind: 'llm-graded', ratingPrompt: '   ' })));
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when ratingPrompt exceeds the length cap for an llm-graded catalog', async () => {
+    queueRole('instructor');
+    const res = await POST(
+      makeRequest(validBody({ gradingKind: 'llm-graded', ratingPrompt: 'A'.repeat(4001) })),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/4000/);
+  });
+
+  it('does not require ratingPrompt for an mcq catalog, and stores null', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: activityTypeRow(), error: null });
+
+    const res = await POST(makeRequest(validBody({ gradingKind: 'mcq' })));
+    expect(res.status).toBe(201);
+
+    const insert = h.state.inserts.find((i) => i.table === 'activity_type');
+    expect(insert?.payload).toMatchObject({ rating_prompt: null });
+  });
+
+  it('ignores a stray ratingPrompt sent for an mcq catalog', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: activityTypeRow(), error: null });
+
+    const res = await POST(makeRequest(validBody({ gradingKind: 'mcq', ratingPrompt: 'Ignored.' })));
+    expect(res.status).toBe(201);
+
+    const insert = h.state.inserts.find((i) => i.table === 'activity_type');
+    expect(insert?.payload).toMatchObject({ rating_prompt: null });
+  });
+
+  it('trims ratingPrompt before storing it for an llm-graded catalog', async () => {
+    queueRole('instructor');
+    queue('activity_type', {
+      data: activityTypeRow({ grading_kind: 'llm-graded', rating_prompt: 'Trimmed rubric.' }),
+      error: null,
+    });
+
+    await POST(makeRequest(validBody({ gradingKind: 'llm-graded', ratingPrompt: '  Trimmed rubric.  ' })));
+
+    const insert = h.state.inserts.find((i) => i.table === 'activity_type');
+    expect(insert?.payload).toMatchObject({ rating_prompt: 'Trimmed rubric.' });
   });
 
   it('returns 400 when name has no letters or numbers to derive a key from', async () => {
@@ -225,6 +294,7 @@ describe('POST /api/activities/types', () => {
       name: 'My Custom Quiz',
       description: 'A quiz about things',
       gradingKind: 'mcq',
+      ratingPrompt: null,
     });
   });
 
