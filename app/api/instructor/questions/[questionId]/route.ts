@@ -1,6 +1,7 @@
 import { getSupabaseClient } from '../../../../../lib/supabase';
 import { requireInstructor } from '../../../../../lib/instructorAuth';
 import { isActivityType } from '../../../../../lib/activityTypes';
+import { DEFAULT_QUESTION_MAX_SCORE, isPassing } from '../../../../../lib/sessionRules';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -172,21 +173,46 @@ export async function PATCH(request: Request, { params }: { params: { questionId
   return Response.json({ questionId, answerIds: answerInputs.map((a) => a.id) }, { status: 200 });
 }
 
+type UsageSessionRow = {
+  session_id: string;
+  user_id: string;
+  cumulative_score: number;
+  max_score: number;
+  status: string;
+};
+
 /**
- * DELETE /api/instructor/questions/{questionId} — removes a question and its answers from
- * whichever catalog (activity_type) it belongs to (GitHub #359). A question has exactly one
- * activity_type column, not a join table, so deleting it can never reach into a different
- * catalog — the isolation the catalog detail page's edit mode needs falls straight out of the
- * schema rather than needing route-level enforcement.
+ * DELETE /api/instructor/questions/{questionId}[?force=true] — removes a question and its
+ * answers from whichever catalog (activity_type) it belongs to (GitHub #359). A question has
+ * exactly one activity_type column, not a join table, so deleting it can never reach into a
+ * different catalog — the isolation the catalog detail page's edit mode needs falls straight out
+ * of the schema rather than needing route-level enforcement.
  *
- * A question that has already been served to a student (a session_to_question row exists for it
- * — which answered_question_log rows imply too, since a question is always assigned before it can
- * be answered) is refused with 409: question_to_answer/answered_question_log's FKs to answer and
- * question carry no ON DELETE clause (see the PATCH docblock above), so deleting the row out from
- * under a student's history would either fail at the database or, if attempted piecemeal, leave a
- * partially-deleted, unplayable question behind. Checking first avoids both.
+ * A question that has already been served to a student (a session_to_question row exists for it)
+ * used to be refused outright with 409. It no longer is: an instructor can delete it anyway by
+ * passing ?force=true, since question_to_answer/answered_question_log/session_to_question's FKs
+ * to answer and question carry no ON DELETE clause (see the PATCH docblock above) and would
+ * otherwise fail at the database. Without ?force=true the usage still 409s, but now with an
+ * `impact` payload (sessions/students/points affected) so the UI can show a real warning instead
+ * of a dead end — see components/DeleteQuestionModal.tsx.
  *
- * Returns 200 with { questionId } on success.
+ * Deleting with usage present rewinds the score, not just the row: every session that had this
+ * question assigned has its cumulative_score reduced by whatever this question contributed there
+ * (0 if it was assigned but never answered) and its max_score reduced by the question's own
+ * max_score, so a session's pass ratio stays a fair reflection of the questions it actually has
+ * left. A completed session's `passed` is recomputed from the new totals — a session sitting right
+ * at the pass line can flip to failed if the deleted question was one of the correct answers, same
+ * as it would have if that question had never been askable. `computeStudentScore` (lib/scoreQueries.ts)
+ * only ever reads session_log.cumulative_score, so this is the only write needed to make the
+ * points actually disappear from the student's score.
+ *
+ * daily_challenge_attempt rows referencing this question are cleaned up unconditionally (not
+ * gated by ?force=true) since that table isn't part of the usage warning — its own score never
+ * rolls into session_log/computeStudentScore — but its FKs to question/answer have no ON DELETE
+ * either, so leaving it alone would make the delete fail with an opaque database error for a
+ * question that happened to be drawn for someone's daily challenge.
+ *
+ * Returns 200 with { questionId, pointsRemoved } on success.
  */
 export async function DELETE(request: Request, { params }: { params: { questionId: string } }) {
   const supabase = getSupabaseClient();
@@ -203,32 +229,118 @@ export async function DELETE(request: Request, { params }: { params: { questionI
   }
 
   const { questionId } = params;
+  const force = new URL(request.url).searchParams.get('force') === 'true';
 
   const { data: question, error: questionFetchError } = await supabase
     .from('question')
-    .select('question_id, user_id')
+    .select('question_id, user_id, max_score')
     .eq('question_id', questionId)
     .maybeSingle();
 
   if (questionFetchError) return Response.json({ error: questionFetchError.message }, { status: 500 });
   if (!question) return Response.json({ error: 'Question not found.' }, { status: 404 });
 
-  if ((question as { user_id: string | null }).user_id !== guard.user_id) {
+  const questionRow = question as { user_id: string | null; max_score: number | null };
+  if (questionRow.user_id !== guard.user_id) {
     return Response.json({ error: 'You do not own this question.' }, { status: 403 });
   }
 
-  const { data: usage, error: usageError } = await supabase
+  const questionMaxScore = questionRow.max_score ?? DEFAULT_QUESTION_MAX_SCORE;
+
+  const { data: usageRows, error: usageError } = await supabase
     .from('session_to_question')
-    .select('session_to_question_id')
-    .eq('question_id', questionId)
-    .maybeSingle();
+    .select('session_id')
+    .eq('question_id', questionId);
 
   if (usageError) return Response.json({ error: usageError.message }, { status: 500 });
-  if (usage) {
-    return Response.json(
-      { error: 'This question has already been used in a student session and cannot be deleted.' },
-      { status: 409 },
-    );
+
+  const sessionIds = [...new Set(((usageRows ?? []) as { session_id: string }[]).map((row) => row.session_id))];
+
+  let pointsRemoved = 0;
+
+  if (sessionIds.length > 0) {
+    const { data: logs, error: logsError } = await supabase
+      .from('answered_question_log')
+      .select('session_id, score')
+      .eq('question_id', questionId);
+
+    if (logsError) return Response.json({ error: logsError.message }, { status: 500 });
+
+    const scoreBySession = new Map<string, number>();
+    for (const log of (logs ?? []) as { session_id: string; score: number }[]) {
+      scoreBySession.set(log.session_id, (scoreBySession.get(log.session_id) ?? 0) + log.score);
+    }
+    pointsRemoved = [...scoreBySession.values()].reduce((sum, value) => sum + value, 0);
+
+    const { data: sessionRows, error: sessionRowsError } = await supabase
+      .from('session_log')
+      .select('session_id, user_id, cumulative_score, max_score, status')
+      .in('session_id', sessionIds);
+
+    if (sessionRowsError) return Response.json({ error: sessionRowsError.message }, { status: 500 });
+
+    const affectedSessions = (sessionRows ?? []) as UsageSessionRow[];
+
+    if (!force) {
+      return Response.json(
+        {
+          error:
+            pointsRemoved > 0
+              ? 'One or more students have already answered this question. Deleting it will remove the points they earned.'
+              : 'This question is currently assigned to an in-progress session.',
+          impact: {
+            sessionsCount: sessionIds.length,
+            answeredSessionsCount: scoreBySession.size,
+            studentsAffectedCount: new Set(affectedSessions.map((row) => row.user_id)).size,
+            pointsAtRisk: pointsRemoved,
+          },
+        },
+        { status: 409 },
+      );
+    }
+
+    for (const row of affectedSessions) {
+      const scoreToRemove = scoreBySession.get(row.session_id) ?? 0;
+      const newCumulativeScore = Math.max(0, row.cumulative_score - scoreToRemove);
+      const newMaxScore = Math.max(0, row.max_score - questionMaxScore);
+
+      const updatePayload: Record<string, unknown> = {
+        cumulative_score: newCumulativeScore,
+        max_score: newMaxScore,
+      };
+      if (row.status === 'completed') {
+        updatePayload.passed = isPassing(newCumulativeScore, newMaxScore);
+      }
+
+      const { error: sessionUpdateError } = await supabase
+        .from('session_log')
+        .update(updatePayload)
+        .eq('session_id', row.session_id);
+
+      if (sessionUpdateError) return Response.json({ error: sessionUpdateError.message }, { status: 500 });
+    }
+  }
+
+  const { error: dailyChallengeDeleteError } = await supabase
+    .from('daily_challenge_attempt')
+    .delete()
+    .eq('question_id', questionId);
+  if (dailyChallengeDeleteError) return Response.json({ error: dailyChallengeDeleteError.message }, { status: 500 });
+
+  if (sessionIds.length > 0) {
+    const { error: answeredLogDeleteError } = await supabase
+      .from('answered_question_log')
+      .delete()
+      .eq('question_id', questionId);
+    if (answeredLogDeleteError) return Response.json({ error: answeredLogDeleteError.message }, { status: 500 });
+
+    const { error: sessionToQuestionDeleteError } = await supabase
+      .from('session_to_question')
+      .delete()
+      .eq('question_id', questionId);
+    if (sessionToQuestionDeleteError) {
+      return Response.json({ error: sessionToQuestionDeleteError.message }, { status: 500 });
+    }
   }
 
   const { data: links, error: linksError } = await supabase
@@ -251,5 +363,5 @@ export async function DELETE(request: Request, { params }: { params: { questionI
   const { error: questionDeleteError } = await supabase.from('question').delete().eq('question_id', questionId);
   if (questionDeleteError) return Response.json({ error: questionDeleteError.message }, { status: 500 });
 
-  return Response.json({ questionId }, { status: 200 });
+  return Response.json({ questionId, pointsRemoved }, { status: 200 });
 }

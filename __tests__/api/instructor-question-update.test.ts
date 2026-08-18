@@ -83,8 +83,8 @@ function queueValidActivityType(activityType = 'IDENTIFY_WEAK_USER_STORIES') {
   queue('activity_type', { data: { activity_type: activityType }, error: null });
 }
 
-function queueOwnedQuestion(userId = 'instructor-1') {
-  queue('question', { data: { question_id: 'q-1', user_id: userId }, error: null });
+function queueOwnedQuestion(userId = 'instructor-1', maxScore: number | null = null) {
+  queue('question', { data: { question_id: 'q-1', user_id: userId, max_score: maxScore }, error: null });
 }
 
 function queueExistingLinks(answerIds = ['a-1', 'a-2']) {
@@ -314,17 +314,28 @@ describe('PATCH /api/instructor/questions/[questionId]', () => {
   });
 });
 
-function deleteCall(token: string | null = 'valid-token', questionId = 'q-1') {
-  const request = new Request(`http://localhost/api/instructor/questions/${questionId}`, {
+function deleteCall(token: string | null = 'valid-token', questionId = 'q-1', force = false) {
+  const url = `http://localhost/api/instructor/questions/${questionId}${force ? '?force=true' : ''}`;
+  const request = new Request(url, {
     method: 'DELETE',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   return DELETE(request, { params: { questionId } });
 }
 
-/** No row means the question has never been assigned to a session (queueUsage(true) means it has). */
-function queueUsage(inUse: boolean) {
-  queue('session_to_question', { data: inUse ? { session_to_question_id: 1 } : null, error: null });
+/** Empty array means the question has never been assigned to a session. */
+function queueUsage(sessionIds: string[]) {
+  queue('session_to_question', { data: sessionIds.map((session_id) => ({ session_id })), error: null });
+}
+
+function queueAnsweredLogs(rows: { session_id: string; score: number }[]) {
+  queue('answered_question_log', { data: rows, error: null });
+}
+
+type SessionRow = { session_id: string; user_id: string; cumulative_score: number; max_score: number; status: string };
+
+function queueSessionRows(rows: SessionRow[]) {
+  queue('session_log', { data: rows, error: null });
 }
 
 describe('DELETE /api/instructor/questions/[questionId]', () => {
@@ -361,22 +372,88 @@ describe('DELETE /api/instructor/questions/[questionId]', () => {
     expect(h.state.tables).not.toContain('session_to_question');
   });
 
-  it('returns 409 when the question has already been used in a student session', async () => {
+  it('returns 409 with impact when the question is assigned but not yet answered', async () => {
     queueRole('instructor');
     queueOwnedQuestion();
-    queueUsage(true);
+    queueUsage(['s-1']);
+    queueAnsweredLogs([]);
+    queueSessionRows([{ session_id: 's-1', user_id: 'student-1', cumulative_score: 0, max_score: 100, status: 'in-progress' }]);
 
     const res = await deleteCall();
     const body = await res.json();
     expect(res.status).toBe(409);
-    expect(body.error).toBe('This question has already been used in a student session and cannot be deleted.');
+    expect(body.error).toBe('This question is currently assigned to an in-progress session.');
+    expect(body.impact).toEqual({
+      sessionsCount: 1,
+      answeredSessionsCount: 0,
+      studentsAffectedCount: 1,
+      pointsAtRisk: 0,
+    });
     expect(h.state.deletes).toHaveLength(0);
   });
 
-  it('deletes the question_to_answer links, the answers, and the question, in that order', async () => {
+  it('returns 409 with impact including points at risk when a student already answered it', async () => {
     queueRole('instructor');
     queueOwnedQuestion();
-    queueUsage(false);
+    queueUsage(['s-1', 's-2']);
+    queueAnsweredLogs([{ session_id: 's-1', score: 20 }]);
+    queueSessionRows([
+      { session_id: 's-1', user_id: 'student-1', cumulative_score: 60, max_score: 100, status: 'completed' },
+      { session_id: 's-2', user_id: 'student-2', cumulative_score: 0, max_score: 100, status: 'in-progress' },
+    ]);
+
+    const res = await deleteCall();
+    const body = await res.json();
+    expect(res.status).toBe(409);
+    expect(body.error).toBe(
+      'One or more students have already answered this question. Deleting it will remove the points they earned.',
+    );
+    expect(body.impact).toEqual({
+      sessionsCount: 2,
+      answeredSessionsCount: 1,
+      studentsAffectedCount: 2,
+      pointsAtRisk: 20,
+    });
+    expect(h.state.deletes).toHaveLength(0);
+  });
+
+  it('force=true rewinds the affected session score and deletes the question anyway', async () => {
+    queueRole('instructor');
+    queueOwnedQuestion('instructor-1', null); // max_score null -> falls back to DEFAULT_QUESTION_MAX_SCORE (25)
+    queueUsage(['s-1']);
+    queueAnsweredLogs([{ session_id: 's-1', score: 20 }]);
+    queueSessionRows([{ session_id: 's-1', user_id: 'student-1', cumulative_score: 60, max_score: 100, status: 'completed' }]);
+    queue('session_log', { data: null, error: null }); // session_log score-rewind update
+    queue('daily_challenge_attempt', { data: null, error: null }); // daily-challenge cleanup delete
+    queue('answered_question_log', { data: null, error: null }); // answered_question_log delete
+    queue('session_to_question', { data: null, error: null }); // session_to_question delete
+    queueExistingLinks(['a-1', 'a-2']);
+    queue('question_to_answer', { data: null, error: null }); // unlink delete
+    queue('answer', { data: null, error: null }); // answer delete
+    queue('question', { data: null, error: null }); // question delete
+
+    const res = await deleteCall('valid-token', 'q-1', true);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ questionId: 'q-1', pointsRemoved: 20 });
+
+    const sessionUpdate = h.state.updates.find((u) => u.table === 'session_log');
+    // 100 - 25 (DEFAULT_QUESTION_MAX_SCORE) = 75 max; 60 - 20 = 40 cumulative; 40 < 75 * 0.75, so passed flips to false.
+    expect(sessionUpdate?.payload).toEqual({ cumulative_score: 40, max_score: 75, passed: false });
+
+    expect(h.state.deletes).toContainEqual({ table: 'daily_challenge_attempt', column: 'question_id', value: 'q-1' });
+    expect(h.state.deletes).toContainEqual({ table: 'answered_question_log', column: 'question_id', value: 'q-1' });
+    expect(h.state.deletes).toContainEqual({ table: 'session_to_question', column: 'question_id', value: 'q-1' });
+    expect(h.state.deletes).toContainEqual({ table: 'question_to_answer', column: 'question_id', value: 'q-1' });
+    expect(h.state.deletes).toContainEqual({ table: 'answer', column: 'answer_id', value: ['a-1', 'a-2'] });
+    expect(h.state.deletes).toContainEqual({ table: 'question', column: 'question_id', value: 'q-1' });
+  });
+
+  it('deletes the question_to_answer links, the answers, and the question, in that order, when unused', async () => {
+    queueRole('instructor');
+    queueOwnedQuestion();
+    queueUsage([]);
+    queue('daily_challenge_attempt', { data: null, error: null }); // daily-challenge cleanup delete
     queueExistingLinks(['a-1', 'a-2']);
     queue('question_to_answer', { data: null, error: null }); // unlink delete
     queue('answer', { data: null, error: null }); // answer delete
@@ -385,8 +462,9 @@ describe('DELETE /api/instructor/questions/[questionId]', () => {
     const res = await deleteCall();
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ questionId: 'q-1' });
+    expect(body).toEqual({ questionId: 'q-1', pointsRemoved: 0 });
 
+    expect(h.state.deletes).toContainEqual({ table: 'daily_challenge_attempt', column: 'question_id', value: 'q-1' });
     expect(h.state.deletes).toContainEqual({ table: 'question_to_answer', column: 'question_id', value: 'q-1' });
     expect(h.state.deletes).toContainEqual({ table: 'answer', column: 'answer_id', value: ['a-1', 'a-2'] });
     expect(h.state.deletes).toContainEqual({ table: 'question', column: 'question_id', value: 'q-1' });

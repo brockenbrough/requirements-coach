@@ -1,17 +1,26 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { updateCourse, type CourseDetail, type CourseMeta } from '../lib/courseClient';
+import { CourseCoverPicker } from './CourseCoverPicker';
+import { updateCourse, type CourseMeta } from '../lib/courseClient';
 
 const FOCUSABLE_SELECTOR = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
 /**
- * GitHub #241 follow-up: edit-course-name popup, copied structurally from
- * components/QuestionFormModal.tsx (GitHub #120/#158) — same mount/unmount-is-open, focus-trap,
- * Escape-to-close, backdrop-click-to-close, and focus-return pattern, since that's the
- * established modal convention every popup in this project follows independently rather than
- * through a shared base component. Fully real (lib/courseClient.ts, REQ-DL-5) — no
- * enrollment-key field: the real course table has no such column.
+ * GitHub #241 follow-up, widened by #363 for the semester field: edit-course popup, copied
+ * structurally from components/QuestionFormModal.tsx (GitHub #120/#158) — same
+ * mount/unmount-is-open, focus-trap, Escape-to-close, backdrop-click-to-close, and focus-return
+ * pattern, since that's the established modal convention every popup in this project follows
+ * independently rather than through a shared base component. Fully real (lib/courseClient.ts,
+ * REQ-DL-5) — no enrollment-key field: the real course table has no such column.
+ *
+ * `course` only needs the fields this form actually edits (id/name/semester/coverImageUrl), not
+ * the full CourseDetail shape — components/CourseCard.tsx's kebab menu opens this with a
+ * CourseSummary in hand (no roster loaded there), and the course detail page's CourseDetail still
+ * satisfies this narrower type structurally.
+ *
+ * components/CourseCoverPicker.tsx (GitHub #363 follow-up) handles picking/uploading the cover;
+ * this form just carries its resolved value through to updateCourse like any other field.
  */
 export function EditCourseModal({
   course,
@@ -19,12 +28,14 @@ export function EditCourseModal({
   onClose,
   onSaved,
 }: {
-  course: CourseDetail;
+  course: { id: string; name: string; semester: string | null; coverImageUrl: string | null };
   token: string;
   onClose: () => void;
   onSaved: (course: CourseMeta) => void;
 }) {
   const [name, setName] = useState(course.name);
+  const [semester, setSemester] = useState(course.semester ?? '');
+  const [coverImageUrl, setCoverImageUrl] = useState<string | null>(course.coverImageUrl);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -79,7 +90,7 @@ export function EditCourseModal({
     setSubmitting(true);
     setError('');
 
-    const result = await updateCourse(token, course.id, { name: name.trim() });
+    const result = await updateCourse(token, course.id, { name: name.trim(), semester: semester.trim() || null, coverImageUrl });
     setSubmitting(false);
 
     if (!result.ok) {
@@ -135,6 +146,19 @@ export function EditCourseModal({
               className="mt-1.5 block w-full rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none transition focus:border-brand-purple"
             />
           </label>
+
+          <label className="mt-4 block text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted">
+            Semester <span className="normal-case text-brand-ink-muted/70">(optional)</span>
+            <input
+              type="text"
+              value={semester}
+              onChange={(event) => setSemester(event.target.value)}
+              placeholder="e.g. SoSe 2026"
+              className="mt-1.5 block w-full rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none transition focus:border-brand-purple"
+            />
+          </label>
+
+          <CourseCoverPicker token={token} value={coverImageUrl} onChange={setCoverImageUrl} />
 
           {error ? <p className="mt-3 text-xs font-bold text-brand-danger">{error}</p> : null}
 

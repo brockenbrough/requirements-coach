@@ -57,6 +57,38 @@ export async function loadJoinableCourses(token: string): Promise<ApiResult<{ co
 }
 
 /**
+ * GET /api/courses/mine — every course the caller is actually enrolled in (GitHub #427), backing
+ * the student "My Courses" page (app/activities/page.tsx). Deliberately not loadJoinableCourses
+ * filtered client-side by alreadyMember — see the route's own docblock for why that would miss a
+ * codeless, instructor-assigned enrollment. Uncached, same reasoning as loadJoinableCourses: a
+ * just-joined or just-left course must show up without waiting out a stale cache.
+ */
+export async function loadMyCourses(token: string): Promise<ApiResult<{ courses: JoinableCourse[] }>> {
+  const result = await request<{ courses: JoinableCourse[] }>('/api/courses/mine', { method: 'GET' }, token);
+  if (!result.ok) return result;
+
+  return { ok: true, data: { courses: result.data.courses.map((c) => ({ ...c, createdAt: toInstant(c.createdAt) })) } };
+}
+
+export type CourseQuizProgress = {
+  courseId: string;
+  hasQuizzes: boolean;
+  totalQuizzes: number;
+  passedQuizzes: number;
+  progressPercent: number | null;
+};
+
+/**
+ * GET /api/courses/my-progress — this student's own quiz-completion percentage for every course
+ * they're enrolled in (GitHub #435), backing the "Quiz progress" bar on app/activities/page.tsx's
+ * course cards. Uncached, same reasoning as loadMyCourses: a just-passed quiz must show up without
+ * waiting out a stale cache.
+ */
+export function loadMyCoursesProgress(token: string): Promise<ApiResult<{ progress: CourseQuizProgress[] }>> {
+  return request<{ progress: CourseQuizProgress[] }>('/api/courses/my-progress', { method: 'GET' }, token);
+}
+
+/**
  * POST /api/courses/join — joins a course by its code. Idempotent: joining a course the caller
  * already belongs to returns alreadyMember: true instead of an error (see the route's own docs).
  *

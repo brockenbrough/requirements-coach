@@ -28,10 +28,14 @@ type NavKey =
 // 'leaderboard' is student-only and has no instructor counterpart: it ranks a course's students
 // against each other, which is not a view an instructor account has a place in. It sits next to
 // 'courses' because it is scoped to one course at a time.
+// GitHub #427: 'activities' now points at the "My Courses" list (app/activities/page.tsx),
+// replacing the old flat cross-course activities list at the same route/nav slot — the NavKey and
+// href are kept as-is so app/activities/[slug]/page.tsx, its play page, and LlmPlayView.tsx (which
+// all set active="activities" while inside a specific activity) don't need to change too.
 const STUDENT_NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
   { key: 'dashboard', label: 'Dashboard', href: '/dashboard' },
-  { key: 'activities', label: 'Activities', href: '/activities' },
-  { key: 'courses', label: 'Courses', href: '/courses' },
+  { key: 'activities', label: 'My Courses', href: '/activities' },
+  { key: 'courses', label: 'Course Browser', href: '/courses' },
   { key: 'leaderboard', label: 'Leaderboard', href: '/leaderboard' },
   { key: 'profile', label: 'Profile', href: '/profile' },
 ];

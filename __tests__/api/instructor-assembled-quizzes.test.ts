@@ -92,8 +92,8 @@ function queueOwnedCourse(overrides: Partial<Record<string, unknown>> = {}) {
   queue('course', { data: courseRow(overrides), error: null });
 }
 
-function queueValidCatalogs(activityTypes: string[]) {
-  queue('activity_type', { data: activityTypes.map((activity_type) => ({ activity_type })), error: null });
+function queueValidCatalogs(activityTypes: string[], gradingKind: string = 'mcq') {
+  queue('activity_type', { data: activityTypes.map((activity_type) => ({ activity_type, grading_kind: gradingKind })), error: null });
 }
 
 function getRequest(token: string | null = 'valid-token') {
@@ -118,6 +118,7 @@ function validBody(overrides: Partial<Record<string, unknown>> = {}) {
     name: 'Sprint 1 Requirements Check',
     description: 'Covers weak stories and weak criteria.',
     courseId: 'course-1',
+    gradingKind: 'mcq',
     catalogActivityTypes: ['IDENTIFY_WEAK_USER_STORIES', 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA'],
     ...overrides,
   };
@@ -156,11 +157,13 @@ describe('GET /api/instructor/assembled-quizzes', () => {
           quiz_name: 'Sprint 1 Requirements Check',
           description: 'Covers weak stories and weak criteria.',
           course_id: 'course-1',
+          grading_kind: 'mcq',
+          questions_per_level: 4,
           created_at: '2026-08-14T10:00:00',
           course: { course_name: 'Software Requirements' },
           assembled_quiz_catalog: [
-            { catalog: { quiz_name: 'Identify Weak User Stories' } },
-            { catalog: { quiz_name: 'Identify Weak Acceptance Criteria' } },
+            { activity_type: 'IDENTIFY_WEAK_USER_STORIES', catalog: { quiz_name: 'Identify Weak User Stories', grading_kind: 'mcq' } },
+            { activity_type: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', catalog: { quiz_name: 'Identify Weak Acceptance Criteria', grading_kind: 'mcq' } },
           ],
         },
       ],
@@ -178,6 +181,12 @@ describe('GET /api/instructor/assembled-quizzes', () => {
         description: 'Covers weak stories and weak criteria.',
         courseId: 'course-1',
         courseName: 'Software Requirements',
+        gradingKind: 'mcq',
+        questionsPerLevel: 4,
+        catalogs: [
+          { activityType: 'IDENTIFY_WEAK_USER_STORIES', name: 'Identify Weak User Stories', gradingKind: 'mcq' },
+          { activityType: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', name: 'Identify Weak Acceptance Criteria', gradingKind: 'mcq' },
+        ],
         catalogNames: ['Identify Weak User Stories', 'Identify Weak Acceptance Criteria'],
         createdAt: '2026-08-14T10:00:00',
       },
@@ -265,6 +274,90 @@ describe('POST /api/instructor/assembled-quizzes', () => {
     expect(res.status).toBe(400);
   });
 
+  it('rejects a missing gradingKind with 400', async () => {
+    queueRole('instructor');
+    const res = await POST(postRequest(validBody({ gradingKind: undefined })));
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error).toBe('gradingKind must be "mcq" or "llm-graded".');
+    expect(h.state.tables).not.toContain('course');
+  });
+
+  it('rejects an invalid gradingKind with 400', async () => {
+    queueRole('instructor');
+    const res = await POST(postRequest(validBody({ gradingKind: 'essay' })));
+    expect(res.status).toBe(400);
+  });
+
+  // GitHub #416
+  it('rejects a zero questionsPerLevel with 400', async () => {
+    queueRole('instructor');
+    const res = await POST(postRequest(validBody({ questionsPerLevel: 0 })));
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error).toBe('questionsPerLevel must be a whole number of at least 4.');
+    expect(h.state.tables).not.toContain('course');
+  });
+
+  it('rejects a negative questionsPerLevel with 400', async () => {
+    queueRole('instructor');
+    const res = await POST(postRequest(validBody({ questionsPerLevel: -3 })));
+    expect(res.status).toBe(400);
+  });
+
+  // Every quiz must have at least MIN_QUESTIONS_PER_LEVEL (4) questions per level — 3 is
+  // otherwise a "valid" positive integer, so this is the boundary that actually matters.
+  it('rejects a questionsPerLevel of 3, just below the required minimum of 4', async () => {
+    queueRole('instructor');
+    const res = await POST(postRequest(validBody({ questionsPerLevel: 3 })));
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error).toBe('questionsPerLevel must be a whole number of at least 4.');
+  });
+
+  it('accepts a questionsPerLevel of exactly 4, the required minimum', async () => {
+    queueRole('instructor');
+    queueOwnedCourse();
+    queueValidCatalogs(['IDENTIFY_WEAK_USER_STORIES']);
+    queue('assembled_quiz', { data: null, error: null });
+    queue('assembled_quiz_catalog', { data: null, error: null });
+
+    const res = await POST(postRequest(validBody({ questionsPerLevel: 4, catalogActivityTypes: ['IDENTIFY_WEAK_USER_STORIES'] })));
+
+    expect(res.status).toBe(201);
+  });
+
+  it('rejects a non-integer questionsPerLevel with 400', async () => {
+    queueRole('instructor');
+    const res = await POST(postRequest(validBody({ questionsPerLevel: 2.5 })));
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a non-numeric questionsPerLevel with 400', async () => {
+    queueRole('instructor');
+    const res = await POST(postRequest(validBody({ questionsPerLevel: '4' })));
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when a selected catalog\'s grading_kind does not match the submitted gradingKind', async () => {
+    queueRole('instructor');
+    queueOwnedCourse();
+    // Both catalogs exist, but one is llm-graded while the quiz is being created as 'mcq'.
+    queue('activity_type', {
+      data: [
+        { activity_type: 'IDENTIFY_WEAK_USER_STORIES', grading_kind: 'mcq' },
+        { activity_type: 'IDENTIFY_WEAK_ACCEPTANCE_CRITERIA', grading_kind: 'llm-graded' },
+      ],
+      error: null,
+    });
+
+    const res = await POST(postRequest(validBody()));
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error).toBe("All selected catalogs must match the quiz's activity type.");
+    expect(h.state.tables).not.toContain('assembled_quiz');
+  });
+
   it('returns 404 when the course does not exist', async () => {
     queueRole('instructor');
     queue('course', { data: null, error: null });
@@ -345,6 +438,37 @@ describe('POST /api/instructor/assembled-quizzes', () => {
 
     const quizInsert = h.state.inserts.find((i) => i.table === 'assembled_quiz');
     expect((quizInsert?.payload as { description: unknown }).description).toBeNull();
+  });
+
+  // GitHub #416
+  it('defaults questionsPerLevel to QUESTIONS_PER_SESSION (4) when omitted', async () => {
+    queueRole('instructor');
+    queueOwnedCourse();
+    queueValidCatalogs(['IDENTIFY_WEAK_USER_STORIES']);
+    queue('assembled_quiz', { data: null, error: null });
+    queue('assembled_quiz_catalog', { data: null, error: null });
+
+    const res = await POST(postRequest(validBody({ questionsPerLevel: undefined, catalogActivityTypes: ['IDENTIFY_WEAK_USER_STORIES'] })));
+    const body = await res.json();
+
+    expect(body.quiz.questionsPerLevel).toBe(4);
+    const quizInsert = h.state.inserts.find((i) => i.table === 'assembled_quiz');
+    expect((quizInsert?.payload as { questions_per_level: unknown }).questions_per_level).toBe(4);
+  });
+
+  it('stores a custom questionsPerLevel and returns it on the created quiz', async () => {
+    queueRole('instructor');
+    queueOwnedCourse();
+    queueValidCatalogs(['IDENTIFY_WEAK_USER_STORIES']);
+    queue('assembled_quiz', { data: null, error: null });
+    queue('assembled_quiz_catalog', { data: null, error: null });
+
+    const res = await POST(postRequest(validBody({ questionsPerLevel: 8, catalogActivityTypes: ['IDENTIFY_WEAK_USER_STORIES'] })));
+    const body = await res.json();
+
+    expect(body.quiz.questionsPerLevel).toBe(8);
+    const quizInsert = h.state.inserts.find((i) => i.table === 'assembled_quiz');
+    expect((quizInsert?.payload as { questions_per_level: unknown }).questions_per_level).toBe(8);
   });
 
   it('deletes the quiz row it just inserted when the catalog link insert fails', async () => {

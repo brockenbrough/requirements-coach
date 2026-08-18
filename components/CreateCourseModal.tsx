@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { CopyCodeButton } from './CopyCodeButton';
+import { CourseCoverPicker } from './CourseCoverPicker';
 import { createCourse, type CourseSummary } from '../lib/courseClient';
 import { useModalDismiss } from './useModalDismiss';
 
@@ -23,6 +24,10 @@ import { useModalDismiss } from './useModalDismiss';
  * app/instructor/courses/page.tsx's list must update immediately (so "the list updates" doesn't
  * depend on the instructor also closing the code screen), and Escape/backdrop-click while looking
  * at the code must not un-create the course from the page's own state.
+ *
+ * components/CourseCoverPicker.tsx (GitHub #363 follow-up) lets the cover be chosen up front —
+ * its uploads go straight to Storage independent of this course (no course_id exists yet), so the
+ * resolved URL just rides along as `coverImageUrl` in the create request like any other field.
  */
 export function CreateCourseModal({
   token,
@@ -34,6 +39,8 @@ export function CreateCourseModal({
   onCreated: (course: CourseSummary) => void;
 }) {
   const [name, setName] = useState('');
+  const [semester, setSemester] = useState('');
+  const [coverImageUrl, setCoverImageUrl] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [createdCourse, setCreatedCourse] = useState<CourseSummary | null>(null);
@@ -50,7 +57,7 @@ export function CreateCourseModal({
     setSubmitting(true);
     setError('');
 
-    const result = await createCourse(token, name.trim());
+    const result = await createCourse(token, name.trim(), { semester: semester.trim() || null, coverImageUrl });
     setSubmitting(false);
 
     if (!result.ok) {
@@ -132,6 +139,19 @@ export function CreateCourseModal({
                 className="mt-1.5 block w-full rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none transition focus:border-brand-purple"
               />
             </label>
+
+            <label className="mt-4 block text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted">
+              Semester <span className="normal-case text-brand-ink-muted/70">(optional)</span>
+              <input
+                type="text"
+                value={semester}
+                onChange={(event) => setSemester(event.target.value)}
+                placeholder="e.g. SoSe 2026"
+                className="mt-1.5 block w-full rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none transition focus:border-brand-purple"
+              />
+            </label>
+
+            <CourseCoverPicker token={token} value={coverImageUrl} onChange={setCoverImageUrl} />
 
             {error ? <p className="mt-3 text-xs font-bold text-brand-danger">{error}</p> : null}
 

@@ -1,6 +1,6 @@
 import { getSupabaseClient } from '../../../../../../lib/supabase';
 import { requireInstructor } from '../../../../../../lib/instructorAuth';
-import { isActivityType } from '../../../../../../lib/activityTypes';
+import { getGradingKind } from '../../../../../../lib/activityTypes';
 import { findOwnedAssembledQuiz, linkCatalogToQuiz } from '../../../../../../lib/assembledQuizQueries';
 
 function getToken(request: Request): string | null {
@@ -15,7 +15,8 @@ function getToken(request: Request): string | null {
  * - 401 missing/invalid bearer token
  * - 403 caller isn't an instructor, or isn't this quiz's creator (no body either way)
  * - 404 quizId matches no quiz
- * - 400 missing activityType, or activityType matches no catalog
+ * - 400 missing activityType, activityType matches no catalog, or the catalog's own grading_kind
+ *   doesn't match this quiz's locked grading_kind (assembled_quiz.grading_kind)
  * - 200 { activityType } — 200, not 201: linking an already-linked catalog is a no-op success
  *   (uq_assembled_quiz_catalog), not a second resource created
  * - 500 Supabase not configured, or the insert fails for a reason other than the unique index
@@ -51,9 +52,12 @@ export async function POST(request: Request, { params }: { params: { quizId: str
     return Response.json({ error: 'activityType is required.' }, { status: 400 });
   }
 
-  const { valid, error: activityTypeError } = await isActivityType(supabase, activityType);
-  if (activityTypeError) return Response.json({ error: activityTypeError.message }, { status: 500 });
-  if (!valid) return Response.json({ error: 'activityType must be a valid catalog.' }, { status: 400 });
+  const { gradingKind, error: gradingKindError } = await getGradingKind(supabase, activityType);
+  if (gradingKindError) return Response.json({ error: gradingKindError.message }, { status: 500 });
+  if (gradingKind === null) return Response.json({ error: 'activityType must be a valid catalog.' }, { status: 400 });
+  if (gradingKind !== found.quiz.grading_kind) {
+    return Response.json({ error: "This catalog's type doesn't match this quiz." }, { status: 400 });
+  }
 
   const { error } = await linkCatalogToQuiz(supabase, found.quiz.assembled_quiz_id, activityType);
   if (error) return Response.json({ error: error.message }, { status: 500 });

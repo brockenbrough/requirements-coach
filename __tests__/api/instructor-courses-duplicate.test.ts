@@ -64,6 +64,8 @@ function queueRole(role: string) {
   queue('user', { data: { role }, error: null });
 }
 
+const SOURCE_COVER_URL = 'https://example.com/course-covers/instructor-1/original.png';
+
 function sourceCourseRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     course_id: 'course-1',
@@ -71,6 +73,8 @@ function sourceCourseRow(overrides: Partial<Record<string, unknown>> = {}) {
     course_code: 'ORIGIN1',
     creator_id: 'instructor-1',
     created_at: '2026-08-11T10:00:00',
+    semester: 'SoSe 2026',
+    cover_image_url: SOURCE_COVER_URL,
     ...overrides,
   };
 }
@@ -82,6 +86,10 @@ function newCourseRow(overrides: Partial<Record<string, unknown>> = {}) {
     course_code: 'FRESH1',
     creator_id: 'instructor-1',
     created_at: '2026-08-12T10:00:00',
+    semester: null,
+    // Unlike semester, the cover carries over from the source by default — see the route's own
+    // docblock and the dedicated test below.
+    cover_image_url: SOURCE_COVER_URL,
     ...overrides,
   };
 }
@@ -164,6 +172,8 @@ describe('POST /api/instructor/courses/[id]/duplicate', () => {
       name: 'Software Requirements (Copy)',
       code: 'FRESH1',
       createdAt: '2026-08-12T10:00:00',
+      semester: null,
+      coverImageUrl: SOURCE_COVER_URL,
       studentCount: 0,
     });
 
@@ -173,6 +183,38 @@ describe('POST /api/instructor/courses/[id]/duplicate', () => {
     const payload = insert?.payload as { course_code: string };
     expect(payload.course_code).toHaveLength(6);
     expect(payload.course_code).not.toBe('ORIGIN1');
+  });
+
+  it("carries the source course's cover image over to the copy, unlike semester", async () => {
+    queueRole('instructor');
+    queue('course', { data: sourceCourseRow(), error: null }); // findOwnedCourse
+    queue('course', { data: newCourseRow(), error: null }); // createCourseWithUniqueCode
+    queue('assembled_quiz', { data: [], error: null });
+
+    const res = await POST(postRequest({ name: 'Copy' }), params);
+    expect(res.status).toBe(201);
+
+    const body = await res.json();
+    expect(body.course.coverImageUrl).toBe(SOURCE_COVER_URL);
+
+    const insert = h.state.inserts.find((i) => i.table === 'course');
+    expect(insert?.payload).toMatchObject({ cover_image_url: SOURCE_COVER_URL });
+  });
+
+  it("does not carry the source course's semester over to the copy", async () => {
+    queueRole('instructor');
+    queue('course', { data: sourceCourseRow({ semester: 'SoSe 2026' }), error: null }); // findOwnedCourse
+    queue('course', { data: newCourseRow(), error: null }); // createCourseWithUniqueCode
+    queue('assembled_quiz', { data: [], error: null });
+
+    const res = await POST(postRequest({ name: 'Copy' }), params);
+    expect(res.status).toBe(201);
+
+    const body = await res.json();
+    expect(body.course.semester).toBeNull();
+
+    const insert = h.state.inserts.find((i) => i.table === 'course');
+    expect(insert?.payload).toMatchObject({ semester: null });
   });
 
   it('retries with a fresh code on a uq_course_code collision, then succeeds', async () => {

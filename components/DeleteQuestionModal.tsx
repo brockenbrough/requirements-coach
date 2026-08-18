@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { deleteQuestion } from '../lib/sessionClient';
+import { deleteQuestion, type QuestionDeleteImpact } from '../lib/sessionClient';
 import type { CatalogQuestion } from '../lib/quizQuestionTypes';
 
 const FOCUSABLE_SELECTOR = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
@@ -13,9 +13,11 @@ const FOCUSABLE_SELECTOR = 'button, [href], input, select, textarea, [tabindex]:
  * native window.confirm() — this is the same "destructive action needs a styled, unmissable
  * warning" reasoning DeleteCourseModal's own header comment gives.
  *
- * DELETE /api/instructor/questions/{id} can 409 when the question has already been answered by a
- * student; that error surfaces here rather than silently removing the row from the catalog page's
- * list.
+ * DELETE /api/instructor/questions/{id} 409s the first attempt when the question has already been
+ * used in a student session, with an `impact` payload describing what's at stake. That flips this
+ * modal into a second, more explicit confirmation step (`impact` state below) — the instructor
+ * still has to click through a second, clearly-worded button before the retry is sent with
+ * `force: true`, which rewinds the affected students' scores server-side and deletes anyway.
  */
 export function DeleteQuestionModal({
   question,
@@ -30,6 +32,7 @@ export function DeleteQuestionModal({
 }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [impact, setImpact] = useState<QuestionDeleteImpact | null>(null);
 
   const panelRef = useRef<HTMLDivElement>(null);
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
@@ -82,10 +85,14 @@ export function DeleteQuestionModal({
     setSubmitting(true);
     setError('');
 
-    const result = await deleteQuestion(token, question.id);
+    const result = await deleteQuestion(token, question.id, impact !== null);
 
     if (!result.ok) {
       setSubmitting(false);
+      if (result.status === 409 && result.impact) {
+        setImpact(result.impact);
+        return;
+      }
       setError(result.error);
       return;
     }
@@ -134,6 +141,31 @@ export function DeleteQuestionModal({
           This removes the question permanently. Every other catalog and its questions are unaffected.
         </p>
 
+        {impact ? (
+          <div className="mt-4 rounded-brand-md border border-brand-danger/40 bg-brand-danger/10 p-3">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-brand-danger">
+              Already used by students
+            </p>
+            <p className="mt-1.5 text-sm font-semibold text-brand-ink">
+              {impact.pointsAtRisk > 0 ? (
+                <>
+                  {impact.studentsAffectedCount} student{impact.studentsAffectedCount === 1 ? '' : 's'} already
+                  answered this question, earning{' '}
+                  <span className="font-extrabold text-white">{impact.pointsAtRisk} point{impact.pointsAtRisk === 1 ? '' : 's'}</span>{' '}
+                  total. Deleting it will remove those points from their score.
+                </>
+              ) : (
+                <>
+                  This question is currently assigned to {impact.sessionsCount} in-progress session
+                  {impact.sessionsCount === 1 ? '' : 's'}. Deleting it will remove it from{' '}
+                  {impact.sessionsCount === 1 ? 'that session' : 'those sessions'}.
+                </>
+              )}
+            </p>
+            <p className="mt-1.5 text-xs font-semibold text-brand-ink-muted">This cannot be undone.</p>
+          </div>
+        ) : null}
+
         {error ? <p className="mt-3 text-xs font-bold text-brand-danger">{error}</p> : null}
 
         <div className="mt-6 flex justify-end gap-3">
@@ -152,7 +184,7 @@ export function DeleteQuestionModal({
             disabled={submitting}
             className="rounded-brand-md bg-brand-danger px-5 py-2 text-sm font-extrabold text-white transition hover:bg-brand-danger/90 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {submitting ? 'Deleting…' : 'Delete question'}
+            {submitting ? 'Deleting…' : impact ? 'Delete anyway' : 'Delete question'}
           </button>
         </div>
       </div>

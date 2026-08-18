@@ -170,6 +170,36 @@ describe('GET /api/instructor/assembled-quizzes/[quizId]/catalogs/[activityType]
 
     expect(h.state.deletes).toEqual([]);
   });
+
+  // llm-graded parity: prompts get the same excludedForQuiz annotation MCQ questions do, via
+  // listQuizCatalogUserStories (mirrors listQuizCatalogQuestions).
+  it('returns the catalog and its prompts, each annotated with this quiz\'s own exclusion state, for an llm-graded catalog', async () => {
+    queueRole('instructor');
+    queue('assembled_quiz', { data: quizRow(), error: null });
+    queue('activity_type', {
+      data: { activity_type: 'CATALOG_LLM', quiz_name: 'Catalog LLM', description: null, grading_kind: 'llm-graded', creator_id: null, creator: null },
+      error: null,
+    });
+    queue('user_story', {
+      data: [
+        { user_story_id: 'story-1', story_text: 'As a user, I want X.', difficulty_level: 1, creator_id: null },
+        { user_story_id: 'story-2', story_text: 'As a user, I want Y.', difficulty_level: 1, creator_id: null },
+      ],
+      error: null,
+    });
+    queue('quiz_excluded_user_story', { data: [{ user_story_id: 'story-2' }], error: null });
+
+    const res = await getReq('quiz-1', 'CATALOG_LLM');
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.catalog.gradingKind).toBe('llm-graded');
+    expect(body.questions).toEqual([]);
+    expect(body.userStories).toHaveLength(2);
+    expect(body.userStories.find((s: { id: string }) => s.id === 'story-1').excludedForQuiz).toBe(false);
+    expect(body.userStories.find((s: { id: string }) => s.id === 'story-2').excludedForQuiz).toBe(true);
+    expect(h.state.tables).not.toContain('question');
+  });
 });
 
 describe('DELETE /api/instructor/assembled-quizzes/[quizId]/catalogs/[activityType]', () => {

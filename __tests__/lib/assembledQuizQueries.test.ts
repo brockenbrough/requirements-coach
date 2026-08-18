@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
   addExtraQuestionToQuiz,
+  addExtraUserStoryToQuiz,
+  excludeUserStoryFromQuiz,
   getQuizComposition,
+  includeUserStoryInQuiz,
+  listQuizExcludedUserStoryIds,
   listQuizExtraQuestionIds,
+  listQuizExtraUserStoryIds,
   loadCatalogQuestionPool,
   pickRandomQuestions,
   removeExtraQuestionFromQuiz,
+  removeExtraUserStoryFromQuiz,
 } from '../../lib/assembledQuizQueries';
 
 type PoolItem = { question_id: string };
@@ -412,8 +418,34 @@ describe('getQuizComposition — hand-picked questions (GitHub #380)', () => {
         { level: 3, available: 0, required: 4, sufficient: false },
       ],
       extraQuestions: [],
+      extraUserStories: [],
       activeCatalogQuestionIds: [],
+      activeCatalogUserStoryIds: [],
       error: null,
     });
+  });
+
+  // GitHub #416: a quiz's own questions_per_level, not the flat QUESTIONS_PER_SESSION default,
+  // is what the coverage banner warns against.
+  it('computes level coverage against the quiz\'s own questionsPerLevel when passed', async () => {
+    const { supabase, queue } = makeQueuedSupabase();
+    queue('assembled_quiz_catalog', { data: [{ activity_type: 'CATALOG_A', catalog: { quiz_name: 'Cat A', description: null } }], error: null });
+    queue('question', {
+      data: [
+        { question_id: 'q-1', activity_type: 'CATALOG_A', difficulty_level: 1 },
+        { question_id: 'q-2', activity_type: 'CATALOG_A', difficulty_level: 1 },
+      ],
+      error: null,
+    });
+    queue('quiz_excluded_question', { data: [], error: null });
+    queue('assembled_quiz_extra_question', { data: [], error: null });
+
+    const result = await getQuizComposition(supabase, 'quiz-1', 2);
+
+    expect(result.levelCoverage).toEqual([
+      { level: 1, available: 2, required: 2, sufficient: true },
+      { level: 2, available: 0, required: 2, sufficient: false },
+      { level: 3, available: 0, required: 2, sufficient: false },
+    ]);
   });
 });

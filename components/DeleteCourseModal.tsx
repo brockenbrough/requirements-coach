@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { deleteCourse, type CourseDetail } from '../lib/courseClient';
+import { deleteCourse } from '../lib/courseClient';
 
 const FOCUSABLE_SELECTOR = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
@@ -22,10 +22,12 @@ const FOCUSABLE_SELECTOR = 'button, [href], input, select, textarea, [tabindex]:
  * - the confirm button is brand-danger rather than brand-purple, the only place on this page
  *   that colour is used for an action rather than an error message.
  *
- * The count comes from the roster the detail page already has in state, so opening this costs no
- * extra request. It can in principle be seconds stale (a student joining with the code in the
- * meantime); that's acceptable for a warning — the route re-counts server-side and returns the
- * number it actually unenrolled.
+ * `course` takes a bare studentCount rather than the full CourseDetail (with its `students[]`
+ * roster) so components/CourseCard.tsx's kebab menu (GitHub #363) — which only ever has a
+ * CourseSummary, not a loaded roster — can open this too. The course detail page passes
+ * course.students.length; that count can in principle be seconds stale (a student joining with
+ * the code in the meantime) either way, which is acceptable for a warning — the route re-counts
+ * server-side and returns the number it actually unenrolled.
  */
 export function DeleteCourseModal({
   course,
@@ -33,7 +35,7 @@ export function DeleteCourseModal({
   onClose,
   onDeleted,
 }: {
-  course: CourseDetail;
+  course: { id: string; name: string; studentCount: number };
   token: string;
   onClose: () => void;
   onDeleted: () => void;
@@ -107,7 +109,7 @@ export function DeleteCourseModal({
     onDeleted();
   }
 
-  const studentCount = course.students.length;
+  const studentCount = course.studentCount;
 
   return (
     <div

@@ -71,6 +71,8 @@ function quizRow(overrides: Partial<Record<string, unknown>> = {}) {
     description: 'Covers weak stories.',
     course_id: 'course-1',
     creator_id: 'instructor-1',
+    grading_kind: 'mcq',
+    questions_per_level: 4,
     created_at: '2026-08-14T10:00:00',
     ...overrides,
   };
@@ -159,16 +161,93 @@ describe('GET /api/instructor/assembled-quizzes/[quizId]', () => {
       description: 'Covers weak stories.',
       courseId: 'course-1',
       courseName: 'Software Requirements',
+      gradingKind: 'mcq',
+      questionsPerLevel: 4,
     });
 
     expect(body.catalogs).toEqual([
-      { activityType: 'CATALOG_A', name: 'Catalog A', description: 'About A', totalQuestions: 5, excludedCount: 1, activeCount: 4 },
+      {
+        activityType: 'CATALOG_A',
+        name: 'Catalog A',
+        description: 'About A',
+        gradingKind: 'mcq',
+        totalQuestions: 5,
+        excludedCount: 1,
+        activeCount: 4,
+      },
     ]);
 
     // Level 1 has 4 questions total, 1 excluded -> 3 available, below the 4 required.
     expect(body.levelCoverage).toContainEqual({ level: 1, available: 3, required: 4, sufficient: false });
     expect(body.levelCoverage).toContainEqual({ level: 2, available: 1, required: 4, sufficient: false });
     expect(body.levelCoverage).toContainEqual({ level: 3, available: 0, required: 4, sufficient: false });
+  });
+
+  // GitHub #416: the coverage banner warns against this quiz's own questionsPerLevel, not the
+  // flat QUESTIONS_PER_SESSION default.
+  it('reports level coverage against this quiz\'s own questionsPerLevel', async () => {
+    queueRole('instructor');
+    queue('assembled_quiz', { data: quizRow({ questions_per_level: 3 }), error: null });
+    queue('course', { data: { course_name: 'Software Requirements' }, error: null });
+    queue('assembled_quiz_catalog', {
+      data: [{ activity_type: 'CATALOG_A', catalog: { quiz_name: 'Catalog A', description: 'About A' } }],
+      error: null,
+    });
+    queue('question', {
+      data: [
+        { question_id: 'q-1', activity_type: 'CATALOG_A', difficulty_level: 1 },
+        { question_id: 'q-2', activity_type: 'CATALOG_A', difficulty_level: 1 },
+        { question_id: 'q-3', activity_type: 'CATALOG_A', difficulty_level: 1 },
+      ],
+      error: null,
+    });
+    queue('quiz_excluded_question', { data: [], error: null });
+
+    const res = await req();
+    const body = await res.json();
+
+    expect(body.quiz.questionsPerLevel).toBe(3);
+    expect(body.levelCoverage).toContainEqual({ level: 1, available: 3, required: 3, sufficient: true });
+  });
+
+  // Regression test: getQuizComposition used to only ever query `question`, so an llm-graded
+  // catalog's prompt count and level coverage were always 0 regardless of how many user_story
+  // rows it actually had.
+  it('counts an llm-graded catalog\'s prompts from user_story, not question, with no exclusions applied', async () => {
+    queueRole('instructor');
+    queue('assembled_quiz', { data: quizRow(), error: null });
+    queue('course', { data: { course_name: 'Software Requirements' }, error: null });
+    queue('assembled_quiz_catalog', {
+      data: [{ activity_type: 'CATALOG_LLM', catalog: { quiz_name: 'Catalog LLM', description: 'About LLM', grading_kind: 'llm-graded' } }],
+      error: null,
+    });
+    queue('question', { data: [], error: null });
+    queue('user_story', {
+      data: [
+        { user_story_id: 'us-1', activity_type: 'CATALOG_LLM', difficulty_level: 1 },
+        { user_story_id: 'us-2', activity_type: 'CATALOG_LLM', difficulty_level: 1 },
+      ],
+      error: null,
+    });
+    queue('quiz_excluded_question', { data: [], error: null });
+
+    const res = await req();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.catalogs).toEqual([
+      {
+        activityType: 'CATALOG_LLM',
+        name: 'Catalog LLM',
+        description: 'About LLM',
+        gradingKind: 'llm-graded',
+        totalQuestions: 2,
+        excludedCount: 0,
+        activeCount: 2,
+      },
+    ]);
+
+    expect(body.levelCoverage).toContainEqual({ level: 1, available: 2, required: 4, sufficient: false });
   });
 
   it('returns an empty composition for a quiz with no linked catalogs', async () => {

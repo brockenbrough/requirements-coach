@@ -175,6 +175,14 @@ CREATE TABLE submission (
     llm_score      int4,
     llm_feedback   text,
     llm_provider   text,
+    -- Task-type-and-difficulty gamification points (lib/llmActivityRules.ts's
+    -- awardedScoreForRating), scaled from llm_score's raw 1-10 rating onto this prompt's
+    -- difficulty-based point scale. Deliberately a separate column rather than repurposing
+    -- llm_score itself: llm_score stays the raw 1-10 rating so per-prompt feedback, the
+    -- PROMPT_PASS_SCORE bar, and lib/llmActivityStatisticsQueries.ts's 1-10 histogram keep
+    -- reading an unscaled number. Nullable for the same write-before-disclose reason as
+    -- llm_score — filled in by the same grading UPDATE.
+    awarded_score  int4,
     submitted_at   timestamp   NOT NULL DEFAULT now(),
     graded_at      timestamp,
     PRIMARY KEY (submission_id));
@@ -235,6 +243,18 @@ CREATE TABLE course (
     creator_id  uuid      NOT NULL,
     course_name text      NOT NULL,
     course_code text,
+    -- Term the course is offered in (e.g. "SoSe 2026"), freeform text — display-only, unlike
+    -- "user".semester above (an int2 count of the student's own study progress; a different
+    -- concept entirely, just an unfortunate name collision across two unrelated tables).
+    -- Nullable: GitHub #363's card only renders a semester badge when this is set.
+    semester    text,
+    -- One of: NULL (no explicit choice — the card deterministically picks one of the 3 built-in
+    -- defaults from course_id, see lib/courseCovers.ts), one of the 3 default covers' own static
+    -- path (an explicit pick, not the auto one), or a public Storage URL in the course-covers
+    -- bucket (an instructor-uploaded image, POST /api/instructor/course-covers). The column
+    -- doesn't distinguish between these — lib/courseCovers.ts's resolveCourseCoverSrc treats
+    -- "any non-null string" as "use this directly", the same way "user".avatar_url works.
+    cover_image_url text,
     created_at  timestamp NOT NULL DEFAULT now(),
     PRIMARY KEY (course_id));
 
@@ -265,13 +285,34 @@ CREATE TABLE student_course (
 -- existing difficulty-level scheme (1-3) is reused as-is; no new level
 -- column or table.
 -- ---------------------------------------------------------------------
+-- grading_kind (added alongside the "type-safe hand-picking" fix, mirroring
+-- activity_type.grading_kind exactly): which single kind of catalog this quiz may ever
+-- compose/hand-pick from, chosen once at creation and never changed afterward, same
+-- "locked forever" convention activity_type.grading_kind already uses. Before this, a quiz
+-- could link catalogs of both kinds at once with nothing to say which one its "Create new
+-- question"/"Add prompt" composition actions should offer.
+--
+-- questions_per_level (GitHub #416): how many questions/prompts a session draws per level for
+-- this quiz, replacing the app-wide QUESTIONS_PER_SESSION constant (lib/sessionRules.ts) as the
+-- draw size for any catalog this quiz grants access to. Defaults to 4 (QUESTIONS_PER_SESSION's
+-- own value) so a quiz created without touching the field draws exactly as every quiz did before
+-- this column existed, and can never be set below MIN_QUESTIONS_PER_LEVEL (also 4 today, but a
+-- separate named constant — see its own comment in lib/sessionRules.ts) via
+-- ck_assembled_quiz_questions_per_level below. Resolved per catalog at session-start time via
+-- getAccessibleCourseForActivity (lib/activityCourseQueries.ts) — the same assembled_quiz row
+-- POST /api/sessions already reads for quiz_excluded_question, not a new lookup — so this is
+-- subject to the same known limitation documented on assembled_quiz.grading_kind and
+-- computeCourseClassStats: a catalog reachable through more than one assembled quiz uses
+-- whichever one that query happens to resolve first.
 CREATE TABLE assembled_quiz (
-    assembled_quiz_id uuid      NOT NULL,
-    quiz_name         text      NOT NULL,
-    description       text,
-    course_id         uuid      NOT NULL,
-    creator_id        uuid      NOT NULL,
-    created_at        timestamp NOT NULL DEFAULT now(),
+    assembled_quiz_id   uuid      NOT NULL,
+    quiz_name           text      NOT NULL,
+    description         text,
+    course_id           uuid      NOT NULL,
+    creator_id          uuid      NOT NULL,
+    grading_kind        text      NOT NULL DEFAULT 'mcq',
+    questions_per_level integer   NOT NULL DEFAULT 4,
+    created_at          timestamp NOT NULL DEFAULT now(),
     PRIMARY KEY (assembled_quiz_id));
 
 -- The m:n link to the catalogs (activity_type rows) a quiz draws from.
@@ -334,6 +375,33 @@ CREATE TABLE assembled_quiz_extra_question (
     assembled_quiz_id                uuid   NOT NULL,
     question_id                       uuid   NOT NULL,
     PRIMARY KEY (assembled_quiz_extra_question_id));
+
+-- ---------------------------------------------------------------------
+-- Quiz Excluded User Story / Assembled Quiz Extra User Story
+--
+-- The llm-graded counterpart of quiz_excluded_question / assembled_quiz_extra_question above —
+-- same two-table split (exclude vs. hand-pick are different questions, per that pair's own header
+-- comment), same reasoning, just naming user_story instead of question because a linked
+-- llm-graded catalog's pool lives there, not in `question` (activity_type.grading_kind decides
+-- which one, see that column's own comment). Before these two tables, an llm-graded catalog's
+-- exclude/hand-pick support was silently absent: getQuizComposition only ever queried `question`,
+-- so a linked llm-graded catalog's prompt count and per-quiz exclusion state had no way to exist.
+--
+-- Both FKs cascade on both tables, same reasoning as their question-table counterparts: a row
+-- here means nothing once either the quiz or the user_story it names is gone, and there is no
+-- student attempt history tied to an assembled_quiz for a cascade to endanger.
+-- ---------------------------------------------------------------------
+CREATE TABLE quiz_excluded_user_story (
+    quiz_excluded_user_story_id SERIAL NOT NULL,
+    assembled_quiz_id           uuid   NOT NULL,
+    user_story_id                uuid   NOT NULL,
+    PRIMARY KEY (quiz_excluded_user_story_id));
+
+CREATE TABLE assembled_quiz_extra_user_story (
+    assembled_quiz_extra_user_story_id SERIAL NOT NULL,
+    assembled_quiz_id                   uuid   NOT NULL,
+    user_story_id                        uuid   NOT NULL,
+    PRIMARY KEY (assembled_quiz_extra_user_story_id));
 
 
 -- =====================================================================
@@ -489,12 +557,15 @@ ALTER TABLE quiz_excluded_question ADD CONSTRAINT fk_quiz_excluded_question_ques
 ALTER TABLE assembled_quiz_extra_question ADD CONSTRAINT fk_assembled_quiz_extra_question_quiz FOREIGN KEY (assembled_quiz_id) REFERENCES assembled_quiz (assembled_quiz_id) ON DELETE CASCADE;
 ALTER TABLE assembled_quiz_extra_question ADD CONSTRAINT fk_assembled_quiz_extra_question_question FOREIGN KEY (question_id) REFERENCES question (question_id) ON DELETE CASCADE;
 
--- ON DELETE CASCADE so a catalog's title ladder cannot outlive the catalog. Without it this FK
--- defaults to RESTRICT and the first title row refuses the delete outright. The cascade also
--- finishes a chain that needs no cleanup code: dropping the catalog drops its titles, and
--- "user".selected_title_definition_id is ON DELETE SET NULL, so anyone wearing one of them simply
--- stops wearing it.
-ALTER TABLE title_definition ADD CONSTRAINT fk_title_definition_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type) ON DELETE CASCADE;
+-- Same cascade reasoning as fk_quiz_excluded_question_quiz/_question — see
+-- quiz_excluded_user_story's own header comment.
+ALTER TABLE quiz_excluded_user_story ADD CONSTRAINT fk_quiz_excluded_user_story_quiz FOREIGN KEY (assembled_quiz_id) REFERENCES assembled_quiz (assembled_quiz_id) ON DELETE CASCADE;
+ALTER TABLE quiz_excluded_user_story ADD CONSTRAINT fk_quiz_excluded_user_story_user_story FOREIGN KEY (user_story_id) REFERENCES user_story (user_story_id) ON DELETE CASCADE;
+
+ALTER TABLE assembled_quiz_extra_user_story ADD CONSTRAINT fk_assembled_quiz_extra_user_story_quiz FOREIGN KEY (assembled_quiz_id) REFERENCES assembled_quiz (assembled_quiz_id) ON DELETE CASCADE;
+ALTER TABLE assembled_quiz_extra_user_story ADD CONSTRAINT fk_assembled_quiz_extra_user_story_user_story FOREIGN KEY (user_story_id) REFERENCES user_story (user_story_id) ON DELETE CASCADE;
+
+ALTER TABLE title_definition ADD CONSTRAINT fk_title_definition_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
 
 -- The title a student has chosen to wear. ON DELETE SET NULL rather than RESTRICT or CASCADE:
 -- deleting a title_definition row must not be blocked by whoever happens to be wearing it, and it
@@ -554,6 +625,15 @@ ALTER TABLE question ADD CONSTRAINT ck_question_difficulty_level CHECK (difficul
 -- Only two grading kinds exist today (see activity_type's own header comment) — a typo here
 -- can't silently create a third one the app has no route/dispatch logic for.
 ALTER TABLE activity_type ADD CONSTRAINT ck_activity_type_grading_kind CHECK (grading_kind IN ('mcq', 'llm-graded'));
+
+-- Same reasoning as ck_activity_type_grading_kind directly above, for assembled_quiz's own
+-- grading_kind column.
+ALTER TABLE assembled_quiz ADD CONSTRAINT ck_assembled_quiz_grading_kind CHECK (grading_kind IN ('mcq', 'llm-graded'));
+
+-- A quiz's per-level draw size may never go below MIN_QUESTIONS_PER_LEVEL (lib/sessionRules.ts,
+-- GitHub #416) — a hard business-rule floor ("every quiz has at least this many questions per
+-- level"), not just "must be positive."
+ALTER TABLE assembled_quiz ADD CONSTRAINT ck_assembled_quiz_questions_per_level CHECK (questions_per_level >= 4);
 
 -- REQ-GAM-DL-2.1: one title per (activity_type, difficulty_level) pair so the BL-1 lookup is
 -- unambiguous. activity_type itself is restricted to the known set via fk_title_definition_activity_type
@@ -630,6 +710,14 @@ CREATE INDEX ix_quiz_excluded_question_quiz_id ON quiz_excluded_question (assemb
 ALTER TABLE assembled_quiz_extra_question ADD CONSTRAINT uq_assembled_quiz_extra_question UNIQUE (assembled_quiz_id, question_id);
 CREATE INDEX ix_assembled_quiz_extra_question_quiz_id ON assembled_quiz_extra_question (assembled_quiz_id);
 
+-- Same two guarantees as uq_quiz_excluded_question/uq_assembled_quiz_extra_question, mirrored for
+-- user_story.
+ALTER TABLE quiz_excluded_user_story ADD CONSTRAINT uq_quiz_excluded_user_story UNIQUE (assembled_quiz_id, user_story_id);
+CREATE INDEX ix_quiz_excluded_user_story_quiz_id ON quiz_excluded_user_story (assembled_quiz_id);
+
+ALTER TABLE assembled_quiz_extra_user_story ADD CONSTRAINT uq_assembled_quiz_extra_user_story UNIQUE (assembled_quiz_id, user_story_id);
+CREATE INDEX ix_assembled_quiz_extra_user_story_quiz_id ON assembled_quiz_extra_user_story (assembled_quiz_id);
+
 -- At most one running session per student and activity type. This is what
 -- makes POST /api/sessions idempotent: "start" and "resume" are the same
 -- call, and two devices cannot build up independent state.
@@ -700,16 +788,18 @@ CREATE TRIGGER trg_answered_question_log_score
   AFTER INSERT ON answered_question_log
   FOR EACH ROW EXECUTE FUNCTION bump_session_score();
 
--- submission is write-before-disclose (llm_score starts NULL, a later UPDATE fills it in once
+-- submission is write-before-disclose (awarded_score starts NULL, a later UPDATE fills it in once
 -- grading finishes — see submission's own header comment), so the roll-up fires on that UPDATE
--- instead of on INSERT the way answered_question_log's does. The OLD.llm_score IS NULL guard
+-- instead of on INSERT the way answered_question_log's does. The OLD.awarded_score IS NULL guard
 -- keeps a later, unrelated UPDATE of an already-graded row (there isn't one today, but nothing
--- stops a future one) from double-counting the score.
+-- stops a future one) from double-counting the score. Reads awarded_score, not llm_score: the
+-- points that roll up into cumulative_score are the difficulty-scaled award, not the raw 1-10
+-- rating (see the column's own comment above).
 CREATE FUNCTION bump_session_score_from_submission() RETURNS trigger AS $$
 BEGIN
-  IF NEW.session_id IS NOT NULL AND NEW.llm_score IS NOT NULL AND OLD.llm_score IS NULL THEN
+  IF NEW.session_id IS NOT NULL AND NEW.awarded_score IS NOT NULL AND OLD.awarded_score IS NULL THEN
     UPDATE session_log
-       SET cumulative_score = cumulative_score + NEW.llm_score
+       SET cumulative_score = cumulative_score + NEW.awarded_score
      WHERE session_id = NEW.session_id;
   END IF;
   RETURN NEW;
@@ -717,7 +807,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trg_submission_score
-  AFTER UPDATE OF llm_score ON submission
+  AFTER UPDATE OF awarded_score ON submission
   FOR EACH ROW EXECUTE FUNCTION bump_session_score_from_submission();
 
 
@@ -748,6 +838,8 @@ ALTER TABLE assembled_quiz ENABLE ROW LEVEL SECURITY;
 ALTER TABLE assembled_quiz_catalog ENABLE ROW LEVEL SECURITY;
 ALTER TABLE quiz_excluded_question ENABLE ROW LEVEL SECURITY;
 ALTER TABLE assembled_quiz_extra_question ENABLE ROW LEVEL SECURITY;
+ALTER TABLE quiz_excluded_user_story ENABLE ROW LEVEL SECURITY;
+ALTER TABLE assembled_quiz_extra_user_story ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE session_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE answered_question_log ENABLE ROW LEVEL SECURITY;
@@ -991,14 +1083,6 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 --     FOREIGN KEY (selected_title_definition_id)
 --     REFERENCES title_definition (title_definition_id) ON DELETE SET NULL;
 
--- Instructor-authored title ladders: if your database predates the cascade on
--- fk_title_definition_activity_type, replace the constraint. Without it, deleting a catalog is
--- refused by its own title rows. Nothing is lost — the constraint is only redefined:
---
---   ALTER TABLE title_definition DROP CONSTRAINT IF EXISTS fk_title_definition_activity_type;
---   ALTER TABLE title_definition ADD CONSTRAINT fk_title_definition_activity_type
---     FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type) ON DELETE CASCADE;
-
 -- GitHub #347 (create and browse quizzes): if your activity_type table predates quiz_name/
 -- description/creator_id, add them without touching the three existing rows' keys — every
 -- existing FK to activity_type (question, session_log, title_definition) and every existing
@@ -1115,3 +1199,110 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 -- database:
 --
 --   CREATE INDEX IF NOT EXISTS ix_student_course_course_id ON student_course (course_id);
+
+-- Quiz Excluded User Story / Assembled Quiz Extra User Story: the llm-graded counterpart of
+-- quiz_excluded_question/assembled_quiz_extra_question (GitHub #361/#380) — an assembled quiz's
+-- llm-graded catalogs previously had no per-quiz exclude or hand-pick support at all, since both
+-- of those tables only ever FK'd to `question`. Two brand new tables, same no-rename/no-backfill
+-- path as their question-table counterparts — run each CREATE TABLE statement, its two FKs, its
+-- unique constraint and index, and its ENABLE ROW LEVEL SECURITY:
+--
+--   CREATE TABLE quiz_excluded_user_story (...);
+--   ALTER TABLE quiz_excluded_user_story ADD CONSTRAINT fk_quiz_excluded_user_story_quiz ...;
+--   ALTER TABLE quiz_excluded_user_story ADD CONSTRAINT fk_quiz_excluded_user_story_user_story ...;
+--   ALTER TABLE quiz_excluded_user_story ADD CONSTRAINT uq_quiz_excluded_user_story ...;
+--   CREATE INDEX ix_quiz_excluded_user_story_quiz_id ...;
+--   ALTER TABLE quiz_excluded_user_story ENABLE ROW LEVEL SECURITY;
+--
+--   CREATE TABLE assembled_quiz_extra_user_story (...);
+--   ALTER TABLE assembled_quiz_extra_user_story ADD CONSTRAINT fk_assembled_quiz_extra_user_story_quiz ...;
+--   ALTER TABLE assembled_quiz_extra_user_story ADD CONSTRAINT fk_assembled_quiz_extra_user_story_user_story ...;
+--   ALTER TABLE assembled_quiz_extra_user_story ADD CONSTRAINT uq_assembled_quiz_extra_user_story ...;
+--   CREATE INDEX ix_assembled_quiz_extra_user_story_quiz_id ...;
+--   ALTER TABLE assembled_quiz_extra_user_story ENABLE ROW LEVEL SECURITY;
+--
+-- No existing table's shape changes, and every quiz created before this migration keeps drawing
+-- exactly the pool it already had — both tables start empty, which is the correct "nothing
+-- excluded or hand-picked yet" state, not a gap to backfill.
+-- GitHub #363 (Moodle-style course card: semester badge): course.semester is a brand new,
+-- nullable text column — every existing course row simply has no semester until an instructor
+-- sets one via the Edit Course modal, which is exactly the "badge just doesn't render" state the
+-- card already handles. Additive only, no backfill:
+--
+--   ALTER TABLE course ADD COLUMN IF NOT EXISTS semester text;
+
+-- GitHub #363 follow-up (pick a default cover, or upload a custom one): course.cover_image_url,
+-- another brand new nullable text column. Additive only, no backfill — every existing course
+-- simply has no explicit cover until an instructor picks one, which is exactly the "fall back to
+-- the deterministic default" state lib/courseCovers.ts's resolveCourseCoverSrc already handles:
+--
+--   ALTER TABLE course ADD COLUMN IF NOT EXISTS cover_image_url text;
+--
+-- Also requires a new **public** Storage bucket named `course-covers` (same as the existing
+-- `avatars` bucket — create it the same way, via the Supabase dashboard's Storage section, not
+-- SQL) for POST /api/instructor/course-covers to upload into. No RLS policy is added for it: like
+-- `avatars`, every write goes through a service-role route (lib/supabase.ts's
+-- getSupabaseClient()), never a client-side Supabase call.
+
+-- Task-type-and-difficulty gamification points: MCQ questions already had a max_score column
+-- (nothing to migrate there — createQuestionWithAnswers just writes a different value now), but
+-- LLM-graded submissions had no column to hold a difficulty-scaled award separately from the raw
+-- 1-10 rating. submission.awarded_score is a brand new nullable int4 column, and
+-- bump_session_score_from_submission()/trg_submission_score are redefined to read it instead of
+-- llm_score. If your database predates this:
+--
+--   ALTER TABLE submission ADD COLUMN IF NOT EXISTS awarded_score int4;
+--   DROP TRIGGER IF EXISTS trg_submission_score ON submission;
+--   -- then re-run the bump_session_score_from_submission() CREATE FUNCTION and
+--   -- trg_submission_score CREATE TRIGGER statements above, which now reference awarded_score.
+--
+-- No backfill: every submission graded before this migration keeps its llm_score (still shown in
+-- feedback/statistics) but has awarded_score NULL, so it never contributed to cumulative_score —
+-- same as it never did before this column existed. Only submissions graded after the migration
+-- earn points toward the total.
+
+-- assembled_quiz.grading_kind (locks each quiz to one catalog kind, closing the gap where
+-- "Create new question"/"Add individual items" had no way to know which kind a quiz wanted):
+-- add the column, backfill each existing quiz from its first-linked catalog's own grading_kind
+-- (falling back to 'mcq' for a quiz with no catalogs linked yet), then add the CHECK constraint —
+-- same add-then-backfill-then-constrain order activity_type.grading_kind's own migration used.
+--
+--   ALTER TABLE assembled_quiz ADD COLUMN IF NOT EXISTS grading_kind text NOT NULL DEFAULT 'mcq';
+--
+--   UPDATE assembled_quiz aq SET grading_kind = COALESCE((
+--     SELECT at.grading_kind FROM assembled_quiz_catalog aqc
+--     JOIN activity_type at ON at.activity_type = aqc.activity_type
+--     WHERE aqc.assembled_quiz_id = aq.assembled_quiz_id
+--     ORDER BY aqc.assembled_quiz_catalog_id LIMIT 1
+--   ), 'mcq');
+--
+--   ALTER TABLE assembled_quiz ADD CONSTRAINT ck_assembled_quiz_grading_kind
+--     CHECK (grading_kind IN ('mcq', 'llm-graded'));
+--
+-- A quiz whose linked catalogs were already genuinely mixed-kind before this migration simply
+-- keeps whichever kind its first-linked catalog has (link insertion order, via the surrogate
+-- assembled_quiz_catalog_id) — the app refuses to link any *further* mismatched catalog to it
+-- going forward, but this backfill does not retroactively unlink any pre-existing mismatched
+-- link. If that matters for a given deployment, find such quizzes first with:
+--
+--   SELECT aq.assembled_quiz_id, aq.grading_kind, at.grading_kind AS catalog_grading_kind
+--     FROM assembled_quiz aq
+--     JOIN assembled_quiz_catalog aqc ON aqc.assembled_quiz_id = aq.assembled_quiz_id
+--     JOIN activity_type at ON at.activity_type = aqc.activity_type
+--     WHERE at.grading_kind <> aq.grading_kind;
+--
+-- and unlink (DELETE FROM assembled_quiz_catalog ...) the mismatched rows by hand.
+
+-- assembled_quiz.questions_per_level (GitHub #416): a per-quiz override for how many
+-- questions/prompts a session draws per level, replacing the flat QUESTIONS_PER_SESSION constant
+-- as the draw size for any catalog the quiz grants access to. Never below MIN_QUESTIONS_PER_LEVEL
+-- (lib/sessionRules.ts) — every quiz must have at least 4 questions per level. If your database
+-- predates this:
+--
+--   ALTER TABLE assembled_quiz ADD COLUMN IF NOT EXISTS questions_per_level integer NOT NULL DEFAULT 4;
+--
+--   ALTER TABLE assembled_quiz ADD CONSTRAINT ck_assembled_quiz_questions_per_level
+--     CHECK (questions_per_level >= 4);
+--
+-- No backfill needed: DEFAULT 4 already matches QUESTIONS_PER_SESSION, so every existing quiz
+-- draws exactly as it did before this column existed.

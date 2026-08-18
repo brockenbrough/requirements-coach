@@ -8,6 +8,14 @@ export type CourseMeta = {
   name: string;
   code: string;
   createdAt: string;
+  /** The term the course is offered in (e.g. "SoSe 2026"), instructor-set and freeform. Null renders no badge. */
+  semester: string | null;
+  /**
+   * A specific cover to use — an instructor-uploaded image URL, or one of the 3 default covers'
+   * own static path if explicitly picked. Null means "no explicit choice": the card falls back
+   * to a deterministic default (lib/courseCovers.ts's resolveCourseCoverSrc), not a placeholder.
+   */
+  coverImageUrl: string | null;
 };
 
 export type CourseSummary = CourseMeta & { studentCount: number };
@@ -38,4 +46,7 @@ export type JoinableCourse = {
   studentCount: number;
   /** Scoped to the caller's own token — never discloses which other students are enrolled. */
   alreadyMember: boolean;
+  /** Same instructor-set fields CourseMeta carries — read-only here (GitHub #424). */
+  semester: string | null;
+  coverImageUrl: string | null;
 };

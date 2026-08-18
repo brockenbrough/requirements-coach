@@ -225,7 +225,7 @@ describe('POST /api/instructor/questions', () => {
       activity_type: 'IDENTIFY_WEAK_USER_STORIES',
       difficulty_level: 1,
       order_number: 1,
-      max_score: 25,
+      max_score: 10,
       user_id: 'instructor-1',
     });
   });

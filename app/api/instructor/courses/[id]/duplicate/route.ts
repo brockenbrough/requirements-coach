@@ -27,6 +27,12 @@ function getToken(request: Request): string | null {
  * only stores course_code (see createCourse's own comment in lib/courseClient.ts), which is
  * always freshly server-generated and never client-settable on create *or* on duplicate — so a
  * request body enrollmentKey has no column to land in and is silently ignored, not persisted.
+ * There is likewise no `semester` field: createCourseWithUniqueCode is called without one (see
+ * its own docblock), so the copy always starts with semester: null — a duplicate is typically
+ * meant for a new offering, and carrying the source's term over would misrepresent it. The cover
+ * image is the opposite case: the source's cover_image_url *is* carried over (a course's visual
+ * identity is more "same course, different section" than its semester is), so there's no
+ * corresponding `coverImageUrl` body field either — there would be nothing for it to override.
  *
  * Not transactional (the Supabase JS client has none): if copying the quizzes fails after the new
  * course row exists, the route deletes that row, and its cascading FKs (fk_assembled_quiz_course,
@@ -38,7 +44,7 @@ function getToken(request: Request): string | null {
  * - 403 caller isn't an instructor, or doesn't own the source course (no body either way)
  * - 404 source course doesn't exist
  * - 400 invalid JSON, or missing/blank name
- * - 201 { course: { id, name, code, createdAt, studentCount: 0 } }
+ * - 201 { course: { id, name, code, createdAt, semester: null, coverImageUrl, studentCount: 0 } }
  * - 500 Supabase not configured, course creation failure, or quiz-copy failure (new course rolled back)
  */
 export async function POST(request: Request, { params }: { params: { id: string } }) {
@@ -75,6 +81,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const { course, error: createError } = await createCourseWithUniqueCode(supabase, {
     name: name.trim(),
     creatorId: guard.user_id,
+    coverImageUrl: found.course.cover_image_url,
   });
 
   if (createError || !course) {
@@ -99,6 +106,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
         name: course.course_name,
         code: course.course_code,
         createdAt: course.created_at,
+        semester: course.semester,
+        coverImageUrl: course.cover_image_url,
         studentCount: 0,
       },
     },

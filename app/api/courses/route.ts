@@ -17,7 +17,7 @@ function getToken(request: Request): string | null {
  * into POST /api/courses/join; this route only helps them confirm which course to ask about.
  *
  * - 401 missing/invalid bearer token
- * - 200 { courses: [{ id, name, createdAt, professorName, studentCount, alreadyMember }] }
+ * - 200 { courses: [{ id, name, createdAt, professorName, studentCount, alreadyMember, semester, coverImageUrl }] }
  * - 500 Supabase not configured, or any query failure
  */
 export async function GET(request: Request) {
@@ -47,6 +47,8 @@ export async function GET(request: Request) {
         professorName: c.professor_name,
         studentCount: c.student_count,
         alreadyMember: c.already_member,
+        semester: c.semester,
+        coverImageUrl: c.cover_image_url,
       })),
     },
     { status: 200 },

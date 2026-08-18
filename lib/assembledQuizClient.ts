@@ -9,6 +9,9 @@
 // that path with a differently-named dynamic segment; Next.js can't have both).
 
 import type { CatalogQuestion, QuizQuestion } from './quizQuestionTypes';
+import type { CatalogUserStory } from './llmActivityTypes';
+import type { UserStoryDraft } from './llmActivityClient';
+import type { GradingKind } from './activityTypes';
 
 export type AssembledQuizSummary = {
   id: string;
@@ -16,7 +19,11 @@ export type AssembledQuizSummary = {
   description: string | null;
   courseId: string;
   courseName: string;
-  catalogs: { activityType: string; name: string }[];
+  /** The single catalog kind this quiz may ever compose/hand-pick from — locked at creation. */
+  gradingKind: GradingKind;
+  /** GitHub #416: how many questions/prompts a session draws per level for this quiz. */
+  questionsPerLevel: number;
+  catalogs: { activityType: string; name: string; gradingKind: GradingKind }[];
   catalogNames: string[];
   createdAt: string;
 };
@@ -27,12 +34,17 @@ export type AssembledQuizDetail = {
   description: string | null;
   courseId: string;
   courseName: string;
+  gradingKind: GradingKind;
+  questionsPerLevel: number;
 };
 
 export type QuizCatalogComposition = {
   activityType: string;
   name: string;
   description: string | null;
+  /** Which pool totalQuestions/activeCount are counted from — 'mcq' (question rows) or
+   *  'llm-graded' (user_story rows). Both kinds support per-quiz exclusion. */
+  gradingKind: GradingKind;
   totalQuestions: number;
   excludedCount: number;
   activeCount: number;
@@ -43,6 +55,9 @@ export type QuizLevelCoverage = { level: 1 | 2 | 3; available: number; required:
 /** One question in a quiz-scoped catalog view (GitHub #361) — a CatalogQuestion plus whether *this quiz* currently excludes it. */
 export type QuizScopedQuestion = CatalogQuestion & { excludedForQuiz: boolean };
 
+/** The llm-graded counterpart of QuizScopedQuestion — a CatalogUserStory plus whether *this quiz* currently excludes it. */
+export type QuizScopedUserStory = CatalogUserStory & { excludedForQuiz: boolean };
+
 /** One individually hand-picked question on a quiz (GitHub #380), with its source catalog for display. */
 export type QuizExtraQuestionSummary = {
   questionId: string;
@@ -52,10 +67,28 @@ export type QuizExtraQuestionSummary = {
   catalogName: string;
 };
 
+/** The llm-graded counterpart of QuizExtraQuestionSummary — one hand-picked prompt, with its source catalog for display. */
+export type QuizExtraUserStorySummary = {
+  userStoryId: string;
+  storyText: string;
+  level: 1 | 2 | 3;
+  catalogActivityType: string;
+  catalogName: string;
+};
+
 /** One question as the "Add individual questions" picker (GitHub #380) lists it, any catalog. */
 export type PickableQuestion = {
   id: string;
   questionText: string;
+  level: 1 | 2 | 3;
+  catalogActivityType: string;
+  catalogName: string;
+};
+
+/** The llm-graded counterpart of PickableQuestion — one prompt as the picker lists it, any catalog. */
+export type PickableUserStory = {
+  id: string;
+  storyText: string;
   level: 1 | 2 | 3;
   catalogActivityType: string;
   catalogName: string;
@@ -93,13 +126,28 @@ export function loadAssembledQuizzes(token: string): Promise<ApiResult<{ quizzes
 
 /**
  * Composes a quiz from one or more catalogs for one of the caller's own courses
- * (POST /api/instructor/assembled-quizzes).
+ * (POST /api/instructor/assembled-quizzes). gradingKind is required and locked forever once set —
+ * see assembled_quiz.grading_kind's own comment in supabase/schema.sql. questionsPerLevel (GitHub
+ * #416) is optional — the route falls back to QUESTIONS_PER_SESSION when it's omitted.
  */
 export function createAssembledQuiz(
   token: string,
-  input: { name: string; description?: string; courseId: string; catalogActivityTypes: string[] },
-): Promise<ApiResult<{ quiz: { id: string; name: string; description: string | null; courseId: string } }>> {
-  return request<{ quiz: { id: string; name: string; description: string | null; courseId: string } }>(
+  input: {
+    name: string;
+    description?: string;
+    courseId: string;
+    gradingKind: GradingKind;
+    questionsPerLevel?: number;
+    catalogActivityTypes: string[];
+  },
+): Promise<
+  ApiResult<{
+    quiz: { id: string; name: string; description: string | null; courseId: string; gradingKind: GradingKind; questionsPerLevel: number };
+  }>
+> {
+  return request<{
+    quiz: { id: string; name: string; description: string | null; courseId: string; gradingKind: GradingKind; questionsPerLevel: number };
+  }>(
     '/api/instructor/assembled-quizzes',
     postJson(input),
     token,
@@ -120,8 +168,9 @@ function quizPath(quizId: string, suffix = ''): string {
 
 /**
  * One quiz's full composition (GET /api/instructor/assembled-quizzes/{quizId}, GitHub #361,
- * extended by GitHub #380) — meta, every linked catalog with its genuinely-active question count,
- * every individually hand-picked question, and per-level coverage against the round size.
+ * extended by GitHub #380 and by llm-graded parity) — meta, every linked catalog with its
+ * genuinely-active question or prompt count, every individually hand-picked question and prompt,
+ * and per-level coverage against the round size.
  */
 export function loadQuizDetail(
   token: string,
@@ -132,8 +181,10 @@ export function loadQuizDetail(
     catalogs: QuizCatalogComposition[];
     levelCoverage: QuizLevelCoverage[];
     extraQuestions: QuizExtraQuestionSummary[];
+    extraUserStories: QuizExtraUserStorySummary[];
     /** Bare ids behind `catalogs`' per-catalog counts — what AddQuizQuestionsModal marks as already in the quiz. */
     activeCatalogQuestionIds: string[];
+    activeCatalogUserStoryIds: string[];
   }>
 > {
   return request<{
@@ -141,7 +192,9 @@ export function loadQuizDetail(
     catalogs: QuizCatalogComposition[];
     levelCoverage: QuizLevelCoverage[];
     extraQuestions: QuizExtraQuestionSummary[];
+    extraUserStories: QuizExtraUserStorySummary[];
     activeCatalogQuestionIds: string[];
+    activeCatalogUserStoryIds: string[];
   }>(quizPath(quizId), { method: 'GET' }, token);
 }
 
@@ -168,18 +221,24 @@ export function unlinkCatalogFromQuiz(token: string, quizId: string, activityTyp
   );
 }
 
+/** One linked catalog's own metadata, in the context of this quiz — the sibling of QuizMeta (lib/quizClient.ts) that also carries gradingKind. */
+export type QuizScopedCatalogMeta = { activityType: string; name: string; description: string | null; authorName: string; gradingKind: GradingKind };
+
 /**
- * One linked catalog's questions, in the context of this quiz
- * (GET /api/instructor/assembled-quizzes/{quizId}/catalogs/{activityType}, GitHub #361) — each
- * annotated with whether this quiz currently excludes it. Read-only: editing/deleting a question
- * happens only through the real catalog (lib/quizClient.ts's loadQuizDetail, GitHub #359).
+ * One linked catalog's questions or prompts, in the context of this quiz
+ * (GET /api/instructor/assembled-quizzes/{quizId}/catalogs/{activityType}, GitHub #361, extended
+ * to llm-graded catalogs). Both pools are always present, one always empty, same "discriminated
+ * by gradingKind, not by shape" convention lib/quizClient.ts's loadQuizDetail uses — each item is
+ * annotated with whether *this quiz* currently excludes it, the same way for both kinds. Content
+ * itself is read-only either way: editing/deleting happens only through the real catalog
+ * (lib/quizClient.ts's loadQuizDetail, GitHub #359).
  */
 export function loadQuizCatalogQuestions(
   token: string,
   quizId: string,
   activityType: string,
-): Promise<ApiResult<{ catalog: { activityType: string; name: string; description: string | null; authorName: string }; questions: QuizScopedQuestion[] }>> {
-  return request<{ catalog: { activityType: string; name: string; description: string | null; authorName: string }; questions: QuizScopedQuestion[] }>(
+): Promise<ApiResult<{ catalog: QuizScopedCatalogMeta; questions: QuizScopedQuestion[]; userStories: QuizScopedUserStory[] }>> {
+  return request<{ catalog: QuizScopedCatalogMeta; questions: QuizScopedQuestion[]; userStories: QuizScopedUserStory[] }>(
     quizPath(quizId, `/catalogs/${encodeURIComponent(activityType)}`),
     { method: 'GET' },
     token,
@@ -231,14 +290,67 @@ export function removeExtraQuestionFromQuiz(token: string, quizId: string, quest
 }
 
 /**
- * Every MCQ question in the system, any author, any catalog
- * (GET /api/instructor/assembled-quizzes/questions, GitHub #380) — the pool the "Add individual
- * questions" picker (AddQuizQuestionsModal) searches/filters client-side. Not quiz-scoped; the
- * caller cross-references against a specific quiz's own already-loaded composition to mark rows
- * as already included.
+ * Excludes one prompt from this quiz's draw pool
+ * (POST /api/instructor/assembled-quizzes/{quizId}/excluded-user-stories) — the llm-graded
+ * counterpart of excludeQuestionFromQuiz. Never touches the original user_story row.
  */
-export function loadAllQuestionsForPicker(token: string): Promise<ApiResult<{ questions: PickableQuestion[] }>> {
-  return request<{ questions: PickableQuestion[] }>('/api/instructor/assembled-quizzes/questions', { method: 'GET' }, token);
+export function excludeUserStoryFromQuiz(token: string, quizId: string, userStoryId: string): Promise<ApiResult<{ userStoryId: string }>> {
+  return request<{ userStoryId: string }>(quizPath(quizId, '/excluded-user-stories'), postJson({ userStoryId }), token);
+}
+
+/**
+ * Re-includes a previously excluded prompt
+ * (DELETE /api/instructor/assembled-quizzes/{quizId}/excluded-user-stories/{userStoryId}) — the
+ * llm-graded counterpart of includeQuestionInQuiz.
+ */
+export function includeUserStoryInQuiz(token: string, quizId: string, userStoryId: string): Promise<ApiResult<{ userStoryId: string }>> {
+  return request<{ userStoryId: string }>(
+    quizPath(quizId, `/excluded-user-stories/${encodeURIComponent(userStoryId)}`),
+    { method: 'DELETE' },
+    token,
+  );
+}
+
+/**
+ * Hand-picks one or more prompts directly onto this quiz
+ * (POST /api/instructor/assembled-quizzes/{quizId}/extra-user-stories) — the llm-graded
+ * counterpart of addExtraQuestionsToQuiz, independent of whether their catalogs are linked to the
+ * quiz at all. Returns the ids actually newly added (already-picked ones are silently omitted).
+ */
+export function addExtraUserStoriesToQuiz(token: string, quizId: string, userStoryIds: string[]): Promise<ApiResult<{ userStoryIds: string[] }>> {
+  return request<{ userStoryIds: string[] }>(quizPath(quizId, '/extra-user-stories'), postJson({ userStoryIds }), token);
+}
+
+/**
+ * Removes a hand-picked prompt from this quiz
+ * (DELETE /api/instructor/assembled-quizzes/{quizId}/extra-user-stories/{userStoryId}) — the
+ * llm-graded counterpart of removeExtraQuestionFromQuiz. The original user_story row, its
+ * catalog, and every other quiz are untouched.
+ */
+export function removeExtraUserStoryFromQuiz(token: string, quizId: string, userStoryId: string): Promise<ApiResult<{ userStoryId: string }>> {
+  return request<{ userStoryId: string }>(
+    quizPath(quizId, `/extra-user-stories/${encodeURIComponent(userStoryId)}`),
+    { method: 'DELETE' },
+    token,
+  );
+}
+
+/**
+ * Every MCQ question and every llm-graded prompt the calling instructor created, any of their own
+ * catalogs (GET /api/instructor/assembled-quizzes/questions, GitHub #380, extended with
+ * llm-graded parity) — the pool the "Add individual questions" picker (AddQuizQuestionsModal)
+ * searches/filters client-side, rendering the two kinds as separate sections. Not quiz-scoped;
+ * the caller cross-references against a specific quiz's own already-loaded composition to mark
+ * rows as already included.
+ */
+export function loadAllQuestionsForPicker(
+  token: string,
+): Promise<ApiResult<{ questions: PickableQuestion[]; userStories: PickableUserStory[] }>> {
+  return request<{ questions: PickableQuestion[]; userStories: PickableUserStory[] }>(
+    '/api/instructor/assembled-quizzes/questions',
+    { method: 'GET' },
+    token,
+  );
 }
 
 /**
@@ -267,6 +379,24 @@ export function createAndPickQuestionForQuiz(
         ...(option.isCorrect ? { explanation: question.explanation } : {}),
       })),
     }),
+    token,
+  );
+}
+
+/**
+ * Creates a brand-new prompt AND hand-picks it onto this quiz in one atomic request
+ * (POST /api/instructor/assembled-quizzes/{quizId}/user-stories) — the llm-graded twin of
+ * createAndPickQuestionForQuiz above. Returns extraUserStory so the composition page can append
+ * it to local state directly, without a full refetch.
+ */
+export function createAndPickUserStoryForQuiz(
+  token: string,
+  quizId: string,
+  prompt: UserStoryDraft,
+): Promise<ApiResult<{ userStoryId: string; extraUserStory: QuizExtraUserStorySummary }>> {
+  return request<{ userStoryId: string; extraUserStory: QuizExtraUserStorySummary }>(
+    quizPath(quizId, '/user-stories'),
+    postJson(prompt),
     token,
   );
 }

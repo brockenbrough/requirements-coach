@@ -20,7 +20,17 @@ function getToken(request: Request): string | null {
  * 200 [], not an error, the same "nothing to show yet" shape as every other student-facing list
  * in this app.
  *
+ * An optional `?courseId=` (GitHub #427) narrows the result to just that one course's activities
+ * — the student course-detail page's "quizzes in this course" list, reusing this same query
+ * rather than a second, parallel one. The caller must already be enrolled in that course: a
+ * courseId that isn't in the caller's own getEnrolledCourseIds result 403s (no body, matching
+ * every other ownership/enrollment guard in this app) rather than silently returning an empty
+ * list — a course that exists but the caller isn't in, and one that doesn't exist at all,
+ * collapse to the same outcome, the same reasoning checkActivityAccess documents for its own
+ * 'forbidden' status.
+ *
  * - 401 missing/invalid bearer token
+ * - 403 courseId given but the caller isn't enrolled in it (no body)
  * - 200 { activities: [{ activityType, name, description, courseId, courseName }] }
  * - 500 Supabase not configured, or either query fails
  */
@@ -39,7 +49,14 @@ export async function GET(request: Request) {
     return Response.json({ error: courseIdsError?.message ?? 'Could not load your courses.' }, { status: 500 });
   }
 
-  const { activities, error } = await listActivityTypesForCourses(supabase, courseIds);
+  const requestedCourseId = new URL(request.url).searchParams.get('courseId');
+  let scopedCourseIds = courseIds;
+  if (requestedCourseId !== null) {
+    if (!courseIds.includes(requestedCourseId)) return new Response(null, { status: 403 });
+    scopedCourseIds = [requestedCourseId];
+  }
+
+  const { activities, error } = await listActivityTypesForCourses(supabase, scopedCourseIds);
   if (error || !activities) {
     return Response.json({ error: error?.message ?? 'Could not load activities.' }, { status: 500 });
   }

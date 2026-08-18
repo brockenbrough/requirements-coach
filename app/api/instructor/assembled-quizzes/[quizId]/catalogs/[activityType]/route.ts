@@ -5,6 +5,7 @@ import {
   findOwnedAssembledQuiz,
   listQuizCatalogActivityTypes,
   listQuizCatalogQuestions,
+  listQuizCatalogUserStories,
   unlinkCatalogFromQuiz,
 } from '../../../../../../../lib/assembledQuizQueries';
 
@@ -54,8 +55,14 @@ async function authorize(request: Request, quizId: string) {
  * GET/POST/PATCH/DELETE /api/instructor/questions[/…]), never from here, so the original catalog
  * can never be reached through a quiz's composition screen.
  *
+ * Branches on the catalog's grading kind the same way GET /api/instructor/quizzes/{activityType}
+ * does — both pools always present, one always empty, rather than a discriminated union. An
+ * llm-graded catalog has no `question` rows at all (its content is `user_story`); its prompts are
+ * annotated with this quiz's own quiz_excluded_user_story state via listQuizCatalogUserStories,
+ * the exact same role listQuizCatalogQuestions plays for the mcq side.
+ *
  * - 404 quizId matches no quiz, OR activityType matches no catalog
- * - 200 { catalog: { activityType, name, description, authorName }, questions: QuizScopedQuestion[] }
+ * - 200 { catalog: { activityType, name, description, authorName, gradingKind }, questions: QuizScopedQuestion[], userStories: QuizScopedUserStory[] }
  */
 export async function GET(request: Request, { params }: { params: { quizId: string; activityType: string } }) {
   const auth = await authorize(request, params.quizId);
@@ -67,12 +74,20 @@ export async function GET(request: Request, { params }: { params: { quizId: stri
   if (catalogError) return Response.json({ error: catalogError.message }, { status: 500 });
   if (!catalog) return Response.json({ error: 'Catalog not found.' }, { status: 404 });
 
+  if (catalog.gradingKind === 'llm-graded') {
+    const { userStories, error: userStoriesError } = await listQuizCatalogUserStories(supabase, quiz.assembled_quiz_id, params.activityType);
+    if (userStoriesError || !userStories) {
+      return Response.json({ error: userStoriesError?.message ?? 'Could not load prompts.' }, { status: 500 });
+    }
+    return Response.json({ catalog, questions: [], userStories }, { status: 200 });
+  }
+
   const { questions, error: questionsError } = await listQuizCatalogQuestions(supabase, quiz.assembled_quiz_id, params.activityType);
   if (questionsError || !questions) {
     return Response.json({ error: questionsError?.message ?? 'Could not load questions.' }, { status: 500 });
   }
 
-  return Response.json({ catalog, questions }, { status: 200 });
+  return Response.json({ catalog, questions, userStories: [] }, { status: 200 });
 }
 
 /**

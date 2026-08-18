@@ -110,7 +110,7 @@ function queueGradingKind(gradingKind: string | null) {
 function queueEnrolled() {
   queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
   queue('assembled_quiz_catalog', {
-    data: [{ assembled_quiz: { course_id: 'course-1', course: { course_name: 'SE' } } }],
+    data: [{ assembled_quiz: { assembled_quiz_id: 'quiz-1', course_id: 'course-1', course: { course_name: 'SE' } } }],
     error: null,
   });
 }
@@ -212,6 +212,50 @@ describe('POST /api/activities/[activityType]/llm/sessions', () => {
     expect(h.state.inserts).toHaveLength(0);
   });
 
+  // Regression: the draw used to query `user_story` straight from the catalog with no awareness
+  // of any assembled quiz's quiz_excluded_user_story rows, so an excluded prompt kept getting
+  // drawn (and counted toward the STORIES_PER_SESSION minimum) even after an instructor excluded
+  // it — mirrors POST /api/sessions' identical fix for quiz_excluded_question.
+  it('never draws a prompt the granting quiz has excluded', async () => {
+    queueGradingKind('llm-graded');
+    queueEnrolled();
+    queue('session_log', { data: null, error: null });
+    queue('session_log', { data: [], error: null });
+    queue('user_story', { data: pool, error: null }); // 6 in the catalog
+    queue('quiz_excluded_user_story', { data: [{ user_story_id: 'story-5' }, { user_story_id: 'story-6' }], error: null });
+    queue('session_log', { data: sessionRow, error: null });
+    queue('session_to_user_story', { data: null, error: null });
+    queue('session_to_user_story', { data: drawnStories, error: null });
+
+    const response = await POST(req(), PARAMS());
+
+    expect(response.status).toBe(201);
+    const [{ payload }] = h.state.inserts.filter((i) => i.table === 'session_to_user_story');
+    const drawnIds = (payload as { user_story_id: string }[]).map((row) => row.user_story_id);
+    expect(drawnIds).not.toContain('story-5');
+    expect(drawnIds).not.toContain('story-6');
+  });
+
+  it('returns 400 when exclusions push the catalog below the minimum, even though it has enough prompts total', async () => {
+    queueGradingKind('llm-graded');
+    queueEnrolled();
+    queue('session_log', { data: null, error: null });
+    queue('session_log', { data: [], error: null });
+    queue('user_story', { data: pool, error: null }); // 6 in the catalog
+    // Only 3 remain once the granting quiz's exclusions are applied.
+    queue('quiz_excluded_user_story', {
+      data: [{ user_story_id: 'story-1' }, { user_story_id: 'story-2' }, { user_story_id: 'story-3' }],
+      error: null,
+    });
+
+    const response = await POST(req(), PARAMS());
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toMatch(/at least \d+ prompts/i);
+    expect(h.state.inserts).toHaveLength(0);
+  });
+
   it('creates a session with 4 distinct prompts and the required defaults', async () => {
     queueHappyPath();
 
@@ -232,7 +276,7 @@ describe('POST /api/activities/[activityType]/llm/sessions', () => {
       difficulty_level: 1,
       status: 'in-progress',
       cumulative_score: 0,
-      max_score: 40,
+      max_score: 80,
       passed: false,
     });
 
