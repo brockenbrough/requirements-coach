@@ -9,30 +9,43 @@ export type TourStep = {
   description: string;
 };
 
-// Sidebar navigation general, then Activities, Courses, score/progress, and Profile. Courses
-// (GitHub #242) sits right after Activities: both are "nav items you'd click to go somewhere",
-// so they stay grouped before the score pill and Profile close out the tour.
+// Every item in STUDENT_NAV_ITEMS (AppShell.tsx) gets its own step, plus the score pill, in the
+// exact top-to-bottom order they render in the sidebar (avatar → score pill → Dashboard → My
+// Courses → Course Browser → Leaderboard → Profile) — a single sweep down the sidebar with no
+// backtracking, so the spotlight never has to jump back up past an already-seen item. Dashboard
+// and Leaderboard used to be skipped entirely even though the very first step's own description
+// already promised "the leaderboard" among the things covered.
 export const studentTourSteps: TourStep[] = [
   {
     target: 'nav',
     title: 'Your navigation',
-    description: 'Everything you need is one click away here: activities, courses, the leaderboard, and your profile.',
-  },
-  {
-    target: 'nav-activities',
-    title: 'Activities',
-    description: 'Start here to practice. Pick an activity and a difficulty level, and work through a short round of questions.',
-  },
-  {
-    target: 'nav-courses',
-    title: 'Course Browser',
-    description:
-      'Join your instructor’s course here — search by course name, code, or instructor, and enter a course code (and enrollment key, if required) to get started.',
+    description: 'Everything you need is one click away here: your courses, the course browser, the leaderboard, and your profile.',
   },
   {
     target: 'score',
     title: 'Your score',
     description: 'Your cumulative score across every activity. Retaking a level only ever helps — a weaker attempt never lowers it.',
+  },
+  {
+    target: 'nav-dashboard',
+    title: 'Dashboard',
+    description: 'Your home base after signing in — a snapshot of what you have in progress and where to pick back up.',
+  },
+  {
+    target: 'nav-activities',
+    title: 'My Courses',
+    description: 'The courses you’ve joined. Click into one to see its quizzes, pick a difficulty level, and start practicing.',
+  },
+  {
+    target: 'nav-courses',
+    title: 'Course Browser',
+    description:
+      'Find your instructor’s course here — search by course name or professor, then enter the join code they gave you to get started.',
+  },
+  {
+    target: 'nav-leaderboard',
+    title: 'Leaderboard',
+    description: 'See how you rank against your classmates in each course you’ve joined.',
   },
   {
     target: 'nav-profile',
@@ -41,18 +54,21 @@ export const studentTourSteps: TourStep[] = [
   },
 ];
 
-// Sidebar navigation general, then Instructor Dashboard, Question Catalogs, and Courses — the
-// four areas the issue names for an instructor. GitHub #359 folded the old, separate "Question
-// Bank" step into this one, since browsing/editing questions now happens per catalog at the same
-// nav destination. The LLM provider settings gear (GitHub #318 follow-up) comes last, after the
-// day-to-day navigation is covered: it's a one-time setup step rather than something an
-// instructor reaches for on every visit, so it doesn't compete with the nav items for the "first
-// thing explained" slot.
+// Every item in INSTRUCTOR_NAV_ITEMS (AppShell.tsx) gets its own step, in the same order the
+// sidebar renders them: Instructor Dashboard, Courses, Question Catalogs, Quizzes, Profile — the
+// last of which used to be skipped entirely even though it's the same "revisit this tour any
+// time" nav item the student tour already ends on. GitHub #359 folded the old, separate "Question
+// Bank" step into Question Catalogs, since browsing/editing questions now happens per catalog at
+// the same nav destination. Quizzes (GitHub #360) composes one or more catalogs for a course, so
+// its step comes right after Question Catalogs. The LLM provider settings gear ('settings-gear',
+// GitHub #318 follow-up) comes last, after every nav item is covered: it's a one-time setup step
+// reached via its own icon button rather than the nav list, so it doesn't compete with the nav
+// items for the "first thing explained" slot.
 export const instructorTourSteps: TourStep[] = [
   {
     target: 'nav',
     title: 'Your navigation',
-    description: 'Everything you need as an instructor is one click away here: your dashboard, question catalogs, and courses.',
+    description: 'Everything you need as an instructor is one click away here: your dashboard, courses, question catalogs, and quizzes.',
   },
   {
     target: 'nav-instructor',
@@ -60,14 +76,24 @@ export const instructorTourSteps: TourStep[] = [
     description: 'See every student’s activity in one place. Filter and sort to quickly find who might need a hand.',
   },
   {
+    target: 'nav-instructor-courses',
+    title: 'Courses',
+    description: 'Create courses, manage rosters, and share join codes with your students.',
+  },
+  {
     target: 'nav-instructor-quizzes',
     title: 'Question Catalogs',
     description: 'Browse the catalogs your students are quizzed from, click into one to see its questions, and add or edit your own.',
   },
   {
-    target: 'nav-instructor-courses',
-    title: 'Courses',
-    description: 'Create courses, manage rosters, and share join codes with your students.',
+    target: 'nav-instructor-assembled-quizzes',
+    title: 'Quizzes',
+    description: 'Compose a quiz for one of your courses from one or more question catalogs, and control exactly which questions are included.',
+  },
+  {
+    target: 'nav-profile',
+    title: 'Your profile',
+    description: 'Update your details, and revisit this tour any time from here.',
   },
   {
     target: 'settings-gear',
