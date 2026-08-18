@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "../../components/AppShell";
 import { ActivityLogRow } from "../../components/ActivityLogRow";
 import { DailyChallengeCard } from "../../components/DailyChallengeCard";
@@ -99,6 +99,18 @@ export default function DashboardPage() {
     return () => { cancelled = true; };
   }, [token]);
 
+  // GitHub #476: "Recent activity" rows otherwise fall back to the raw activity_type key (e.g.
+  // "TEST_CATALOG") for any instructor-created catalog, since toActivityLogEntry's own built-in
+  // name lookup only knows the three built-in activity types. availableTitles is already loaded
+  // on this page for the Mastery titles grid below, so this is a lookup, not a new fetch — and
+  // since it's a separate, independently-loading effect, this stays a plain derived value rather
+  // than folding into the `recent` state, so a slow/failed load never blocks the list itself from
+  // rendering with whatever name it can already resolve.
+  const activityNameByType = useMemo(
+    () => new Map((availableTitles ?? []).map((activity) => [activity.activityType, activity.activityName])),
+    [availableTitles],
+  );
+
   // Blank rather than a "logged out" message while useRequireRole's effect redirects — for
   // a wrong role that message would be actively misleading (an instructor isn't logged out).
   if (loading || !authorized) return null;
@@ -134,7 +146,7 @@ export default function DashboardPage() {
       ) : (
         <div className="mb-4">
           {recent.map((session) => (
-            <ActivityLogRow key={session.session_id} entry={toActivityLogEntry(session)} variant="compact" />
+            <ActivityLogRow key={session.session_id} entry={toActivityLogEntry(session, activityNameByType)} variant="compact" />
           ))}
         </div>
       )}

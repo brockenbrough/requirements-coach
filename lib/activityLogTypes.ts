@@ -160,6 +160,14 @@ export function summarizeStudents(
  * expect, so the dashboard's "Recent activity" preview and the full /dashboard/log page
  * (GitHub #48) can share one row component without either page knowing about the other's data
  * source.
+ *
+ * nameByType (GitHub #476) is the same activityType -> real display name lookup
+ * deriveActivityFilterOptions below already takes — getActivityByType only knows the three
+ * built-in activity types, so without it, any instructor-created catalog falls back to its raw
+ * activity_type key (e.g. "TEST_CATALOG", the slugified name Postgres actually stores) instead
+ * of a real name. Optional and additive: omitting it reproduces the exact old behavior, so a
+ * caller with nothing better to offer (or mid-load, before its own name lookup resolves) is
+ * unaffected.
  */
 /**
  * The instructor-side counterpart (GitHub #171): the same adaptation, plus the two fields that
@@ -175,11 +183,11 @@ export function toStudentActivitySummary(session: InstructorActivityEntry): Stud
   };
 }
 
-export function toActivityLogEntry(session: SessionListEntry): ActivityLogEntry {
+export function toActivityLogEntry(session: SessionListEntry, nameByType?: Map<string, string>): ActivityLogEntry {
   return {
     id: session.session_id,
     activityType: session.activity_type as ActivityType,
-    activityName: getActivityByType(session.activity_type)?.name ?? session.activity_type,
+    activityName: nameByType?.get(session.activity_type) ?? getActivityByType(session.activity_type)?.name ?? session.activity_type,
     level: session.difficulty_level as 1 | 2 | 3,
     // session_log's timestamps carry no zone; toInstant marks them as the UTC they are, so
     // ActivityLogRow/StudentScoreChart/StudentMetricCards all format the right local time.
