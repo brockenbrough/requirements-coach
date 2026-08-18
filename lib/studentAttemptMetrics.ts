@@ -19,7 +19,9 @@ export function computeStudentMetrics(studentId: string, studentName: string, at
   // averageScore/abandonedCount/needsAttention reuse the exact same thresholds and "completed
   // attempts only" rule the roster (lib/activityLogTypes.ts's summarizeStudents) already uses —
   // so this page can never disagree with the dashboard about whether a student needs attention.
-  const asSummaries: StudentActivitySummary[] = attempts.map((attempt) => ({ ...attempt, studentId, studentName }));
+  // courses: [] — this page's own attempts are still mock data (see StudentAttemptDetail's own
+  // docstring in mockStudentAttempts.ts), with no real course association to report.
+  const asSummaries: StudentActivitySummary[] = attempts.map((attempt) => ({ ...attempt, studentId, studentName, courses: [] }));
   const [aggregate] = summarizeStudents(asSummaries);
 
   const completedQuestions = attempts.reduce((sum, attempt) => sum + attempt.answeredQuestions, 0);

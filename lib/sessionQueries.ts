@@ -11,6 +11,7 @@ import {
 } from './sessionRules';
 import type { InstructorActivityEntry, InstructorSessionEntry, SessionListEntry, SessionRecord } from './sessionTypes';
 import { shuffleArray } from './shuffleArray';
+import { listCoursesForActivityTypes } from './activityCourseQueries';
 
 export type SupabaseClient = NonNullable<ReturnType<typeof getSupabaseClient>>;
 
@@ -481,6 +482,10 @@ function studentDisplayName(student: EmbeddedStudent): string {
  * loadStudentActivityForIds has no such second source to double against — the course CSV export
  * is the only thing that reads it, and there's no separate submissions merge there — so it
  * deliberately keeps including every activity type.
+ *
+ * courses (GitHub #474) costs one extra round trip — listCoursesForActivityTypes scoped to
+ * ownedMcqTypes, the same list already bounding the session query — rather than one per session
+ * row, since the same catalog is usually attempted by many students.
  */
 export async function loadAllStudentActivity(supabase: SupabaseClient, ownedMcqTypes: string[]) {
   if (ownedMcqTypes.length === 0) return { activities: [], error: null };
@@ -508,6 +513,9 @@ export async function loadAllStudentActivity(supabase: SupabaseClient, ownedMcqT
 
   if (progressError) return { activities: null, error: progressError };
 
+  const { coursesByActivityType, error: coursesError } = await listCoursesForActivityTypes(supabase, ownedMcqTypes);
+  if (coursesError) return { activities: null, error: coursesError };
+
   // The embed is destructured off rather than spread along: it carries role and username, which
   // are inputs to this query, not part of what the endpoint discloses.
   const activities: InstructorActivityEntry[] = rows.map(({ student, ...session }) => {
@@ -520,6 +528,7 @@ export async function loadAllStudentActivity(supabase: SupabaseClient, ownedMcqT
       nextPosition: sessionProgress?.nextPosition ?? null,
       studentId: session.user_id,
       studentName: studentDisplayName(student),
+      courses: coursesByActivityType!.get(session.activity_type) ?? [],
     };
   });
 
@@ -564,6 +573,14 @@ export async function loadStudentActivityForIds(supabase: SupabaseClient, studen
 
   if (progressError) return { activities: null, error: progressError };
 
+  // Unlike loadAllStudentActivity, this has no pre-known activity_type list to scope the course
+  // lookup by — a roster can have attempted anything, not just catalogs linked to the course
+  // being exported — so the distinct set is derived from the rows themselves after the fetch.
+  const { coursesByActivityType, error: coursesError } = await listCoursesForActivityTypes(supabase, [
+    ...new Set(rows.map((row) => row.activity_type)),
+  ]);
+  if (coursesError) return { activities: null, error: coursesError };
+
   const activities: InstructorActivityEntry[] = rows.map(({ student, ...session }) => {
     const sessionProgress = progress!.get(session.session_id);
 
@@ -574,6 +591,7 @@ export async function loadStudentActivityForIds(supabase: SupabaseClient, studen
       nextPosition: sessionProgress?.nextPosition ?? null,
       studentId: session.user_id,
       studentName: studentDisplayName(student),
+      courses: coursesByActivityType!.get(session.activity_type) ?? [],
     };
   });
 

@@ -82,6 +82,8 @@ export function deriveActivityFilterOptions(
 export type StudentActivitySummary = ActivityLogEntry & {
   studentId: string;
   studentName: string;
+  /** GitHub #474: every course this attempt's catalog is currently linked to; [] means none yet. */
+  courses: { courseId: string; courseName: string }[];
 };
 
 // Deliberately simple, visible thresholds rather than a statistical model — an instructor
@@ -169,6 +171,7 @@ export function toStudentActivitySummary(session: InstructorActivityEntry): Stud
     ...toActivityLogEntry(session),
     studentId: session.studentId,
     studentName: session.studentName,
+    courses: session.courses,
   };
 }
 
@@ -208,6 +211,8 @@ export type AcSubmissionRow = ActivityLogEntry & {
   userStoryDescription: string;
   submittedText: string;
   llmFeedback: string | null;
+  /** GitHub #474: every course this submission's catalog is currently linked to; [] means none yet. */
+  courses: { courseId: string; courseName: string }[];
 };
 
 export type ActivityRow = QuizAttemptRow | AcSubmissionRow;
@@ -251,5 +256,6 @@ export function toAcSubmissionRow(submission: InstructorACSubmission): AcSubmiss
     userStoryDescription: submission.userStoryDescription,
     submittedText: submission.submittedText,
     llmFeedback: submission.llmFeedback,
+    courses: submission.courses,
   };
 }

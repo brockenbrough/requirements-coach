@@ -147,6 +147,8 @@ export type InstructorACSubmission = {
   llmFeedback: string | null;
   submittedAt: string;
   gradedAt: string | null;
+  /** GitHub #474: every course this submission's catalog is currently linked to; [] means none yet. */
+  courses: { courseId: string; courseName: string }[];
 };
 
 /** GET /api/instructor/acceptance-criteria/submissions — all AC submissions, optionally scoped to one student. */
