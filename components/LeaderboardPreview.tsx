@@ -6,9 +6,9 @@ import { Avatar } from './Avatar';
 import { LeaderboardRankBadge } from './LeaderboardRankBadge';
 import { RankChangeIndicator } from './RankChangeIndicator';
 import { StreakBadge } from './StreakBadge';
-import { loadCourseLeaderboard, loadMyLeaderboardCourses } from '../lib/studentCourseClient';
+import { GLOBAL_LEADERBOARD_KEY, loadGlobalLeaderboard } from '../lib/studentCourseClient';
 import { recordLeaderboardRanks } from '../lib/previousRankStore';
-import type { LeaderboardCourse, LeaderboardEntry } from '../lib/leaderboardTypes';
+import type { LeaderboardEntry } from '../lib/leaderboardTypes';
 
 const TOP_COUNT = 5;
 
@@ -40,8 +40,14 @@ function PreviewRow({ entry, isCurrentUser }: { entry: LeaderboardEntry; isCurre
 }
 
 /**
- * The dashboard's glance at the course leaderboard: the top five, plus the student's own row
- * appended when they didn't make it, so the panel always answers "where am I?" without a click.
+ * The dashboard's glance at the GLOBAL leaderboard (GitHub #432 follow-up): the top five, plus
+ * the student's own row appended when they didn't make it, ranked by total score across every
+ * course the student shares with the people shown — not one course's own points. The per-course
+ * leaderboard lives elsewhere now: app/leaderboard/page.tsx (with its course switcher) and
+ * components/CourseLeaderboard.tsx (embedded on a course's own quiz-list page) are the two
+ * course-scoped readers of GET /api/courses/{courseId}/leaderboard; this is the one reader of the
+ * separate, global GET /api/leaderboard (lib/leaderboardQueries.ts's computeGlobalLeaderboard) —
+ * intentionally two different endpoints, not the same query reused with/without a filter.
  *
  * Deliberately not LeaderboardTable at a smaller size. This sits in a ~600px dashboard column
  * next to the mastery cards, where five table columns with headers would be cramped; a stacked
@@ -49,29 +55,28 @@ function PreviewRow({ entry, isCurrentUser }: { entry: LeaderboardEntry; isCurre
  * meaning — LeaderboardRankBadge, Avatar and RankChangeIndicator — so the podium colours, the
  * initials fallback and the arrow semantics cannot drift between them. Only the layout differs.
  *
- * Reads GET /api/courses/{courseId}/leaderboard via lib/studentCourseClient.ts's
- * loadCourseLeaderboard, same real data source as app/leaderboard/page.tsx — the two share the
- * courseId-keyed cache (lib/leaderboardStore.ts), so whichever loads first serves the other.
- * Picks the student's first enrolled course, since a "primary course" doesn't exist yet; a
- * student in several courses sees the same one here as the leaderboard page falls back to.
- * Records this render's ranks as the new previous-rank snapshot (lib/previousRankStore.ts) the
- * same way the full leaderboard page does, so a delta shown here and on /leaderboard afterwards
- * agrees rather than each keeping its own idea of "last visit".
+ * Reads GET /api/leaderboard via lib/studentCourseClient.ts's loadGlobalLeaderboard, cached under
+ * the reserved GLOBAL_LEADERBOARD_KEY in the same courseId-keyed stores real course leaderboards
+ * use (lib/leaderboardStore.ts, lib/previousRankStore.ts) — a completed session's existing
+ * cache-clear (the play flow's handleFinishSummary) already covers this entry too. An empty
+ * result can only mean "not enrolled in any course at all" (see computeGlobalLeaderboard's own
+ * doc: the viewer's own row would otherwise always appear, even at 0 points), so that's the one
+ * case rendered as "join a course" rather than "be the first".
  */
 export function LeaderboardPreview({ token, studentId }: { token: string; studentId?: string }) {
-  const [course, setCourse] = useState<LeaderboardCourse | null | undefined>(undefined);
   const [entries, setEntries] = useState<LeaderboardEntry[] | null>(null);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
 
-    loadMyLeaderboardCourses(token).then((result) => {
+    loadGlobalLeaderboard(token).then((result) => {
       if (cancelled) return;
       if (!result.ok) {
-        setCourse(null);
+        setFailed(true);
         return;
       }
-      setCourse(result.data.courses[0] ?? null);
+      setEntries(result.data.entries);
     });
 
     return () => {
@@ -80,24 +85,11 @@ export function LeaderboardPreview({ token, studentId }: { token: string; studen
   }, [token]);
 
   useEffect(() => {
-    if (!course) return;
-    let cancelled = false;
+    if (!entries || entries.length === 0) return;
+    recordLeaderboardRanks(GLOBAL_LEADERBOARD_KEY, entries);
+  }, [entries]);
 
-    loadCourseLeaderboard(token, course.courseId).then((result) => {
-      if (!cancelled && result.ok) setEntries(result.data.entries);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [token, course]);
-
-  useEffect(() => {
-    if (!course || !entries || entries.length === 0) return;
-    recordLeaderboardRanks(course.courseId, entries);
-  }, [course, entries]);
-
-  if (course === undefined || (course && entries === null)) {
+  if (entries === null && !failed) {
     return (
       <section className="mb-7 animate-pulse rounded-brand-lg bg-brand-navy p-6" aria-hidden="true">
         <div className="mb-4 h-6 w-32 rounded-full bg-white/10" />
@@ -114,25 +106,22 @@ export function LeaderboardPreview({ token, studentId }: { token: string; studen
   const top = rows.slice(0, TOP_COUNT);
   const me = rows.find((entry) => entry.studentId === studentId) ?? null;
   const meInTop = top.some((entry) => entry.studentId === studentId);
+  // An empty result here only ever means "not enrolled anywhere" — see computeGlobalLeaderboard's
+  // own doc: the viewer's own courses always include the viewer, so a real, non-empty enrollment
+  // would always produce at least the viewer's own row.
+  const notEnrolled = !failed && rows.length === 0;
 
   return (
     <section className="mb-7 rounded-brand-lg bg-brand-navy p-6 text-brand-ink">
       <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="text-xl font-extrabold text-white">Leaderboard</h3>
-        {course ? (
-          <span className="text-xs font-bold uppercase tracking-wide text-brand-ink-muted">
-            {course.courseName}
-          </span>
-        ) : null}
       </div>
 
-      {!course ? (
+      {failed ? (
+        <p className="mb-4 text-sm font-semibold text-brand-ink-muted">Could not load the leaderboard.</p>
+      ) : notEnrolled ? (
         <p className="mb-4 text-sm font-semibold text-brand-ink-muted">
           Join a course to see how you compare with your classmates.
-        </p>
-      ) : rows.length === 0 ? (
-        <p className="mb-4 text-sm font-semibold text-brand-ink-muted">
-          No one in this course has completed an activity yet — be the first.
         </p>
       ) : (
         <div className="mb-4">
@@ -158,10 +147,10 @@ export function LeaderboardPreview({ token, studentId }: { token: string; studen
       )}
 
       <Link
-        href={course ? `/leaderboard?courseId=${encodeURIComponent(course.courseId)}` : '/courses'}
+        href={notEnrolled ? '/courses' : '/leaderboard'}
         className="block w-full rounded-brand-md border border-brand-teal py-2.5 text-center text-sm font-extrabold text-brand-teal transition hover:bg-brand-teal/10"
       >
-        {course ? 'View full leaderboard →' : 'Browse courses'}
+        {notEnrolled ? 'Browse courses' : 'View course leaderboards →'}
       </Link>
     </section>
   );

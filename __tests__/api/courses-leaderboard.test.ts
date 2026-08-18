@@ -131,6 +131,18 @@ describe('GET /api/courses/{courseId}/leaderboard', () => {
       data: [{ user_id: 'student-1', student: { username: 'ada', avatar_url: null, role: 'student' } }],
       error: null,
     }); // roster
+    queue('assembled_quiz_catalog', {
+      // Links IDENTIFY_WEAK_USER_STORIES to this course, the same shape
+      // lib/activityCourseQueries.ts's listActivityTypesForCourses reads (GitHub #432 scoping).
+      data: [
+        {
+          activity_type: 'IDENTIFY_WEAK_USER_STORIES',
+          catalog: { quiz_name: 'IDENTIFY_WEAK_USER_STORIES', description: null, grading_kind: 'mcq' },
+          assembled_quiz: { course_id: COURSE_ID, quiz_name: 'Quiz', description: null, course: { course_name: 'Course' } },
+        },
+      ],
+      error: null,
+    });
     queue('session_log', {
       data: [
         {
