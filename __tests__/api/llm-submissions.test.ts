@@ -63,7 +63,14 @@ vi.mock('../../lib/llm/factory', async (importOriginal) => {
   return { ...actual, getLLMProvider: vi.fn() };
 });
 
+// Mocked rather than exercised for real (that's __tests__/lib/secretEncryption.test.ts's job) —
+// this route test stays focused on routing/authorization. Defaults to an identity function so
+// CONFIG.api_key below still flows through to getLLMProvider unchanged; individual tests can
+// override it to simulate a decrypt failure.
+vi.mock('../../lib/secretEncryption', () => ({ decryptSecret: vi.fn((value: string) => value) }));
+
 import { getLLMProvider } from '../../lib/llm/factory';
+import { decryptSecret } from '../../lib/secretEncryption';
 import { POST } from '../../app/api/activities/[activityType]/llm/submissions/route';
 
 const ACTIVITY = 'WRITE_ACCEPTANCE_CRITERIA';
@@ -158,6 +165,8 @@ beforeEach(() => {
   rateAcceptanceCriteria.mockResolvedValue({ score: 8, feedback: 'Clear and testable.' });
   vi.mocked(getLLMProvider).mockReset();
   vi.mocked(getLLMProvider).mockReturnValue({ rateAcceptanceCriteria } as never);
+  vi.mocked(decryptSecret).mockReset();
+  vi.mocked(decryptSecret).mockImplementation((value: string) => value);
 });
 
 describe('POST /api/activities/[activityType]/llm/submissions', () => {
@@ -291,6 +300,18 @@ describe('POST /api/activities/[activityType]/llm/submissions', () => {
     const response = await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
 
     expect(response.status).toBe(500);
+  });
+
+  it('returns 500 without calling the provider when the stored api_key cannot be decrypted', async () => {
+    queueUpToLLM();
+    vi.mocked(decryptSecret).mockReturnValue(null);
+
+    const response = await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body.error).toBe('Configured LLM provider key could not be read.');
+    expect(getLLMProvider).not.toHaveBeenCalled();
   });
 
   it('returns 502 when the LLM provider request fails', async () => {

@@ -1339,3 +1339,14 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 --
 -- No backfill needed: DEFAULT 4 already matches QUESTIONS_PER_SESSION, so every existing quiz
 -- draws exactly as it did before this column existed.
+
+-- instructor_llm_config.api_key is now encrypted before it's written (lib/secretEncryption.ts,
+-- keyed by the LLM_CONFIG_ENCRYPTION_KEY env var — see .env.example) — no column/type change,
+-- it's still `text`, just no longer plaintext. Unlike the other notes in this footer, this one
+-- has NO safe backfill: any row saved before this change is plaintext, not the app's
+-- iv:authTag:ciphertext format, and cannot be decrypted after the fact — there is no key that
+-- would work, because none was ever used to encrypt it. If your deployment has pre-existing rows
+-- in this table, each affected instructor needs to re-save their LLM provider config once from
+-- Instructor → Settings after this deploys; grading against the old row 500s with "Configured
+-- LLM provider key could not be read" until they do. See docs/manuals/administrator-manual.md's
+-- "Setting up LLM grading" section for the operator-facing version of this note.

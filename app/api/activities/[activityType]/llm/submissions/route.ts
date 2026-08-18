@@ -1,6 +1,7 @@
 import { getSupabaseClient } from "../../../../../../lib/supabase";
 import { getGradingKind } from "../../../../../../lib/activityTypes";
 import { getLLMProvider, isLLMProviderName } from "../../../../../../lib/llm/factory";
+import { decryptSecret } from "../../../../../../lib/secretEncryption";
 import { SESSION_COLUMNS, isPassing } from "../../../../../../lib/sessionRules";
 import { awardedScoreForRating } from "../../../../../../lib/llmActivityRules";
 import {
@@ -202,9 +203,16 @@ export async function POST(request: Request, { params }: { params: { activityTyp
       { status: 500 },
     );
 
-  const { provider: providerName, api_key: apiKey, model } = config as LLMConfigRow;
+  const { provider: providerName, api_key: storedApiKey, model } = config as LLMConfigRow;
   if (!isLLMProviderName(providerName))
     return Response.json({ error: "Configured LLM provider is invalid." }, { status: 500 });
+
+  // storedApiKey is ciphertext (lib/secretEncryption.ts) — decrypted only here, in memory, at the
+  // point it's handed to the provider SDK. null covers both a missing/misconfigured
+  // LLM_CONFIG_ENCRYPTION_KEY and a row saved before encryption existed (see
+  // supabase/schema.sql's migration note).
+  const apiKey = decryptSecret(storedApiKey);
+  if (!apiKey) return Response.json({ error: "Configured LLM provider key could not be read." }, { status: 500 });
 
   const provider = getLLMProvider(providerName, apiKey, model);
   if (!provider)
