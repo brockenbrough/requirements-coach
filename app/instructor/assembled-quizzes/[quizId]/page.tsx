@@ -131,7 +131,9 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
       setExtraUserStories(detailResult.data.extraUserStories);
       setActiveCatalogQuestionIds(detailResult.data.activeCatalogQuestionIds);
       setActiveCatalogUserStoryIds(detailResult.data.activeCatalogUserStoryIds);
-      setAllCatalogs(catalogsResult.data.quizzes);
+      // GitHub #478: a built-in example catalog can be added to a quiz's composition too — linking
+      // only writes to assembled_quiz_catalog, never to the catalog itself.
+      setAllCatalogs([...catalogsResult.data.quizzes, ...catalogsResult.data.exampleCatalogs]);
     });
 
     return () => {

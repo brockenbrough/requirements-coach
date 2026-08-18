@@ -20,12 +20,15 @@ function getToken(request: Request): string | null {
  * contains (GitHub #359), for the catalog detail page's read-only view. Distinct from
  * GET /api/instructor/quizzes/:activityType/:difficultyLevel/questions (own-questions-only, one
  * level, 403s when the caller owns none of that level) — this route answers "what's in this
- * catalog", scoped the same "mine only" way the browse list is: a catalog is visible here only if
- * creator_id matches the caller, so a built-in or colleague's catalog 403s even though it exists.
+ * catalog", scoped the same "mine only" way the browse list is, with one exception (GitHub #478):
+ * a built-in example catalog (creator_id IS NULL) is visible here to every instructor too, always
+ * read-only (quiz.isBuiltIn is what tells the client to lock the page down) — only a colleague's
+ * own catalog still 403s even though it exists.
  *
  * - 401 missing/invalid bearer token
- * - 403 caller isn't an instructor (no body), or is an instructor but doesn't own this catalog
- *   (no body — same 404-then-403 ordering as e.g. lib/courseQueries.ts's findOwnedCourse)
+ * - 403 caller isn't an instructor (no body), or is an instructor but the catalog belongs to a
+ *   different instructor (no body — same 404-then-403 ordering as e.g. lib/courseQueries.ts's
+ *   findOwnedCourse)
  * - 404 activityType matches no catalog
  * - 200 { quiz, questions: CatalogQuestion[], userStories: CatalogUserStory[], titles: StoredTitleRung[] }
  * - 500 Supabase not configured, or either query fails
@@ -55,7 +58,7 @@ export async function GET(request: Request, { params }: { params: { activityType
   const { quiz, creatorId, error: quizError } = await getQuizByActivityType(supabase, activityType);
   if (quizError) return Response.json({ error: quizError.message }, { status: 500 });
   if (!quiz) return Response.json({ error: 'Catalog not found.' }, { status: 404 });
-  if (creatorId !== guard.user_id) return new Response(null, { status: 403 });
+  if (creatorId !== null && creatorId !== guard.user_id) return new Response(null, { status: 403 });
 
   // The mastery title ladder is catalog-level metadata, not a pool, so it comes back for both
   // grading kinds — an llm-graded catalog earns titles exactly the same way an MCQ one does.

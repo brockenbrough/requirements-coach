@@ -23,6 +23,9 @@ export type QuizSummary = {
   /** How many assembled quizzes (GitHub #360) currently reference this catalog — a catalog has no
    *  course of its own, so this is what the browse page shows instead. */
   quizCount: number;
+  /** GitHub #478: true for one of the built-in example catalogs (creator_id IS NULL) — strictly
+   *  read-only everywhere in the UI; "Duplicate" is the only action available on one. */
+  isBuiltIn: boolean;
 };
 
 export type QuizMeta = Omit<QuizSummary, 'questionCount' | 'quizCount'> & {
@@ -56,9 +59,12 @@ async function request<T>(url: string, init: RequestInit, token: string): Promis
   return { ok: true, data: body as T };
 }
 
-/** Every catalog the calling instructor created (GET /api/instructor/quizzes). */
-export function loadQuizzes(token: string): Promise<ApiResult<{ quizzes: QuizSummary[] }>> {
-  return request<{ quizzes: QuizSummary[] }>('/api/instructor/quizzes', { method: 'GET' }, token);
+/**
+ * Every catalog the calling instructor created, plus the built-in example catalogs every
+ * instructor sees (GET /api/instructor/quizzes, GitHub #478).
+ */
+export function loadQuizzes(token: string): Promise<ApiResult<{ quizzes: QuizSummary[]; exampleCatalogs: QuizSummary[] }>> {
+  return request<{ quizzes: QuizSummary[]; exampleCatalogs: QuizSummary[] }>('/api/instructor/quizzes', { method: 'GET' }, token);
 }
 
 /**
@@ -185,12 +191,48 @@ export function loadTitleNames(token: string): Promise<ApiResult<{ titleNames: s
 /**
  * Deletes a catalog and unlinks it from every assembled quiz it was composed into
  * (DELETE /api/instructor/quizzes/{activityType}). Refuses with a 409 (surfaced as `error`) if a
- * student has already engaged with it.
+ * student has already engaged with it. A built-in example catalog always 403s here — see
+ * duplicateCatalog below for the action that's actually available on one.
  */
 export function deleteCatalog(token: string, activityType: string): Promise<ApiResult<{ activityType: string }>> {
   return request<{ activityType: string }>(
     `/api/instructor/quizzes/${encodeURIComponent(activityType)}`,
     { method: 'DELETE' },
+    token,
+  );
+}
+
+/**
+ * A newly duplicated catalog (POST /api/instructor/quizzes/{activityType}/duplicate) — deliberately
+ * its own type rather than CreatedQuiz: a duplicate never asks for a title ladder up front the way
+ * catalog creation does, and it reports questionCount (the copy's own item count) instead.
+ */
+export type DuplicatedQuiz = {
+  activityType: string;
+  name: string;
+  description: string | null;
+  gradingKind: GradingKind;
+  ratingPrompt: string | null;
+  questionCount: number;
+};
+
+/**
+ * Copies a catalog the caller can view (their own, or a built-in example) into a brand-new,
+ * fully-editable catalog they own — POST /api/instructor/quizzes/{activityType}/duplicate,
+ * GitHub #478's "Duplicate" action. The source is left untouched.
+ */
+export function duplicateCatalog(
+  token: string,
+  activityType: string,
+  input: { name: string },
+): Promise<ApiResult<{ quiz: DuplicatedQuiz }>> {
+  return request<{ quiz: DuplicatedQuiz }>(
+    `/api/instructor/quizzes/${encodeURIComponent(activityType)}/duplicate`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    },
     token,
   );
 }
