@@ -29,6 +29,13 @@ const SOFT_LENGTH_LIMIT = 600;
  * The catalog picker is rendered even when `catalogOptions` holds a single entry — the same
  * effectively-locked field QuestionFormModal's `quizOptions` produces on this page. It stays
  * visible rather than being hidden, so the form always says which catalog it is writing to.
+ *
+ * Bug: Creating prompt popup closes — same fix QuestionFormModal already got: a successful save
+ * only auto-closes in 'edit' mode. In 'add' mode the modal stays open and the prompt field resets
+ * (catalog/level selection stays as-is, since a batch of prompts usually shares both) — each save
+ * is already a real, persisted write via onSave, so there is nothing to lose by letting the
+ * instructor add another right away. addedPrompts tracks this session's own saves so the
+ * instructor can see them without the catalog's real list behind this modal's full-screen overlay.
  */
 export function PromptFormModal({
   mode,
@@ -53,6 +60,7 @@ export function PromptFormModal({
   const [storyText, setStoryText] = useState(initialData?.storyText ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [addedPrompts, setAddedPrompts] = useState<{ id: string; storyText: string }[]>([]);
 
   const { panelRef, firstFieldRef, requestClose } = useModalDismiss<HTMLDivElement, HTMLTextAreaElement>({
     onClose,
@@ -68,7 +76,8 @@ export function PromptFormModal({
     setSubmitting(true);
     setError('');
 
-    const result = await onSave({ storyText: storyText.trim(), activityType, difficultyLevel: level });
+    const trimmedStoryText = storyText.trim();
+    const result = await onSave({ storyText: trimmedStoryText, activityType, difficultyLevel: level });
 
     setSubmitting(false);
 
@@ -77,7 +86,17 @@ export function PromptFormModal({
       return;
     }
 
-    requestClose();
+    // Editing is a single, targeted action on one existing prompt — closing afterward is the
+    // unsurprising behavior an edit form usually has. Adding is the repeated, batch-y flow this
+    // fix is about, so it stays open instead; see addedPrompts' own comment above.
+    if (mode === 'edit') {
+      requestClose();
+      return;
+    }
+
+    setAddedPrompts((current) => [...current, { id: `${Date.now()}-${current.length}`, storyText: trimmedStoryText }]);
+    setStoryText('');
+    firstFieldRef.current?.focus();
   }
 
   return (
@@ -159,6 +178,29 @@ export function PromptFormModal({
             </p>
           </div>
 
+          {mode === 'add' && addedPrompts.length > 0 ? (
+            <div
+              role="status"
+              className="mb-4 rounded-brand-md border border-brand-teal/40 bg-brand-teal/10 p-3"
+            >
+              <p className="flex items-center gap-2 text-xs font-bold text-brand-teal-dark">
+                <span className="flex h-4 w-4 flex-none items-center justify-center rounded-full bg-brand-teal text-brand-teal-ink">
+                  <svg viewBox="0 0 24 24" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M20 6 9 17l-5-5" />
+                  </svg>
+                </span>
+                {addedPrompts.length} prompt{addedPrompts.length === 1 ? '' : 's'} added this session — keep going, or press Done below.
+              </p>
+              <ul className="mt-2 max-h-24 space-y-1 overflow-y-auto text-xs font-semibold text-brand-ink-muted">
+                {addedPrompts.map((added) => (
+                  <li key={added.id} className="truncate">
+                    · {added.storyText}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           <label className="mb-1.5 block text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted">
             Prompt
             <textarea
@@ -192,7 +234,9 @@ export function PromptFormModal({
               disabled={submitting}
               className="rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-4 py-2 text-sm font-extrabold text-brand-ink-muted transition hover:text-white disabled:opacity-60"
             >
-              Cancel
+              {/* Once at least one prompt has been saved this session, "Cancel" would wrongly
+                  imply it could be undone — every save so far is already a real, persisted write. */}
+              {addedPrompts.length > 0 ? 'Done' : 'Cancel'}
             </button>
             <button
               type="submit"
