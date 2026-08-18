@@ -494,6 +494,7 @@ describe('DELETE /api/instructor/quizzes/[activityType]', () => {
     queueRole('instructor');
     queue('activity_type', { data: quizRow({ creator_id: 'instructor-1' }), error: null });
     queue('session_log', { data: null, error: null });
+    queue('assembled_quiz_catalog', { data: [], error: null }); // linkage check — no quiz links
     queue('question', { data: [{ question_id: 'q-1' }], error: null });
     queue('daily_challenge_attempt', { data: { daily_challenge_attempt_id: 'attempt-1' }, error: null });
 
@@ -504,10 +505,37 @@ describe('DELETE /api/instructor/quizzes/[activityType]', () => {
     expect(h.state.deletes).toEqual([]);
   });
 
+  it('returns 409 and deletes nothing when the catalog is still composed into one or more assembled quizzes', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ creator_id: 'instructor-1' }), error: null });
+    queue('session_log', { data: null, error: null });
+    queue('assembled_quiz_catalog', {
+      data: [
+        { assembled_quiz: { assembled_quiz_id: 'quiz-1', quiz_name: 'Sprint 1 Quiz', course: { course_name: 'CS 101' } } },
+        { assembled_quiz: { assembled_quiz_id: 'quiz-2', quiz_name: 'Midterm Review', course: { course_name: 'CS 201' } } },
+      ],
+      error: null,
+    });
+
+    const res = await delReq();
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toContain('"Sprint 1 Quiz" (CS 101)');
+    expect(body.error).toContain('"Midterm Review" (CS 201)');
+    expect(body.quizzes).toEqual([
+      { quizId: 'quiz-1', quizName: 'Sprint 1 Quiz', courseName: 'CS 101' },
+      { quizId: 'quiz-2', quizName: 'Midterm Review', courseName: 'CS 201' },
+    ]);
+    expect(h.state.tables).not.toContain('question');
+    expect(h.state.tables).not.toContain('user_story');
+    expect(h.state.deletes).toEqual([]);
+  });
+
   it('deletes an unused mcq catalog\'s questions/answers, unlinks it from every quiz, and deletes the catalog', async () => {
     queueRole('instructor');
     queue('activity_type', { data: quizRow({ creator_id: 'instructor-1' }), error: null }); // getQuizByActivityType
     queue('session_log', { data: null, error: null });
+    queue('assembled_quiz_catalog', { data: [], error: null }); // linkage check — no quiz links
     queue('question', { data: [{ question_id: 'q-1' }, { question_id: 'q-2' }], error: null }); // select ids
     queue('daily_challenge_attempt', { data: null, error: null });
     queue('question_to_answer', { data: [{ answer_id: 'a-1' }, { answer_id: 'a-2' }], error: null }); // select answer ids
@@ -535,6 +563,7 @@ describe('DELETE /api/instructor/quizzes/[activityType]', () => {
     queueRole('instructor');
     queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'instructor-1' }), error: null });
     queue('session_log', { data: null, error: null });
+    queue('assembled_quiz_catalog', { data: [], error: null }); // linkage check — no quiz links
     queue('user_story', { data: null, error: null }); // delete
     queue('title_definition', { data: null, error: null });
     queue('assembled_quiz_catalog', { data: null, error: null });
@@ -553,6 +582,7 @@ describe('DELETE /api/instructor/quizzes/[activityType]', () => {
     queueRole('instructor');
     queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'instructor-1' }), error: null });
     queue('session_log', { data: null, error: null });
+    queue('assembled_quiz_catalog', { data: [], error: null }); // linkage check — no quiz links
     queue('user_story', { data: null, error: null });
     queue('title_definition', { data: null, error: null });
     queue('assembled_quiz_catalog', { data: null, error: null });
@@ -568,6 +598,7 @@ describe('DELETE /api/instructor/quizzes/[activityType]', () => {
     queueRole('instructor');
     queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'instructor-1' }), error: null });
     queue('session_log', { data: null, error: null });
+    queue('assembled_quiz_catalog', { data: [], error: null }); // linkage check — no quiz links
     queue('user_story', { data: null, error: null });
     queue('title_definition', { data: null, error: null });
     queue('assembled_quiz_catalog', { data: null, error: null });

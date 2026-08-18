@@ -148,15 +148,18 @@ export async function PATCH(request: Request, { params }: { params: { activityTy
 
 /**
  * DELETE /api/instructor/quizzes/:activityType — deletes a catalog the caller owns: its own
- * questions/answers (mcq) or user_story prompts (llm-graded), and unlinks it from every assembled
- * quiz that composed it (deleteCatalog, lib/activityTypeQueries.ts, has the exact cascade). Same
- * 404-then-403 ownership check as GET above.
+ * questions/answers (mcq) or user_story prompts (llm-graded). Same 404-then-403 ownership check as
+ * GET above.
  *
  * - 401 missing/invalid bearer token
  * - 403 caller isn't an instructor, or doesn't own this catalog (no body either way)
  * - 404 activityType matches no catalog
  * - 409 a student has already engaged with this catalog (deleteCatalog's own docblock has the
  *   exact usage this checks) — the catalog is left untouched
+ * - 409 the catalog is still composed into one or more assembled quizzes — the catalog is left
+ *   untouched, and the body names exactly which quiz(es)/course(s) still reference it so the
+ *   instructor knows what to remove first (via the existing "remove a catalog from a quiz" action)
+ *   before retrying the delete
  * - 200 { activityType }
  * - 500 Supabase not configured, or a query fails
  */
@@ -184,6 +187,17 @@ export async function DELETE(request: Request, { params }: { params: { activityT
   const result = await deleteCatalog(supabase, activityType, quiz.gradingKind);
   if (result.status === 'in_use') {
     return Response.json({ error: 'This catalog has already been used by a student and cannot be deleted.' }, { status: 409 });
+  }
+  if (result.status === 'linked') {
+    const names = result.quizzes.map((q) => `"${q.quizName}" (${q.courseName})`).join(', ');
+    const plural = result.quizzes.length > 1;
+    return Response.json(
+      {
+        error: `This catalog is still used by ${plural ? 'these assembled quizzes' : 'this assembled quiz'}: ${names}. Remove it from ${plural ? 'them' : 'it'} first, then try deleting the catalog again.`,
+        quizzes: result.quizzes,
+      },
+      { status: 409 },
+    );
   }
   if (result.status === 'error') return Response.json({ error: result.error.message }, { status: 500 });
 
