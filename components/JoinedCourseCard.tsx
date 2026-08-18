@@ -9,10 +9,10 @@ import { QuizProgressBar } from './QuizProgressBar';
  * Moodle-style cover-image/name/semester-badge look as components/CourseCard.tsx (instructor) and
  * components/StudentCourseCard.tsx (browse/join), but a third, deliberately separate component:
  * every course here is already joined by definition, so there's no Join/Leave affordance to
- * render — the whole card is just a Link into that course's quiz list
+ * render on the card itself — the whole card is just a Link into that course's quiz list
  * (app/courses/[id]/page.tsx), the "click into a course to see its quizzes" the issue asks for.
- * Leaving a course is still only available from the browse page (app/courses/page.tsx),
- * unchanged.
+ * A Leave button lives on that destination page instead (GitHub #471) — a student following this
+ * card had no other way to leave a course once "My Courses" replaced the flat activities list.
  *
  * quizProgress (GitHub #435) is this student's own "N% of this course's quizzes passed" — the
  * individual counterpart to CourseCard.tsx's classStats bar, which measures the whole roster
