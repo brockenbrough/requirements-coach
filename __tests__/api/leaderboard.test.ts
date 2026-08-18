@@ -70,10 +70,10 @@ describe('GET /api/leaderboard', () => {
     expect(response.status).toBe(401);
   });
 
-  // No courseId anywhere in this route — the caller's own enrolled courses (derived from their
-  // token) decide the roster, unlike GET /api/courses/{courseId}/leaderboard.
-  it('returns 200 with an empty list for a caller enrolled in nothing', async () => {
-    queue('student_course', { data: [], error: null }); // getEnrolledCourseIds
+  // The roster doesn't depend on the caller at all — every student account is ranked regardless
+  // of who's asking, unlike GET /api/courses/{courseId}/leaderboard.
+  it('returns 200 with an empty list when there are no student accounts at all', async () => {
+    queue('user', { data: [], error: null });
 
     const response = await GET(req());
     const body = await response.json();
@@ -82,12 +82,11 @@ describe('GET /api/leaderboard', () => {
     expect(body.entries).toEqual([]);
   });
 
-  it('returns the ranked, cross-course roster for an enrolled caller', async () => {
-    queue('student_course', { data: [{ course_id: 'course-a' }], error: null }); // getEnrolledCourseIds
-    queue('student_course', {
-      data: [{ user_id: 'student-1', student: { username: 'ada', avatar_url: null, role: 'student' } }],
+  it('returns every student account ranked, not just ones who share a course with the caller', async () => {
+    queue('user', {
+      data: [{ user_id: 'student-1', username: 'ada', avatar_url: null, selected_title: null }],
       error: null,
-    }); // roster
+    });
     queue('session_log', {
       data: [
         {
@@ -109,8 +108,8 @@ describe('GET /api/leaderboard', () => {
     expect(body.entries).toEqual([{ rank: 1, studentId: 'student-1', username: 'ada', avatarUrl: null, title: null, points: 100, streak: 1 }]);
   });
 
-  it('returns 500 when the enrolled-courses lookup fails', async () => {
-    queue('student_course', { data: null, error: { message: 'db down' } });
+  it('returns 500 when the roster query fails', async () => {
+    queue('user', { data: null, error: { message: 'db down' } });
 
     const response = await GET(req());
     expect(response.status).toBe(500);

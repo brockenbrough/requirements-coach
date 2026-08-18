@@ -2,14 +2,21 @@
 
 import type { LeaderboardCourse } from '../lib/leaderboardTypes';
 
-// Above this many courses the pill row wraps into an unreadable block, so it becomes a select.
-// Same threshold reasoning as ActivityFilters' choice of control per filter.
+// Above this many choices (including "All") the pill row wraps into an unreadable block, so it
+// becomes a select. Same threshold reasoning as ActivityFilters' choice of control per filter.
 const MAX_PILLS = 4;
 
+/** The sentinel for "every student in the app" — never a real course_id (those are UUIDs). */
+export const ALL_COURSES_SCOPE = 'all';
+
 /**
- * Picks which course's ranking is shown. The selection lives in the URL (?courseId=), not in
- * component state — the page owns that, this component only reports the change — so a
- * leaderboard view stays linkable and survives a reload.
+ * Picks which ranking is shown: literally every student in the app ("All", the default) or one
+ * course's own roster at a time. The selection lives in the URL (?courseId=), not in component
+ * state — the page owns that, this component only reports the change — so a leaderboard view
+ * stays linkable and survives a reload.
+ *
+ * "All" is always offered, even with a single enrolled course — it isn't "this course, plus every
+ * other course I'm in" (a no-op with one course), it's every student, enrolled anywhere or not.
  */
 export function LeaderboardCourseSwitcher({
   courses,
@@ -17,21 +24,21 @@ export function LeaderboardCourseSwitcher({
   onSelect,
 }: {
   courses: LeaderboardCourse[];
-  selectedCourseId: string | null;
+  selectedCourseId: string;
   onSelect: (courseId: string) => void;
 }) {
-  // One course is not a choice — the heading already says which one it is.
-  if (courses.length <= 1) return null;
+  if (courses.length === 0) return null;
 
-  if (courses.length > MAX_PILLS) {
+  if (courses.length + 1 > MAX_PILLS) {
     return (
       <label className="mb-5 block">
         <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">Course</span>
         <select
-          value={selectedCourseId ?? ''}
+          value={selectedCourseId}
           onChange={(event) => onSelect(event.target.value)}
           className="w-full max-w-xs rounded-brand-md border border-gray-300 bg-white px-3 py-2 text-sm font-bold text-brand-navy focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-purple"
         >
+          <option value={ALL_COURSES_SCOPE}>All</option>
           {courses.map((course) => (
             <option key={course.courseId} value={course.courseId}>
               {course.courseName}
@@ -44,7 +51,7 @@ export function LeaderboardCourseSwitcher({
 
   return (
     <div className="mb-5 flex flex-wrap gap-2" role="group" aria-label="Course">
-      {courses.map((course) => {
+      {[{ courseId: ALL_COURSES_SCOPE, courseName: 'All' }, ...courses].map((course) => {
         const isSelected = course.courseId === selectedCourseId;
         return (
           <button

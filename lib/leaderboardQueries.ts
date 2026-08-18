@@ -8,7 +8,6 @@ import type { SupabaseClient } from './sessionQueries';
 import { sumBestScores, type SessionRow } from './scoreQueries';
 import { computeStreakFromSessions, type StreakSessionRow } from './streakQueries';
 import { listActivityTypesForCourses } from './activityCourseQueries';
-import { getEnrolledCourseIds } from './courseQueries';
 
 // Aliased to `student`, same convention as lib/sessionQueries.ts's STUDENT_EMBED, because the
 // table is called "user" (a reserved word). !inner matters here exactly the way it does there:
@@ -176,45 +175,64 @@ export async function computeCourseLeaderboard(
 }
 
 /**
- * The dashboard's global leaderboard (GitHub #432 follow-up): every student who shares at least
- * one course with the viewer, ranked by their TOTAL score across every course they're in — no
- * activity_type filter, the same "no course_id filter" definition computeStudentScore already
- * uses for a single student's own sidebar total. The one thing this deliberately does NOT do is
- * rank every student in the entire app: this codebase's one other cross-user disclosure rule,
- * GET /api/students/{id}/public-profile, only ever disclosed a student's identity/score to
- * someone who shares a course with them (lib/courseQueries.ts's isEnrolledInAnyCourse), and a
- * literal "every user, everywhere" leaderboard would be the first place in the app to break that
- * invariant. "Shares at least one course with the viewer" is the least-surprising way to stay
- * global (not capped to a single course, unlike computeCourseLeaderboard) without doing that —
- * the union of every course the viewer is in, rather than one course's own roster.
+ * A direct read off "user" rather than a student_course-scoped embed like ROSTER_STUDENT_EMBED —
+ * computeGlobalLeaderboard's roster is every student account, not one scoped to a shared course,
+ * so there's no join row to embed onto. Same fields, mapped into RosterRow's shape below so it can
+ * still go through the shared rankRoster tail unchanged.
+ */
+type GlobalUserRow = {
+  user_id: string;
+  username: string;
+  avatar_url: string | null;
+  selected_title: { title_name: string } | null;
+};
+
+/**
+ * The dashboard's (and the full leaderboard page's "All" scope) global leaderboard: literally
+ * every student account in the app, ranked by their TOTAL score across every course they're in —
+ * no activity_type filter, the same "no course_id filter" definition computeStudentScore already
+ * uses for a single student's own sidebar total.
  *
- * The viewer's own courses always include the viewer, so an empty result here can only mean "not
- * enrolled in any course at all" — never "enrolled, but nobody has scored yet" (their own 0-point
- * row would still appear). Callers can rely on that to choose which empty-state message to show,
- * the same way computeCourseLeaderboard's callers rely on data: [] meaning "a real, empty roster".
+ * This is a deliberate, explicit exception to the disclosure boundary every other cross-user read
+ * in this app enforces (GET /api/courses/{courseId}/leaderboard, GET /api/students/{id}/
+ * public-profile — both gated on isEnrolledInAnyCourse, "do the caller and the target share a
+ * course"). An earlier version of this function scoped the roster to "shares a course with the
+ * viewer" specifically to preserve that boundary; product direction confirmed a global leaderboard
+ * should mean literally every student, visible to every other student, with no shared-course
+ * requirement — so the roster query below intentionally has no relationship to the caller at all.
+ * A caller that wants the shared-course-only view should read GET /api/courses/{courseId}/leaderboard
+ * for a specific course instead.
+ *
+ * Because the roster no longer depends on the caller, this takes no viewerId — every caller sees
+ * the same ranking. An empty result now only means "no student accounts exist at all", not
+ * "nobody enrolled anywhere"; callers that used to treat [] as "you're not in a course yet" need
+ * a different signal for that (e.g. their own enrolled-courses list) now that this always returns
+ * every student, enrolled or not.
  *
  * Same roster-then-sessions shape as computeCourseLeaderboard, and the same rankRoster tail — the
- * two can't disagree about what "rank" or "tie" means, only about which points count.
+ * two can't disagree about what "rank" or "tie" means, only about which points count and who's
+ * ranked at all.
  */
 export async function computeGlobalLeaderboard(
   supabase: SupabaseClient,
-  viewerId: string,
 ): Promise<{ data: LeaderboardRow[] | null; error: { message: string } | null }> {
-  const { courseIds, error: courseIdsError } = await getEnrolledCourseIds(supabase, viewerId);
-  if (courseIdsError) return { data: null, error: courseIdsError };
+  const { data: userData, error: userError } = await supabase
+    .from('user')
+    .select('user_id, username, avatar_url, selected_title:title_definition(title_name)')
+    .eq('role', 'student');
 
-  if (!courseIds || courseIds.length === 0) return { data: [], error: null };
+  if (userError) return { data: null, error: userError };
 
-  const { data: rosterData, error: rosterError } = await supabase
-    .from('student_course')
-    .select(`user_id, ${ROSTER_STUDENT_EMBED}`)
-    .in('course_id', courseIds)
-    .eq('student.role', 'student');
+  const roster: RosterRow[] = ((userData ?? []) as unknown as GlobalUserRow[]).map((row) => ({
+    user_id: row.user_id,
+    student: {
+      username: row.username,
+      avatar_url: row.avatar_url,
+      role: 'student',
+      selected_title: row.selected_title,
+    },
+  }));
 
-  if (rosterError) return { data: null, error: rosterError };
-
-  const rosterRows = (rosterData ?? []) as unknown as RosterRow[];
-  const roster = [...new Map(rosterRows.map((row) => [row.user_id, row])).values()];
   if (roster.length === 0) return { data: [], error: null };
 
   const studentIds = roster.map((row) => row.user_id);
