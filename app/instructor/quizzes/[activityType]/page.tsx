@@ -7,6 +7,7 @@ import { AppShell } from '../../../../components/AppShell';
 import { CatalogPromptCard } from '../../../../components/CatalogPromptCard';
 import { ConfirmModal } from '../../../../components/ConfirmModal';
 import { DeleteQuestionModal } from '../../../../components/DeleteQuestionModal';
+import { DuplicateCatalogModal } from '../../../../components/DuplicateCatalogModal';
 import { PromptFormModal } from '../../../../components/PromptFormModal';
 import { QuestionFormModal } from '../../../../components/QuestionFormModal';
 import { RatingPromptModal } from '../../../../components/RatingPromptModal';
@@ -50,6 +51,15 @@ function TrashIcon() {
       <path d="M8 6V4h8v2" />
       <path d="M19 6l-1 14H6L5 6" />
       <path d="M10 11v6M14 11v6" />
+    </svg>
+  );
+}
+
+function LockIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <rect x="5" y="11" width="14" height="9" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
     </svg>
   );
 }
@@ -105,6 +115,7 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showDeleteCatalog, setShowDeleteCatalog] = useState(false);
   const [ratingPromptModalOpen, setRatingPromptModalOpen] = useState(false);
+  const [duplicateModalOpen, setDuplicateModalOpen] = useState(false);
 
   useEffect(() => {
     if (!token) return;
@@ -138,6 +149,10 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
   if (!token || !profile) return null;
 
   const llmGraded = quiz?.gradingKind === 'llm-graded';
+  // GitHub #478: a built-in example catalog is visible to every instructor now, but strictly
+  // read-only — no Edit toggle, no add/edit/delete, no Delete-catalog button. "Duplicate" is the
+  // only action available on one.
+  const isBuiltIn = quiz?.isBuiltIn ?? false;
   const items = llmGraded ? prompts ?? [] : questions ?? [];
   const visibleQuestions = (questions ?? []).filter((question) => level === 'all' || question.level === level);
   const visiblePrompts = (prompts ?? []).filter((prompt) => level === 'all' || prompt.level === level);
@@ -276,6 +291,12 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
     return { ok: true };
   }
 
+  function handleDuplicated(duplicated: { activityType: string }) {
+    // The new catalog is a normal, fully editable one — hand off to its own detail page rather
+    // than staying on this (still read-only) one.
+    router.push(`/instructor/quizzes/${encodeURIComponent(duplicated.activityType)}`);
+  }
+
   return (
     <AppShell active="instructor-quizzes">
       <div className="mx-auto max-w-3xl">
@@ -316,40 +337,61 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
                 </p>
               </div>
               <div className="flex flex-none items-center gap-2">
-                {editMode ? (
+                {isBuiltIn ? (
                   <button
                     type="button"
-                    onClick={() => (llmGraded ? setPromptModalState({ mode: 'add' }) : setModalState({ mode: 'add' }))}
+                    onClick={() => setDuplicateModalOpen(true)}
                     className="flex items-center gap-2 rounded-full bg-brand-purple px-5 py-2.5 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark"
                   >
-                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round">
-                      <path d="M12 5v14M5 12h14" />
-                    </svg>
-                    {llmGraded ? 'New Prompt' : 'New Question'}
+                    Duplicate
                   </button>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => setEditMode((current) => !current)}
-                  className={`rounded-full border px-5 py-2.5 text-sm font-extrabold transition ${
-                    editMode
-                      ? 'border-gray-300 bg-white text-gray-600 hover:border-brand-purple hover:text-brand-purple'
-                      : 'border-brand-purple bg-white text-brand-purple hover:bg-brand-purple hover:text-white'
-                  }`}
-                >
-                  {editMode ? 'Done' : 'Edit'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowDeleteCatalog(true)}
-                  aria-label="Delete this catalog"
-                  title="Delete this catalog"
-                  className="flex h-10 w-10 flex-none items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 transition hover:border-brand-danger hover:text-brand-danger"
-                >
-                  <TrashIcon />
-                </button>
+                ) : (
+                  <>
+                    {editMode ? (
+                      <button
+                        type="button"
+                        onClick={() => (llmGraded ? setPromptModalState({ mode: 'add' }) : setModalState({ mode: 'add' }))}
+                        className="flex items-center gap-2 rounded-full bg-brand-purple px-5 py-2.5 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark"
+                      >
+                        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round">
+                          <path d="M12 5v14M5 12h14" />
+                        </svg>
+                        {llmGraded ? 'New Prompt' : 'New Question'}
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => setEditMode((current) => !current)}
+                      className={`rounded-full border px-5 py-2.5 text-sm font-extrabold transition ${
+                        editMode
+                          ? 'border-gray-300 bg-white text-gray-600 hover:border-brand-purple hover:text-brand-purple'
+                          : 'border-brand-purple bg-white text-brand-purple hover:bg-brand-purple hover:text-white'
+                      }`}
+                    >
+                      {editMode ? 'Done' : 'Edit'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowDeleteCatalog(true)}
+                      aria-label="Delete this catalog"
+                      title="Delete this catalog"
+                      className="flex h-10 w-10 flex-none items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 transition hover:border-brand-danger hover:text-brand-danger"
+                    >
+                      <TrashIcon />
+                    </button>
+                  </>
+                )}
               </div>
             </div>
+
+            {isBuiltIn ? (
+              <div className="mb-5 mt-5 flex items-center gap-2.5 rounded-brand-md border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-600">
+                <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-gray-200 text-gray-500">
+                  <LockIcon />
+                </span>
+                This is a built-in example catalog. It's read-only — duplicate it to make your own editable copy.
+              </div>
+            ) : null}
 
             {toastMessage ? (
               <div
@@ -389,13 +431,15 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
                     <p className="text-sm font-medium text-gray-400">Using the built-in default rubric.</p>
                   )}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setRatingPromptModalOpen(true)}
-                  className="flex-none rounded-full border border-gray-300 bg-white px-4 py-1.5 text-xs font-extrabold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple"
-                >
-                  {quiz.ratingPrompt ? 'Edit rubric' : 'Set rubric'}
-                </button>
+                {isBuiltIn ? null : (
+                  <button
+                    type="button"
+                    onClick={() => setRatingPromptModalOpen(true)}
+                    className="flex-none rounded-full border border-gray-300 bg-white px-4 py-1.5 text-xs font-extrabold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple"
+                  >
+                    {quiz.ratingPrompt ? 'Edit rubric' : 'Set rubric'}
+                  </button>
+                )}
               </div>
             ) : null}
 
@@ -556,6 +600,15 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
           initialValue={quiz?.ratingPrompt ?? ''}
           onCancel={() => setRatingPromptModalOpen(false)}
           onSave={handleSaveRatingPrompt}
+        />
+      ) : null}
+
+      {duplicateModalOpen && quiz ? (
+        <DuplicateCatalogModal
+          catalog={{ activityType: params.activityType, name: quiz.name }}
+          token={token}
+          onClose={() => setDuplicateModalOpen(false)}
+          onCreated={handleDuplicated}
         />
       ) : null}
 

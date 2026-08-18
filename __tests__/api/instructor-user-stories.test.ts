@@ -230,6 +230,20 @@ describe('POST /api/instructor/user-stories', () => {
     expect(h.state.inserts).toEqual([]);
   });
 
+  // GitHub #478: a built-in example catalog (creator_id IS NULL) is strictly read-only — no new
+  // prompt may be filed under it, even though the activityType itself is a valid llm-graded key.
+  it('rejects adding a prompt to a built-in example catalog with 403', async () => {
+    queueRole('instructor');
+    queueGradingKind('llm-graded');
+    queue('activity_type', { data: { creator_id: null }, error: null }); // assertCatalogIsEditable
+
+    const res = await POST(postRequest(validBody()));
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error).toMatch(/built-in example catalog/);
+    expect(h.state.inserts).toEqual([]);
+  });
+
   it('returns 400 for a difficulty level outside 1-3', async () => {
     for (const difficultyLevel of [0, 4, '2', null, undefined]) {
       queueRole('instructor');

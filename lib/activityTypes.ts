@@ -141,3 +141,36 @@ export function slugifyQuizName(name: string): string {
     .replace(/[^A-Z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
 }
+
+// Matches activity_type.activity_type varchar(50) in supabase/schema.sql. Shared by every route
+// that derives a key from an instructor-given name (POST /api/activities/types, POST
+// /api/instructor/quizzes/{activityType}/duplicate) so the two can't drift on how long a name is
+// allowed to be.
+export const MAX_ACTIVITY_TYPE_KEY_LENGTH = 50;
+
+export type ActivityTypeKeyValidation = { ok: true; key: string } | { ok: false; response: Response };
+
+/**
+ * slugifyQuizName plus the two failure modes every caller that derives a key from a name has to
+ * check: an empty result (a name with no letters or digits at all) and a key too long for the
+ * column. Extracted for GitHub #478's duplicate-catalog route, which needs the exact same checks
+ * POST /api/activities/types already made inline.
+ */
+export function deriveActivityTypeKey(name: string): ActivityTypeKeyValidation {
+  const key = slugifyQuizName(name);
+
+  if (key === '') {
+    return { ok: false, response: Response.json({ error: 'name must contain at least one letter or number.' }, { status: 400 }) };
+  }
+  if (key.length > MAX_ACTIVITY_TYPE_KEY_LENGTH) {
+    return {
+      ok: false,
+      response: Response.json(
+        { error: `name is too long — the derived key must be ${MAX_ACTIVITY_TYPE_KEY_LENGTH} characters or fewer.` },
+        { status: 400 },
+      ),
+    };
+  }
+
+  return { ok: true, key };
+}

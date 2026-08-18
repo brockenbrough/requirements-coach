@@ -25,6 +25,10 @@ export type QuizSummary = {
    *  no course of its own, so this is the closest honest answer to "where is this used" the
    *  browse page can show. Zero just means nobody has composed it into a quiz yet, not an error. */
   quizCount: number;
+  /** GitHub #478: true for one of the three seeded example catalogs (creator_id IS NULL) — the
+   *  same test authorNameOf already uses to say "Built-in", surfaced as its own boolean so callers
+   *  don't have to string-match authorName to decide whether to lock the UI down. */
+  isBuiltIn: boolean;
 };
 
 type QuizRow = {
@@ -77,31 +81,54 @@ function authorNameOf(row: QuizRow): string {
  * counts becomes questionCount. Both are fetched unconditionally because it is one query either
  * way; the unused one is always 0, since a catalog only ever fills one pool.
  */
+function buildQuizSummary(row: QuizRow): QuizSummary {
+  const gradingKind = gradingKindOf(row);
+
+  return {
+    activityType: row.activity_type,
+    name: row.quiz_name,
+    description: row.description,
+    authorName: authorNameOf(row),
+    gradingKind,
+    questionCount: itemCountOf(row, gradingKind),
+    quizCount: row.assembled_quiz_catalog?.[0]?.count ?? 0,
+    isBuiltIn: row.creator_id === null,
+  };
+}
+
+const QUIZ_SUMMARY_SELECT =
+  'activity_type, quiz_name, description, grading_kind, creator_id, creator:creator_id(first_name, last_name, username), question(count), user_story(count), assembled_quiz_catalog(count)';
+
 export async function listQuizzesWithAuthorAndCount(supabase: SupabaseClient, instructorId: string) {
   const { data, error } = await supabase
     .from('activity_type')
-    .select(
-      'activity_type, quiz_name, description, grading_kind, creator_id, creator:creator_id(first_name, last_name, username), question(count), user_story(count), assembled_quiz_catalog(count)',
-    )
+    .select(QUIZ_SUMMARY_SELECT)
     .eq('creator_id', instructorId)
     .order('quiz_name', { ascending: true });
 
   if (error) return { quizzes: null, error };
 
-  const quizzes: QuizSummary[] = ((data ?? []) as unknown as QuizRow[]).map((row) => {
-    const gradingKind = gradingKindOf(row);
+  const quizzes: QuizSummary[] = ((data ?? []) as unknown as QuizRow[]).map(buildQuizSummary);
+  return { quizzes, error: null };
+}
 
-    return {
-      activityType: row.activity_type,
-      name: row.quiz_name,
-      description: row.description,
-      authorName: authorNameOf(row),
-      gradingKind,
-      questionCount: itemCountOf(row, gradingKind),
-      quizCount: row.assembled_quiz_catalog?.[0]?.count ?? 0,
-    };
-  });
+/**
+ * GitHub #478: the three seeded, ownerless catalogs (creator_id IS NULL) every instructor sees as
+ * "Example Catalogs" — the opposite scope from listQuizzesWithAuthorAndCount's "mine only" list,
+ * queried with the same row shape so the browse page can render both lists through one QuizSummary
+ * type. Not restricted to exactly three rows — any catalog with no creator counts, so this stays
+ * correct if a future migration seeds more.
+ */
+export async function listExampleCatalogsWithCount(supabase: SupabaseClient) {
+  const { data, error } = await supabase
+    .from('activity_type')
+    .select(QUIZ_SUMMARY_SELECT)
+    .is('creator_id', null)
+    .order('quiz_name', { ascending: true });
 
+  if (error) return { quizzes: null, error };
+
+  const quizzes: QuizSummary[] = ((data ?? []) as unknown as QuizRow[]).map(buildQuizSummary);
   return { quizzes, error: null };
 }
 
@@ -147,6 +174,7 @@ export async function getQuizByActivityType(supabase: SupabaseClient, activityTy
     authorName: authorNameOf(row),
     gradingKind: gradingKindOf(row),
     ratingPrompt: row.rating_prompt,
+    isBuiltIn: row.creator_id === null,
   };
 
   return { quiz, creatorId: row.creator_id, error: null };
@@ -411,4 +439,247 @@ export async function deleteCatalog(supabase: SupabaseClient, activityType: stri
   }
 
   return { status: 'ok' };
+}
+
+export type CatalogEditableCheck = { ok: true } | { ok: false; response: Response };
+
+/**
+ * GitHub #478: refuses to let new content be filed under a built-in example catalog (creator_id
+ * IS NULL). Individual question/prompt edit and delete routes already refuse a seeded, ownerless
+ * row by construction — no instructor's user_id ever equals NULL — but *creating* a new question
+ * or prompt under an existing catalog key was never scoped to that catalog's own ownership at all,
+ * so a built-in catalog could otherwise quietly grow content that was never part of the shipped
+ * example, defeating the "the original example is untouched" guarantee the Duplicate action
+ * depends on.
+ *
+ * An unknown activityType is let through here (`data` comes back null) rather than surfaced as a
+ * second error — the caller's own validation (isActivityType/getGradingKind) already 400s that
+ * case before this runs.
+ */
+export async function assertCatalogIsEditable(supabase: SupabaseClient, activityType: string): Promise<CatalogEditableCheck> {
+  const { data, error } = await supabase
+    .from('activity_type')
+    .select('creator_id')
+    .eq('activity_type', activityType)
+    .maybeSingle();
+
+  if (error) return { ok: false, response: Response.json({ error: error.message }, { status: 500 }) };
+
+  if (data && (data as { creator_id: string | null }).creator_id === null) {
+    return {
+      ok: false,
+      response: Response.json(
+        { error: 'This is a built-in example catalog and cannot be edited. Duplicate it to add your own questions or prompts.' },
+        { status: 403 },
+      ),
+    };
+  }
+
+  return { ok: true };
+}
+
+export type DuplicateCatalogResult =
+  | {
+      status: 'ok';
+      quiz: {
+        activityType: string;
+        name: string;
+        description: string | null;
+        gradingKind: GradingKind;
+        ratingPrompt: string | null;
+        questionCount: number;
+      };
+    }
+  | { status: 'not_found' }
+  | { status: 'name_conflict' }
+  | { status: 'error'; error: { message: string } };
+
+/**
+ * GitHub #478: copies a catalog's own metadata plus every question/answer ('mcq') or user_story
+ * ('llm-graded') it contains into a brand-new catalog owned by `creatorId` — the mechanism behind
+ * an example catalog's "Duplicate" action. The source catalog is only ever read; nothing about it
+ * is mutated, which is what keeps "the original example is untouched" true by construction rather
+ * than by convention. Copied questions/prompts are attributed to `creatorId` (not left ownerless),
+ * so the new catalog really is "a normal, fully editable catalog like any the instructor creates
+ * themselves" — the copied rows pass the same `user_id`/`creator_id` ownership check every edit/
+ * delete route already enforces.
+ *
+ * `newKey`/`newName` are assumed already validated (lib/activityTypes.ts's deriveActivityTypeKey)
+ * — this function only handles the database side.
+ *
+ * Not transactional (same limitation every other multi-step write in this codebase accepts, since
+ * the Supabase JS client offers no transaction). If any step after the activity_type insert fails,
+ * everything inserted under `newKey` so far — including the activity_type row itself — is deleted.
+ * That cleanup is always safe here (unlike deleteCatalog above, which must check student usage
+ * first): `newKey` did not exist a moment ago, so nothing could have referenced it yet.
+ */
+export async function duplicateCatalog(
+  supabase: SupabaseClient,
+  params: { sourceActivityType: string; newKey: string; newName: string; creatorId: string },
+): Promise<DuplicateCatalogResult> {
+  const { sourceActivityType, newKey, newName, creatorId } = params;
+
+  const { data: sourceRow, error: sourceError } = await supabase
+    .from('activity_type')
+    .select('description, grading_kind, rating_prompt')
+    .eq('activity_type', sourceActivityType)
+    .maybeSingle();
+
+  if (sourceError) return { status: 'error', error: sourceError };
+  if (!sourceRow) return { status: 'not_found' };
+
+  const source = sourceRow as { description: string | null; grading_kind: string; rating_prompt: string | null };
+  const gradingKind: GradingKind = isGradingKind(source.grading_kind) ? source.grading_kind : 'mcq';
+
+  const { error: insertError } = await supabase.from('activity_type').insert({
+    activity_type: newKey,
+    quiz_name: newName,
+    description: source.description,
+    grading_kind: gradingKind,
+    rating_prompt: source.rating_prompt,
+    creator_id: creatorId,
+  });
+
+  if (insertError) {
+    if ((insertError as { code?: string }).code === '23505') return { status: 'name_conflict' };
+    return { status: 'error', error: insertError };
+  }
+
+  if (gradingKind === 'llm-graded') {
+    const { data: storyRows, error: storyFetchError } = await supabase
+      .from('user_story')
+      .select('story_text, difficulty_level')
+      .eq('activity_type', sourceActivityType);
+
+    if (storyFetchError) {
+      await supabase.from('activity_type').delete().eq('activity_type', newKey);
+      return { status: 'error', error: storyFetchError };
+    }
+
+    const stories = (storyRows ?? []) as { story_text: string; difficulty_level: number }[];
+
+    if (stories.length > 0) {
+      const { error: storyInsertError } = await supabase.from('user_story').insert(
+        stories.map((story) => ({
+          user_story_id: crypto.randomUUID(),
+          story_text: story.story_text,
+          difficulty_level: story.difficulty_level,
+          activity_type: newKey,
+          creator_id: creatorId,
+        })),
+      );
+
+      if (storyInsertError) {
+        await supabase.from('user_story').delete().eq('activity_type', newKey);
+        await supabase.from('activity_type').delete().eq('activity_type', newKey);
+        return { status: 'error', error: storyInsertError };
+      }
+    }
+
+    return {
+      status: 'ok',
+      quiz: {
+        activityType: newKey,
+        name: newName,
+        description: source.description,
+        gradingKind,
+        ratingPrompt: source.rating_prompt,
+        questionCount: stories.length,
+      },
+    };
+  }
+
+  type SourceQuestionRow = {
+    question_prompt: string;
+    difficulty_level: number;
+    order_number: number;
+    max_score: number | null;
+    question_to_answer: { answer: { option_text: string; is_correct: boolean; explanation: string | null } | null }[];
+  };
+
+  const { data: questionRows, error: questionFetchError } = await supabase
+    .from('question')
+    .select(
+      'question_prompt, difficulty_level, order_number, max_score, question_to_answer(answer:answer_id(option_text, is_correct, explanation))',
+    )
+    .eq('activity_type', sourceActivityType);
+
+  if (questionFetchError) {
+    await supabase.from('activity_type').delete().eq('activity_type', newKey);
+    return { status: 'error', error: questionFetchError };
+  }
+
+  const sourceQuestions = (questionRows ?? []) as unknown as SourceQuestionRow[];
+
+  const newQuestionRows: Record<string, unknown>[] = [];
+  const newAnswerRows: Record<string, unknown>[] = [];
+  const newLinkRows: Record<string, unknown>[] = [];
+
+  for (const q of sourceQuestions) {
+    const newQuestionId = crypto.randomUUID();
+    newQuestionRows.push({
+      question_id: newQuestionId,
+      question_prompt: q.question_prompt,
+      activity_type: newKey,
+      difficulty_level: q.difficulty_level,
+      order_number: q.order_number,
+      max_score: q.max_score,
+      user_id: creatorId,
+    });
+
+    for (const link of q.question_to_answer) {
+      if (!link.answer) continue;
+      const newAnswerId = crypto.randomUUID();
+      newAnswerRows.push({
+        answer_id: newAnswerId,
+        option_text: link.answer.option_text,
+        is_correct: link.answer.is_correct,
+        explanation: link.answer.explanation,
+      });
+      newLinkRows.push({ question_id: newQuestionId, answer_id: newAnswerId });
+    }
+  }
+
+  async function rollbackMcq() {
+    const newQuestionIds = newQuestionRows.map((r) => r.question_id as string);
+    const newAnswerIds = newAnswerRows.map((r) => r.answer_id as string);
+    if (newQuestionIds.length > 0) await supabase.from('question_to_answer').delete().in('question_id', newQuestionIds);
+    if (newAnswerIds.length > 0) await supabase.from('answer').delete().in('answer_id', newAnswerIds);
+    if (newQuestionIds.length > 0) await supabase.from('question').delete().in('question_id', newQuestionIds);
+    await supabase.from('activity_type').delete().eq('activity_type', newKey);
+  }
+
+  if (newQuestionRows.length > 0) {
+    const { error: questionInsertError } = await supabase.from('question').insert(newQuestionRows);
+    if (questionInsertError) {
+      await supabase.from('activity_type').delete().eq('activity_type', newKey);
+      return { status: 'error', error: questionInsertError };
+    }
+
+    if (newAnswerRows.length > 0) {
+      const { error: answerInsertError } = await supabase.from('answer').insert(newAnswerRows);
+      if (answerInsertError) {
+        await rollbackMcq();
+        return { status: 'error', error: answerInsertError };
+      }
+
+      const { error: linkInsertError } = await supabase.from('question_to_answer').insert(newLinkRows);
+      if (linkInsertError) {
+        await rollbackMcq();
+        return { status: 'error', error: linkInsertError };
+      }
+    }
+  }
+
+  return {
+    status: 'ok',
+    quiz: {
+      activityType: newKey,
+      name: newName,
+      description: source.description,
+      gradingKind,
+      ratingPrompt: source.rating_prompt,
+      questionCount: newQuestionRows.length,
+    },
+  };
 }

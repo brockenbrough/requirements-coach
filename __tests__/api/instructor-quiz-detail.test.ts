@@ -191,6 +191,7 @@ describe('GET /api/instructor/quizzes/[activityType]', () => {
       authorName: 'Ada Brockenbrough',
       gradingKind: 'mcq',
       ratingPrompt: null,
+      isBuiltIn: false,
     });
 
     expect(body.questions).toHaveLength(2);
@@ -231,15 +232,18 @@ describe('GET /api/instructor/quizzes/[activityType]', () => {
     expect(h.state.tables).not.toContain('question');
   });
 
-  it('returns 403 with an empty body for a built-in catalog (creator_id is null)', async () => {
+  // GitHub #478: a built-in example catalog is visible (read-only) to every instructor, not just
+  // whoever created it — there is no creator to match anyway, since creator_id is NULL.
+  it('returns 200 with isBuiltIn: true for a built-in catalog (creator_id is null)', async () => {
     queueRole('instructor');
     queue('activity_type', { data: quizRow(), error: null }); // default creator_id: null
+    queue('question', { data: [questionRow({ user_id: null })], error: null });
 
     const res = await req();
-    expect(res.status).toBe(403);
-    expect(await res.text()).toBe('');
-    expect(h.state.tables).not.toContain('question');
-    expect(h.state.tables).not.toContain('user_story');
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.quiz.isBuiltIn).toBe(true);
+    expect(body.questions[0].ownerId).toBeNull();
   });
 
   it('returns 500 when the catalog lookup fails', async () => {
