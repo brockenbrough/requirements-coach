@@ -6,6 +6,7 @@ import {
   listCatalogQuestions,
   listCatalogUserStories,
 } from '../../../../../lib/activityTypeQueries';
+import { loadTitleLadder } from '../../../../../lib/titleAuthoringQueries';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -24,7 +25,7 @@ function getToken(request: Request): string | null {
  * - 403 caller isn't an instructor (no body), or is an instructor but doesn't own this catalog
  *   (no body — same 404-then-403 ordering as e.g. lib/courseQueries.ts's findOwnedCourse)
  * - 404 activityType matches no catalog
- * - 200 { quiz, questions: CatalogQuestion[], userStories: CatalogUserStory[] }
+ * - 200 { quiz, questions: CatalogQuestion[], userStories: CatalogUserStory[], titles: StoredTitleRung[] }
  * - 500 Supabase not configured, or either query fails
  *
  * GitHub #379: both pools are always present in the response, one of them empty, rather than a
@@ -54,13 +55,20 @@ export async function GET(request: Request, { params }: { params: { activityType
   if (!quiz) return Response.json({ error: 'Catalog not found.' }, { status: 404 });
   if (creatorId !== guard.user_id) return new Response(null, { status: 403 });
 
+  // The mastery title ladder is catalog-level metadata, not a pool, so it comes back for both
+  // grading kinds — an llm-graded catalog earns titles exactly the same way an MCQ one does.
+  const { rungs: titles, error: titlesError } = await loadTitleLadder(supabase, activityType);
+  if (titlesError || !titles) {
+    return Response.json({ error: titlesError?.message ?? 'Could not load titles.' }, { status: 500 });
+  }
+
   if (quiz.gradingKind === 'llm-graded') {
     const { userStories, error: userStoriesError } = await listCatalogUserStories(supabase, activityType);
     if (userStoriesError || !userStories) {
       return Response.json({ error: userStoriesError?.message ?? 'Could not load prompts.' }, { status: 500 });
     }
 
-    return Response.json({ quiz, questions: [], userStories }, { status: 200 });
+    return Response.json({ quiz, questions: [], userStories, titles }, { status: 200 });
   }
 
   const { questions, error: questionsError } = await listCatalogQuestions(supabase, activityType);
@@ -68,7 +76,7 @@ export async function GET(request: Request, { params }: { params: { activityType
     return Response.json({ error: questionsError?.message ?? 'Could not load questions.' }, { status: 500 });
   }
 
-  return Response.json({ quiz, questions, userStories: [] }, { status: 200 });
+  return Response.json({ quiz, questions, userStories: [], titles }, { status: 200 });
 }
 
 /**

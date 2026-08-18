@@ -7,17 +7,38 @@ const h = vi.hoisted(() => {
     queues: {} as Record<string, Result[]>,
     tables: [] as string[],
     inserts: [] as { table: string; payload: unknown }[],
+    // Title authoring writes through an upsert, and a failed ladder insert rolls the catalog back
+    // with a delete — neither existed on this builder before.
+    upserts: [] as { table: string; payload: unknown }[],
+    deletes: [] as { table: string; filters: { column: string; value: unknown }[] }[],
     user: { id: 'instructor-1' } as { id: string } | null,
   };
 
   function makeBuilder(table: string, result: Result) {
+    const filters: { column: string; value: unknown }[] = [];
+
     const builder: Record<string, unknown> = {
       insert: (payload: unknown) => {
         state.inserts.push({ table, payload });
         return builder;
       },
+      upsert: (payload: unknown) => {
+        state.upserts.push({ table, payload });
+        return builder;
+      },
+      delete: () => {
+        state.deletes.push({ table, filters });
+        return builder;
+      },
       select: () => builder,
-      eq: () => builder,
+      eq: (column: string, value: unknown) => {
+        filters.push({ column, value });
+        return builder;
+      },
+      in: (column: string, value: unknown) => {
+        filters.push({ column, value });
+        return builder;
+      },
       maybeSingle: async () => result,
       then: (onOk: (r: Result) => unknown, onErr?: (e: unknown) => unknown) =>
         Promise.resolve(result).then(onOk, onErr),
@@ -81,6 +102,8 @@ beforeEach(() => {
   h.state.queues = {};
   h.state.tables = [];
   h.state.inserts = [];
+  h.state.upserts = [];
+  h.state.deletes = [];
   h.state.user = { id: 'instructor-1' };
 });
 
@@ -197,6 +220,7 @@ describe('POST /api/activities/types', () => {
 
     const body = await res.json();
     expect(body.quiz).toEqual({
+      titles: [],
       activityType: 'MY_CUSTOM_QUIZ',
       name: 'My Custom Quiz',
       description: 'A quiz about things',
@@ -243,5 +267,111 @@ describe('POST /api/activities/types', () => {
 
     const res = await POST(makeRequest(validBody()));
     expect(res.status).toBe(500);
+  });
+});
+
+// Mastery title authoring at creation time. Titles are optional throughout: every catalog created
+// before this feature existed has none, and requiring them would put a barrier in front of catalog
+// creation itself.
+describe('POST /api/activities/types — mastery titles', () => {
+  it('writes the ladder alongside the catalog', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: activityTypeRow(), error: null });
+    queue('title_definition', { data: null, error: null });
+
+    const res = await POST(
+      makeRequest(
+        validBody({
+          titles: [
+            { difficultyLevel: 1, titleName: 'Story Apprentice' },
+            { difficultyLevel: 2, titleName: 'Story Analyst' },
+          ],
+        }),
+      ),
+    );
+
+    expect(res.status).toBe(201);
+    const upsert = h.state.upserts.find((entry) => entry.table === 'title_definition');
+    expect(upsert?.payload).toEqual([
+      expect.objectContaining({ activity_type: 'MY_CUSTOM_QUIZ', difficulty_level: 1, title_name: 'Story Apprentice' }),
+      expect.objectContaining({ activity_type: 'MY_CUSTOM_QUIZ', difficulty_level: 2, title_name: 'Story Analyst' }),
+    ]);
+  });
+
+  it('creates the catalog without touching title_definition when no titles are given', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: activityTypeRow(), error: null });
+
+    const res = await POST(makeRequest(validBody()));
+
+    expect(res.status).toBe(201);
+    expect(h.state.tables).not.toContain('title_definition');
+  });
+
+  it('treats an empty ladder the same as none', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: activityTypeRow(), error: null });
+
+    const res = await POST(
+      makeRequest(
+        validBody({
+          titles: [
+            { difficultyLevel: 1, titleName: '' },
+            { difficultyLevel: 2, titleName: '   ' },
+          ],
+        }),
+      ),
+    );
+
+    expect(res.status).toBe(201);
+    // Only clears were requested and there is nothing to clear on a catalog created a moment ago,
+    // so the ladder write is a no-op rather than a delete.
+    expect(h.state.upserts).toHaveLength(0);
+  });
+
+  // Rollback by hand — there is no transaction. Leaving the catalog behind would be worse than
+  // failing outright: the instructor would retry the same name and hit the 409 collision instead.
+  it('deletes the just-created catalog when the ladder insert fails', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: activityTypeRow(), error: null });
+    queue('title_definition', { data: null, error: { message: 'ladder exploded' } });
+
+    const res = await POST(
+      makeRequest(validBody({ titles: [{ difficultyLevel: 1, titleName: 'Story Apprentice' }] })),
+    );
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: 'ladder exploded' });
+    expect(h.state.deletes).toContainEqual({
+      table: 'activity_type',
+      filters: [{ column: 'activity_type', value: 'MY_CUSTOM_QUIZ' }],
+    });
+  });
+
+  it('rejects a malformed ladder before creating anything', async () => {
+    queueRole('instructor');
+
+    const res = await POST(makeRequest(validBody({ titles: [{ difficultyLevel: 9, titleName: 'Too high' }] })));
+
+    expect(res.status).toBe(400);
+    expect(h.state.tables).not.toContain('activity_type');
+  });
+
+  it('rejects the same level twice', async () => {
+    queueRole('instructor');
+
+    const res = await POST(
+      makeRequest(
+        validBody({
+          titles: [
+            { difficultyLevel: 1, titleName: 'One' },
+            { difficultyLevel: 1, titleName: 'Two' },
+          ],
+        }),
+      ),
+    );
+
+    expect(res.status).toBe(400);
+    expect(h.state.tables).not.toContain('activity_type');
   });
 });
