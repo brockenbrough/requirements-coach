@@ -23,14 +23,22 @@ function formatRemaining(ms: number): string {
  * since there's no "abandon" for the Daily Challenge: the deadline keeps counting down
  * server-side regardless of whether this page is open, and loadDailyChallenge picks the attempt
  * back up on return.
+ *
+ * Carries its own background/border rather than relying on surrounding text color, since it
+ * renders both on AppShell's white <main> (the in-progress and completed states have no
+ * wrapping card) and on this page's own dark cards (bg-[#1b1642]) — a plain light-on-transparent
+ * link had good contrast on the dark cards but nearly none on white.
  */
 function BackToDashboardLink() {
   return (
     <Link
       href="/dashboard"
-      className="mb-4 inline-flex items-center gap-1 text-xs font-bold text-[#A79FC9] transition hover:text-white"
+      className="mb-4 inline-flex items-center gap-1.5 rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3 py-1.5 text-xs font-extrabold text-white transition hover:bg-brand-navy"
     >
-      ← Back to dashboard
+      <svg viewBox="0 0 24 24" className="h-3 w-3 flex-none" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+        <path d="M15 6l-6 6 6 6" />
+      </svg>
+      Back to dashboard
     </Link>
   );
 }
