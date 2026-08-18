@@ -1,5 +1,80 @@
 import { describe, expect, it } from 'vitest';
-import { deriveActivityFilterOptions, summarizeStudents, type ActivityLogEntry, type StudentActivitySummary } from '../../lib/activityLogTypes';
+import {
+  deriveActivityFilterOptions,
+  summarizeStudents,
+  toActivityLogEntry,
+  type ActivityLogEntry,
+  type StudentActivitySummary,
+} from '../../lib/activityLogTypes';
+import type { SessionListEntry } from '../../lib/sessionTypes';
+
+function session(overrides: Partial<SessionListEntry> = {}): SessionListEntry {
+  return {
+    session_id: 'session-1',
+    user_id: 'student-1',
+    activity_type: 'TEST_CATALOG',
+    difficulty_level: 1,
+    started_at: '2026-08-01T10:00:00.000Z',
+    ended_at: '2026-08-01T10:20:00.000Z',
+    status: 'completed',
+    cumulative_score: 40,
+    max_score: 40,
+    passed: true,
+    questionCount: 4,
+    answeredCount: 4,
+    nextPosition: null,
+    ...overrides,
+  };
+}
+
+// GitHub #476: without a real name to offer, a custom catalog's activity_type key (the raw,
+// slugified value session_log actually stores, e.g. "TEST_CATALOG") is all there is to show — the
+// bug was never resolving a better one at all, even when it was available.
+describe('toActivityLogEntry', () => {
+  it('falls back to the raw activity_type key when no name lookup is given', () => {
+    const entry = toActivityLogEntry(session({ activity_type: 'TEST_CATALOG' }));
+
+    expect(entry.activityName).toBe('TEST_CATALOG');
+  });
+
+  it('prefers the real name from nameByType over the raw key', () => {
+    const nameByType = new Map([['TEST_CATALOG', 'Sprint 1 Requirements Check']]);
+
+    const entry = toActivityLogEntry(session({ activity_type: 'TEST_CATALOG' }), nameByType);
+
+    expect(entry.activityName).toBe('Sprint 1 Requirements Check');
+  });
+
+  it('falls back to the raw key when nameByType has no entry for this activity_type', () => {
+    const nameByType = new Map([['SOME_OTHER_CATALOG', 'Unrelated Name']]);
+
+    const entry = toActivityLogEntry(session({ activity_type: 'TEST_CATALOG' }), nameByType);
+
+    expect(entry.activityName).toBe('TEST_CATALOG');
+  });
+
+  it('still resolves a built-in activity type\'s curated name, with or without nameByType', () => {
+    const withoutLookup = toActivityLogEntry(session({ activity_type: 'IDENTIFY_WEAK_USER_STORIES' }));
+    const withEmptyLookup = toActivityLogEntry(session({ activity_type: 'IDENTIFY_WEAK_USER_STORIES' }), new Map());
+
+    expect(withoutLookup.activityName).toBe('Identify Weak User Stories');
+    expect(withEmptyLookup.activityName).toBe('Identify Weak User Stories');
+  });
+
+  // Only the name resolution changed — every other field still reads straight off the session.
+  it('leaves status, score and date untouched', () => {
+    const entry = toActivityLogEntry(
+      session({ cumulative_score: 30, max_score: 40, status: 'completed', passed: false }),
+      new Map([['TEST_CATALOG', 'Sprint 1 Requirements Check']]),
+    );
+
+    expect(entry.score).toBe(30);
+    expect(entry.maxScore).toBe(40);
+    expect(entry.passed).toBe(false);
+    expect(entry.status).toBe('completed');
+    expect(entry.dateTime).toBe('2026-08-01T10:20:00.000Z');
+  });
+});
 
 /**
  * summarizeStudents is a pure helper, so this test builds its input directly instead of mocking
