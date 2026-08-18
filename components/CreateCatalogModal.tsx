@@ -38,6 +38,10 @@ const KIND_OPTIONS: { value: GradingKind; label: string; hint: string }[] = [
  * to require picking one here, is gone. A catalog is created owned only by its instructor and
  * becomes visible to students once composed into an assembled_quiz (GitHub #360,
  * app/instructor/assembled-quizzes/page.tsx) for a course.
+ *
+ * No grading-rubric field here either: the rubric (assembled_quiz.rating_prompt) belongs to the
+ * quiz that composes a catalog, not the catalog itself — see components/CreateQuizModal.tsx and
+ * CLAUDE.md's grading-rubric section.
  */
 export function CreateCatalogModal({
   token,

@@ -143,6 +143,12 @@ export async function POST(request: Request, { params }: { params: { activityTyp
       cumulative_score: 0,
       max_score: sessionMaxScoreForDifficulty(startLevel as 1 | 2 | 3),
       passed: false,
+      // Which assembled quiz's composition actually granted access — persisted so
+      // POST .../llm/submissions can resolve the *same* quiz's rating_prompt to grade against,
+      // rather than re-deriving "some" accessible quiz at grading time (which could silently
+      // differ if this catalog is reachable through more than one accessible quiz). See
+      // session_log.assembled_quiz_id's own comment in supabase/schema.sql.
+      assembled_quiz_id: accessLink.assembledQuizId,
     })
     .select(SESSION_COLUMNS)
     .single();

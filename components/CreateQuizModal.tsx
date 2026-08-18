@@ -6,6 +6,7 @@ import type { CourseSummary } from '../lib/courseClient';
 import type { QuizSummary } from '../lib/quizClient';
 import type { GradingKind } from '../lib/activityTypes';
 import { useModalDismiss } from './useModalDismiss';
+import { RatingPromptModal } from './RatingPromptModal';
 
 /**
  * Same two-way choice as components/CreateCatalogModal.tsx's KIND_OPTIONS — a quiz is locked to
@@ -38,6 +39,17 @@ const KIND_OPTIONS: { value: GradingKind; label: string; hint: string }[] = [
  * multi-select filtered to that kind. `courses`/`catalogs` are passed in rather than fetched here
  * — the parent page already loads both for the list/table view, and this modal only ever opens
  * after that load has completed.
+ *
+ * Selecting "LLM-Graded Task" immediately opens RatingPromptModal, a second popup stacked on top
+ * of this one — the same forced-entry pattern CreateCatalogModal used to have for its own rubric
+ * field, moved here because the rubric (assembled_quiz.rating_prompt) is the *quiz's* grading
+ * configuration, not any one of its catalogs' — see that column's own comment in
+ * supabase/schema.sql. Confirming it stores the rubric locally and returns here (with a "Grading
+ * rubric set" summary + Edit affordance in its place); dismissing it any other way resets
+ * gradingKind back to unselected, same "no silent default" rule gradingKind's own required-choice
+ * already follows. Unlike gradingKind, the rubric isn't locked forever — RatingPromptModal is
+ * reused in "edit" mode on the quiz detail page's own "Set rubric"/"Edit rubric" button
+ * (app/instructor/assembled-quizzes/[quizId]/page.tsx) for revising it after creation.
  */
 export function CreateQuizModal({
   token,
@@ -72,13 +84,18 @@ export function CreateQuizModal({
   // state: creation cannot proceed without this choice only if nothing is pre-picked for the
   // instructor to accept without looking.
   const [gradingKind, setGradingKind] = useState<GradingKind | null>(null);
+  const [ratingPrompt, setRatingPrompt] = useState('');
+  // Opened the instant "LLM-Graded Task" is selected (see the docblock above) — kept as its own
+  // flag rather than derived from gradingKind so "Edit" can reopen it without re-selecting the
+  // radio, and so this modal's own Escape/backdrop handling can be suppressed while it's up.
+  const [ratingPromptModalOpen, setRatingPromptModalOpen] = useState(false);
   const [selectedCatalogs, setSelectedCatalogs] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
   const { panelRef, firstFieldRef, requestClose } = useModalDismiss<HTMLDivElement, HTMLInputElement>({
     onClose,
-    isBlocked: submitting,
+    isBlocked: submitting || ratingPromptModalOpen,
   });
 
   function toggleCatalog(activityType: string) {
@@ -91,7 +108,13 @@ export function CreateQuizModal({
   // (assembled_quiz.grading_kind is locked at creation, enforced again server-side).
   const catalogsForKind = gradingKind === null ? [] : catalogs.filter((catalog) => catalog.gradingKind === gradingKind);
 
-  const canSubmit = Boolean(name.trim()) && Boolean(courseId) && gradingKind !== null && selectedCatalogs.length > 0 && !submitting;
+  const canSubmit =
+    Boolean(name.trim()) &&
+    Boolean(courseId) &&
+    gradingKind !== null &&
+    (gradingKind !== 'llm-graded' || Boolean(ratingPrompt.trim())) &&
+    selectedCatalogs.length > 0 &&
+    !submitting;
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -105,6 +128,7 @@ export function CreateQuizModal({
       description: description.trim() || undefined,
       courseId,
       gradingKind,
+      ratingPrompt: gradingKind === 'llm-graded' ? ratingPrompt.trim() : undefined,
       catalogActivityTypes: selectedCatalogs,
     });
 
@@ -130,6 +154,7 @@ export function CreateQuizModal({
   }
 
   return (
+    <>
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-8"
       onClick={(event) => {
@@ -233,6 +258,10 @@ export function CreateQuizModal({
                       // a quiz can't mix kinds, so a stale selection would otherwise silently
                       // submit alongside catalogs the instructor can no longer even see checked.
                       setSelectedCatalogs([]);
+                      // Force the rubric prompt open right away for llm-graded — see the docblock
+                      // above. Switching to mcq needs no popup; any previously-entered rubric is
+                      // simply unused (and discarded server-side too, per the create route).
+                      if (option.value === 'llm-graded') setRatingPromptModalOpen(true);
                     }}
                     className="mt-0.5 h-4 w-4 flex-none accent-brand-purple"
                   />
@@ -247,6 +276,26 @@ export function CreateQuizModal({
               This cannot be changed after the quiz is created.
             </p>
           </fieldset>
+
+          {gradingKind === 'llm-graded' && !ratingPromptModalOpen ? (
+            <div className="mt-4 flex items-center justify-between gap-3 rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-3">
+              <div>
+                <p className="text-sm font-extrabold text-brand-ink">
+                  {ratingPrompt ? 'Grading rubric set' : 'Grading rubric required'}
+                </p>
+                {ratingPrompt ? (
+                  <p className="mt-0.5 line-clamp-1 text-xs font-semibold text-brand-ink-muted">{ratingPrompt}</p>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                onClick={() => setRatingPromptModalOpen(true)}
+                className="flex-none rounded-brand-md border border-brand-navy-border bg-brand-navy px-3.5 py-2 text-xs font-extrabold text-brand-ink transition hover:border-brand-purple hover:text-brand-purple"
+              >
+                {ratingPrompt ? 'Edit' : 'Add rubric'}
+              </button>
+            </div>
+          ) : null}
 
           <span className="mb-1.5 mt-4 block text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted">Catalogs</span>
           <div className="max-h-40 space-y-2 overflow-y-auto rounded-brand-md border border-brand-navy-border bg-brand-navy-2 p-3">
@@ -292,5 +341,28 @@ export function CreateQuizModal({
         </form>
       </div>
     </div>
+    {ratingPromptModalOpen ? (
+      <RatingPromptModal
+        mode="create"
+        initialValue={ratingPrompt}
+        onSave={async (value) => {
+          // No network call yet — the quiz itself (and its rubric) is only created once the
+          // parent form below is submitted, so this just stores the value in local state.
+          setRatingPrompt(value);
+          setRatingPromptModalOpen(false);
+          return { ok: true };
+        }}
+        onCancel={() => {
+          // Dismissed without answering — the same "no silent default" rule gradingKind's own
+          // required-choice already follows, applied one level down: treat it as if no kind had
+          // been chosen at all, rather than leaving an llm-graded selection with no rubric behind it.
+          setGradingKind(null);
+          setSelectedCatalogs([]);
+          setRatingPrompt('');
+          setRatingPromptModalOpen(false);
+        }}
+      />
+    ) : null}
+    </>
   );
 }

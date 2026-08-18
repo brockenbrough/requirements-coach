@@ -288,6 +288,18 @@ describe('POST /api/activities/[activityType]/llm/sessions', () => {
     expect(links.map((l) => l.position)).toEqual([0, 1, 2, 3]);
   });
 
+  // Persisted so POST .../llm/submissions can later resolve *this same* quiz's rating_prompt to
+  // grade against, rather than re-deriving "some" accessible quiz at grading time — see
+  // session_log.assembled_quiz_id's own comment in supabase/schema.sql.
+  it('persists the granting assembled quiz on the new session, for later rubric resolution', async () => {
+    queueHappyPath();
+
+    await POST(req(), PARAMS());
+
+    const sessionInsert = h.state.inserts.find((i) => i.table === 'session_log')!.payload as Record<string, unknown>;
+    expect(sessionInsert).toMatchObject({ assembled_quiz_id: 'quiz-1' });
+  });
+
   it('draws from the activity type in the path, not a fixed one', async () => {
     queueHappyPath();
 

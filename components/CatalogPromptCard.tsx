@@ -11,8 +11,12 @@ import type { CatalogUserStory } from '../lib/llmActivityTypes';
  * block is existing, working code and leaving it untouched is the cheapest guarantee that adding
  * the LLM-graded branch can't regress the MCQ one.
  *
- * There is no answer-options list and no explanation: an LLM-graded prompt is the whole item, and
- * the grading rubric lives in lib/llm/promptUtils.ts rather than per prompt.
+ * There is no answer-options list and no explanation: an LLM-graded prompt is the whole item. The
+ * grading rubric isn't a property of the catalog (or any one prompt) at all — it lives on
+ * whichever assembled_quiz composes this catalog (assembled_quiz.rating_prompt), since a rubric
+ * describes how a specific quiz wants answers graded, and the same catalog can be composed into
+ * more than one quiz. This page never shows or edits it — that only happens in the "Grading
+ * Rubric" section of the assembled-quiz detail page (app/instructor/assembled-quizzes/[quizId]/page.tsx).
  */
 export function CatalogPromptCard({
   prompt,

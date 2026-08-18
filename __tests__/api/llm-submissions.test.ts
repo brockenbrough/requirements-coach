@@ -127,8 +127,8 @@ function req(body: object, token: string | null = 'valid-token') {
 }
 
 /** Queues the calls the route makes up to (but not including) the LLM call and its DB writes. */
-function queueUpToLLM(options: { existingSubmissions?: unknown[]; story?: object } = {}) {
-  queue('session_log', { data: sessionRow, error: null });
+function queueUpToLLM(options: { existingSubmissions?: unknown[]; story?: object; session?: object } = {}) {
+  queue('session_log', { data: options.session ?? sessionRow, error: null });
   queue('session_to_user_story', { data: drawnStories, error: null });
   queue('submission', { data: options.existingSubmissions ?? [], error: null });
   queue('user_story', { data: options.story ?? STORY, error: null });
@@ -410,5 +410,40 @@ describe('POST /api/activities/[activityType]/llm/submissions', () => {
     )!.payload as Record<string, unknown>;
     expect(sessionCompletion).toMatchObject({ status: 'completed' });
     expect(sessionCompletion.ended_at).toBeTruthy();
+  });
+
+  // Quiz-level custom rubric (assembled_quiz.rating_prompt) — resolved via the session's own
+  // assembled_quiz_id (the quiz whose composition granted this session access at start time), not
+  // from the story's catalog. The route only has to pass it through to the provider — the
+  // RATING_RUBRIC-vs-custom-rubric substitution itself is buildRatingPrompt's own unit-test
+  // responsibility (__tests__/lib/promptUtils.test.ts).
+  it("passes the granting quiz's custom rating_prompt through to the LLM provider", async () => {
+    queueUpToLLM({ session: { ...sessionRow, assembled_quiz_id: 'quiz-1' } });
+    queue('assembled_quiz', { data: { rating_prompt: 'Custom rubric text.' }, error: null });
+    queueSuccessfulWrite(submissionRow('story-1'));
+
+    await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
+
+    expect(rateAcceptanceCriteria).toHaveBeenCalledWith(STORY.story_text, 'x', 'Custom rubric text.');
+  });
+
+  it('passes no custom rubric, and never queries assembled_quiz, when the session has no assembled_quiz_id', async () => {
+    queueUpToLLM(); // default sessionRow: assembled_quiz_id is undefined
+    queueSuccessfulWrite(submissionRow('story-1'));
+
+    await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
+
+    expect(rateAcceptanceCriteria).toHaveBeenCalledWith(STORY.story_text, 'x', null);
+    expect(h.state.tables).not.toContain('assembled_quiz');
+  });
+
+  it('passes no custom rubric when the granting quiz has no rating_prompt set', async () => {
+    queueUpToLLM({ session: { ...sessionRow, assembled_quiz_id: 'quiz-1' } });
+    queue('assembled_quiz', { data: { rating_prompt: null }, error: null });
+    queueSuccessfulWrite(submissionRow('story-1'));
+
+    await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
+
+    expect(rateAcceptanceCriteria).toHaveBeenCalledWith(STORY.story_text, 'x', null);
   });
 });

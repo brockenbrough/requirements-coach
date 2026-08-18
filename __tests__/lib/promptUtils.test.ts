@@ -59,6 +59,36 @@ describe('buildRatingPrompt', () => {
     expect(buildRatingPrompt('', ANSWER)).toContain(RATING_RUBRIC);
     expect(buildRatingPrompt(TASK, '')).toContain(TASK);
   });
+
+  // A catalog's own activity_type.rating_prompt (see supabase/schema.sql) replaces RATING_RUBRIC
+  // entirely — an instructor's catalog need not be about acceptance criteria at all, so the
+  // built-in rubric is only ever a fallback for a catalog that hasn't set one.
+  describe('with a custom rubric', () => {
+    const CUSTOM_RUBRIC = 'Score strictly on whether the API contract is fully specified.';
+
+    it('substitutes the custom rubric in place of RATING_RUBRIC', () => {
+      const prompt = buildRatingPrompt(TASK, ANSWER, CUSTOM_RUBRIC);
+      expect(prompt).toContain(CUSTOM_RUBRIC);
+      expect(prompt).not.toContain(RATING_RUBRIC);
+    });
+
+    it('falls back to RATING_RUBRIC when the custom rubric is undefined, null, or blank', () => {
+      expect(buildRatingPrompt(TASK, ANSWER)).toContain(RATING_RUBRIC);
+      expect(buildRatingPrompt(TASK, ANSWER, null)).toContain(RATING_RUBRIC);
+      expect(buildRatingPrompt(TASK, ANSWER, '   ')).toContain(RATING_RUBRIC);
+    });
+
+    it('still asks for score and feedback in the same closing instruction regardless of rubric', () => {
+      const prompt = buildRatingPrompt(TASK, ANSWER, CUSTOM_RUBRIC);
+      expect(prompt).toMatch(/Reply with the score and feedback/);
+    });
+
+    it('still fences the student answer when a custom rubric is used', () => {
+      const prompt = buildRatingPrompt(TASK, ANSWER, CUSTOM_RUBRIC);
+      expect(prompt).toContain('<student_answer>');
+      expect(prompt).toContain('</student_answer>');
+    });
+  });
 });
 
 describe('parseRatingResponse', () => {

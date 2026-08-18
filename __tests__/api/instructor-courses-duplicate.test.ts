@@ -234,7 +234,7 @@ describe('POST /api/instructor/courses/[id]/duplicate', () => {
     queue('course', { data: sourceCourseRow(), error: null }); // findOwnedCourse
     queue('course', { data: newCourseRow(), error: null }); // createCourseWithUniqueCode
     queue('assembled_quiz', {
-      data: [{ assembled_quiz_id: 'quiz-1', quiz_name: 'Midterm Prep', description: 'desc' }],
+      data: [{ assembled_quiz_id: 'quiz-1', quiz_name: 'Midterm Prep', description: 'desc', rating_prompt: 'Score strictness: high.' }],
       error: null,
     }); // duplicateQuizzesForCourse's source read
     queue('assembled_quiz_catalog', { data: [{ activity_type: 'IDENTIFY_WEAK_USER_STORIES' }], error: null }); // listQuizCatalogActivityTypes
@@ -250,6 +250,9 @@ describe('POST /api/instructor/courses/[id]/duplicate', () => {
     expect(newQuizInsert?.payload).toMatchObject({
       quiz_name: 'Midterm Prep',
       description: 'desc',
+      // The rubric is the quiz's own property now (assembled_quiz.rating_prompt) — a duplicated
+      // quiz carries it over exactly like quiz_name/description.
+      rating_prompt: 'Score strictness: high.',
       course_id: 'course-2',
       creator_id: 'instructor-1',
     });

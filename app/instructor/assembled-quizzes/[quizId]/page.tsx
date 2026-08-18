@@ -8,6 +8,7 @@ import { AddQuizQuestionsModal } from '../../../../components/AddQuizQuestionsMo
 import { ConfirmModal } from '../../../../components/ConfirmModal';
 import { QuestionFormModal } from '../../../../components/QuestionFormModal';
 import { PromptFormModal } from '../../../../components/PromptFormModal';
+import { RatingPromptModal } from '../../../../components/RatingPromptModal';
 import {
   createAndPickQuestionForQuiz,
   createAndPickUserStoryForQuiz,
@@ -17,6 +18,7 @@ import {
   removeExtraQuestionFromQuiz,
   removeExtraUserStoryFromQuiz,
   unlinkCatalogFromQuiz,
+  updateAssembledQuizRatingPrompt,
   type AssembledQuizDetail,
   type QuizCatalogComposition,
   type QuizExtraQuestionSummary,
@@ -46,6 +48,13 @@ const LEVEL_LABEL: Record<1 | 2 | 3, string> = { 1: 'Easy', 2: 'Medium', 3: 'Har
  * app/instructor/assembled-quizzes/[quizId]/catalogs/[activityType]/page.tsx, the "copy of the
  * catalog in the context of this quiz" view (requirement 3) where individual questions get
  * excluded/included.
+ *
+ * For an llm-graded quiz, a "Grading Rubric" section (below "From catalogs") shows this quiz's own
+ * assembled_quiz.rating_prompt with a "Set rubric"/"Edit rubric" button, opening
+ * components/RatingPromptModal.tsx in "edit" mode (PATCH /api/instructor/assembled-quizzes/{quizId}).
+ * One control for the whole quiz, not per catalog — unlike the composition below it, the rubric is
+ * a property of the quiz itself, not of any one of the catalogs it draws from (see that column's
+ * own comment in supabase/schema.sql for why it lives here rather than on activity_type).
  */
 export default function AssembledQuizDetailPage({ params }: { params: { quizId: string } }) {
   const { token, loading, authorized } = useRequireRole('instructor');
@@ -67,6 +76,7 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
   const [addingCatalog, setAddingCatalog] = useState(false);
   const [addError, setAddError] = useState('');
   const [catalogToRemove, setCatalogToRemove] = useState<QuizCatalogComposition | null>(null);
+  const [ratingPromptModalOpen, setRatingPromptModalOpen] = useState(false);
   const [showDeleteQuiz, setShowDeleteQuiz] = useState(false);
   const [showAddQuestionsModal, setShowAddQuestionsModal] = useState(false);
   const [showCreateItemModal, setShowCreateItemModal] = useState(false);
@@ -168,6 +178,19 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
     setSelectedCatalogToAdd('');
     showToast(`"${added?.name ?? selectedCatalogToAdd}" added to this quiz.`);
     setRetryCount((count) => count + 1); // re-fetch level coverage, which the optimistic insert above can't compute correctly
+  }
+
+  async function handleSaveQuizRatingPrompt(value: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (!token) return { ok: false, error: 'Your session has expired. Please sign in again.' };
+
+    const result = await updateAssembledQuizRatingPrompt(token, params.quizId, value);
+    if (!result.ok) return { ok: false, error: result.error };
+
+    setQuiz((current) => (current ? { ...current, ratingPrompt: result.data.ratingPrompt } : current));
+    setRatingPromptModalOpen(false);
+    showToast('Grading rubric updated.');
+
+    return { ok: true };
   }
 
   async function handleRemoveExtraQuestion(question: QuizExtraQuestionSummary) {
@@ -366,6 +389,32 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
               )}
             </div>
 
+            {quiz.gradingKind === 'llm-graded' ? (
+              <>
+                <p className="mb-3 text-xs font-extrabold uppercase tracking-wide text-gray-400">Grading Rubric</p>
+                <p className="mb-4 text-xs font-semibold text-gray-500">
+                  Every submission graded through this quiz is scored against this rubric. Changing it only affects
+                  submissions graded afterward.
+                </p>
+                <div className="mb-6 flex flex-wrap items-start justify-between gap-3 rounded-brand-lg border border-gray-100 bg-gray-50 p-4">
+                  <div className="min-w-0 flex-1">
+                    {quiz.ratingPrompt ? (
+                      <p className="whitespace-pre-wrap text-sm font-medium text-gray-600">{quiz.ratingPrompt}</p>
+                    ) : (
+                      <p className="text-sm font-medium text-gray-400">Using the built-in default rubric.</p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setRatingPromptModalOpen(true)}
+                    className="flex-none rounded-full border border-gray-300 bg-white px-4 py-1.5 text-xs font-extrabold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple"
+                  >
+                    {quiz.ratingPrompt ? 'Edit rubric' : 'Set rubric'}
+                  </button>
+                </div>
+              </>
+            ) : null}
+
             <p className="mb-3 text-xs font-extrabold uppercase tracking-wide text-gray-400">Add a catalog</p>
             <div className="flex flex-wrap items-center gap-3 rounded-brand-lg border border-gray-100 bg-gray-50 p-4">
               <select
@@ -550,6 +599,15 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
             router.push('/instructor/assembled-quizzes');
             return { ok: true as const };
           }}
+        />
+      ) : null}
+
+      {ratingPromptModalOpen ? (
+        <RatingPromptModal
+          mode="edit"
+          initialValue={quiz?.ratingPrompt ?? ''}
+          onCancel={() => setRatingPromptModalOpen(false)}
+          onSave={handleSaveQuizRatingPrompt}
         />
       ) : null}
 
