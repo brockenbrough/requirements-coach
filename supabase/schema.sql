@@ -489,7 +489,12 @@ ALTER TABLE quiz_excluded_question ADD CONSTRAINT fk_quiz_excluded_question_ques
 ALTER TABLE assembled_quiz_extra_question ADD CONSTRAINT fk_assembled_quiz_extra_question_quiz FOREIGN KEY (assembled_quiz_id) REFERENCES assembled_quiz (assembled_quiz_id) ON DELETE CASCADE;
 ALTER TABLE assembled_quiz_extra_question ADD CONSTRAINT fk_assembled_quiz_extra_question_question FOREIGN KEY (question_id) REFERENCES question (question_id) ON DELETE CASCADE;
 
-ALTER TABLE title_definition ADD CONSTRAINT fk_title_definition_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
+-- ON DELETE CASCADE so a catalog's title ladder cannot outlive the catalog. Without it this FK
+-- defaults to RESTRICT and the first title row refuses the delete outright. The cascade also
+-- finishes a chain that needs no cleanup code: dropping the catalog drops its titles, and
+-- "user".selected_title_definition_id is ON DELETE SET NULL, so anyone wearing one of them simply
+-- stops wearing it.
+ALTER TABLE title_definition ADD CONSTRAINT fk_title_definition_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type) ON DELETE CASCADE;
 
 -- The title a student has chosen to wear. ON DELETE SET NULL rather than RESTRICT or CASCADE:
 -- deleting a title_definition row must not be blocked by whoever happens to be wearing it, and it
@@ -985,6 +990,14 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 --   ALTER TABLE "user" ADD CONSTRAINT fk_user_title_definition
 --     FOREIGN KEY (selected_title_definition_id)
 --     REFERENCES title_definition (title_definition_id) ON DELETE SET NULL;
+
+-- Instructor-authored title ladders: if your database predates the cascade on
+-- fk_title_definition_activity_type, replace the constraint. Without it, deleting a catalog is
+-- refused by its own title rows. Nothing is lost — the constraint is only redefined:
+--
+--   ALTER TABLE title_definition DROP CONSTRAINT IF EXISTS fk_title_definition_activity_type;
+--   ALTER TABLE title_definition ADD CONSTRAINT fk_title_definition_activity_type
+--     FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type) ON DELETE CASCADE;
 
 -- GitHub #347 (create and browse quizzes): if your activity_type table predates quiz_name/
 -- description/creator_id, add them without touching the three existing rows' keys — every

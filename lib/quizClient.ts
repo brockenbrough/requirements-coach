@@ -7,6 +7,8 @@
 import type { CatalogQuestion } from './quizQuestionTypes';
 import type { CatalogUserStory } from './llmActivityTypes';
 import type { GradingKind } from './activityTypes';
+import type { StoredTitleRung } from './titleAuthoringQueries';
+import type { TitleLadderRungInput } from './titleLadderInput';
 
 export type QuizSummary = {
   activityType: string;
@@ -70,11 +72,20 @@ export type CreatedQuiz = {
   name: string;
   description: string | null;
   gradingKind: GradingKind;
+  /** The ladder as authored, only the levels that got a title — [] when none were given. */
+  titles: StoredTitleRung[];
 };
 
 export function createQuiz(
   token: string,
-  input: { name: string; gradingKind: GradingKind; description?: string },
+  input: {
+    name: string;
+    gradingKind: GradingKind;
+    description?: string;
+    /** Optional mastery title ladder. Omitted or empty creates a catalog with no titles, which is
+     *  what every catalog created before this existed looks like. */
+    titles?: TitleLadderRungInput[];
+  },
 ): Promise<ApiResult<{ quiz: CreatedQuiz }>> {
   return request<{ quiz: CreatedQuiz }>(
     '/api/activities/types',
@@ -95,12 +106,63 @@ export function createQuiz(
  * GitHub #379: both pools always come back, one of them empty — read quiz.gradingKind to know
  * which one is the real content.
  */
-export type QuizDetail = { quiz: QuizMeta; questions: CatalogQuestion[]; userStories: CatalogUserStory[] };
+export type QuizDetail = {
+  quiz: QuizMeta;
+  questions: CatalogQuestion[];
+  userStories: CatalogUserStory[];
+  /** The catalog's mastery title ladder — only the levels that actually have a title, so an
+   *  unauthored catalog sends []. */
+  titles: StoredTitleRung[];
+};
 
 export function loadQuizDetail(token: string, activityType: string): Promise<ApiResult<QuizDetail>> {
   return request<QuizDetail>(
     `/api/instructor/quizzes/${encodeURIComponent(activityType)}`,
     { method: 'GET' },
+    token,
+  );
+}
+
+/**
+ * Replaces one catalog's mastery title ladder (PUT /api/instructor/quizzes/{activityType}/titles).
+ *
+ * A rung with titleName null clears that level; a level absent from `rungs` is left alone. The
+ * response is the ladder as actually stored, not an echo — see the route for why.
+ */
+export function saveTitleLadder(
+  token: string,
+  activityType: string,
+  rungs: TitleLadderRungInput[],
+): Promise<ApiResult<{ titles: StoredTitleRung[] }>> {
+  return request<{ titles: StoredTitleRung[] }>(
+    `/api/instructor/quizzes/${encodeURIComponent(activityType)}/titles`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ titles: rungs }),
+    },
+    token,
+  );
+}
+
+/** Every title name already in use anywhere, for the authoring form's suggestion list. */
+export function loadTitleNames(token: string): Promise<ApiResult<{ titleNames: string[] }>> {
+  return request<{ titleNames: string[] }>('/api/instructor/titles', { method: 'GET' }, token);
+}
+
+/**
+ * Deletes a catalog the caller created (DELETE /api/instructor/quizzes/{activityType}).
+ *
+ * Expect a 409 with a readable message when the catalog has attempt history or is composed into an
+ * assembled quiz — that is a normal outcome to render, not an error to swallow.
+ */
+export function deleteCatalog(
+  token: string,
+  activityType: string,
+): Promise<ApiResult<{ activityType: string; deletedQuestions: number; deletedPrompts: number }>> {
+  return request<{ activityType: string; deletedQuestions: number; deletedPrompts: number }>(
+    `/api/instructor/quizzes/${encodeURIComponent(activityType)}`,
+    { method: 'DELETE' },
     token,
   );
 }
