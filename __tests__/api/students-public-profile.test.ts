@@ -68,7 +68,15 @@ function req(token: string | null = 'valid-token') {
 const ctx = { params: { studentId: TARGET_ID } };
 
 function targetRow(overrides: Partial<Record<string, unknown>> = {}) {
-  return { username: 'ada', avatar_url: null, biography: 'Hello!', role: 'student', ...overrides };
+  return {
+    username: 'ada',
+    avatar_url: null,
+    biography: 'Hello!',
+    role: 'student',
+    // The fk_user_title_definition embed: null when this student wears no title.
+    selected_title: null,
+    ...overrides,
+  };
 }
 
 /** Queues the full happy-path chain: target row, target's courses, shared course, score, titles, ladder. */
@@ -85,7 +93,14 @@ function queueHappyPath(options: { targetCourseIds?: string[]; sharedCourseIds?:
     error: null,
   });
   queue('title_definition', {
-    data: [{ activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 1, title_name: 'Requirements Novice' }],
+    data: [
+      {
+        title_definition_id: 'title-1',
+        activity_type: 'IDENTIFY_WEAK_USER_STORIES',
+        difficulty_level: 1,
+        title_name: 'Requirements Novice',
+      },
+    ],
     error: null,
   });
   // availableTitles: the target's own course-scoped activity list, plus its full ladder.
@@ -100,7 +115,14 @@ function queueHappyPath(options: { targetCourseIds?: string[]; sharedCourseIds?:
     error: null,
   });
   queue('title_definition', {
-    data: [{ activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 1, title_name: 'Requirements Novice' }],
+    data: [
+      {
+        title_definition_id: 'title-1',
+        activity_type: 'IDENTIFY_WEAK_USER_STORIES',
+        difficulty_level: 1,
+        title_name: 'Requirements Novice',
+      },
+    ],
     error: null,
   });
 }
@@ -177,6 +199,7 @@ describe('GET /api/students/{studentId}/public-profile', () => {
       username: 'ada',
       avatarUrl: null,
       biography: 'Hello!',
+      selectedTitle: null,
       score: 100,
       titles: [{ activityType: 'IDENTIFY_WEAK_USER_STORIES', difficultyLevel: 1, title: 'Requirements Novice' }],
       availableTitles: [
@@ -186,9 +209,9 @@ describe('GET /api/students/{studentId}/public-profile', () => {
           courseId: 'course-1',
           courseName: 'Course 1',
           titles: [
-            { difficultyLevel: 1, title: 'Requirements Novice' },
-            { difficultyLevel: 2, title: null },
-            { difficultyLevel: 3, title: null },
+            { difficultyLevel: 1, titleDefinitionId: 'title-1', title: 'Requirements Novice' },
+            { difficultyLevel: 2, titleDefinitionId: null, title: null },
+            { difficultyLevel: 3, titleDefinitionId: null, title: null },
           ],
         },
       ],

@@ -1,6 +1,8 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { requireInstructor } from '../../../../lib/instructorAuth';
 import { isGradingKind, slugifyQuizName } from '../../../../lib/activityTypes';
+import { saveTitleLadder } from '../../../../lib/titleAuthoringQueries';
+import { validateTitleLadder } from '../../../../lib/titleLadderInput';
 
 // Matches activity_type.activity_type varchar(50) in supabase/schema.sql.
 const MAX_KEY_LENGTH = 50;
@@ -61,10 +63,11 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Invalid JSON body.' }, { status: 400 });
   }
 
-  const { name, description, gradingKind } = (body ?? {}) as {
+  const { name, description, gradingKind, titles } = (body ?? {}) as {
     name?: unknown;
     description?: unknown;
     gradingKind?: unknown;
+    titles?: unknown;
   };
 
   if (typeof name !== 'string' || name.trim() === '') {
@@ -91,6 +94,12 @@ export async function POST(request: Request) {
     );
   }
 
+  // Validated before the catalog is inserted, so a malformed ladder never creates a catalog that
+  // then has to be rolled back. titles is optional throughout: a catalog without one behaves
+  // exactly as every catalog does today.
+  const ladder = validateTitleLadder(titles);
+  if (!ladder.ok) return Response.json({ error: ladder.error }, { status: 400 });
+
   const trimmedDescription = typeof description === 'string' && description.trim() !== '' ? description.trim() : null;
 
   const { data, error } = await supabase
@@ -114,6 +123,19 @@ export async function POST(request: Request) {
 
   const row = data as { activity_type: string; quiz_name: string; description: string | null; grading_kind: string };
 
+  // Rollback by hand: there is no transaction available through supabase-js, so a failed ladder
+  // insert deletes the catalog it was about to belong to — the same unwind createAssembledQuiz
+  // (lib/assembledQuizQueries.ts) and POST /api/instructor/questions perform. Leaving the catalog
+  // behind would be worse than failing outright: the instructor would retry the same name and hit
+  // the 409 above, with no way to see why.
+  if (ladder.rungs.length > 0) {
+    const { error: ladderError } = await saveTitleLadder(supabase, row.activity_type, ladder.rungs);
+    if (ladderError) {
+      await supabase.from('activity_type').delete().eq('activity_type', row.activity_type);
+      return Response.json({ error: ladderError.message }, { status: 500 });
+    }
+  }
+
   return Response.json(
     {
       quiz: {
@@ -121,6 +143,7 @@ export async function POST(request: Request) {
         name: row.quiz_name,
         description: row.description,
         gradingKind: row.grading_kind,
+        titles: ladder.rungs.filter((rung) => rung.titleName !== null),
       },
     },
     { status: 201 },

@@ -38,7 +38,7 @@ export function AcceptanceCriteriaWritingScreen({
 
       <form onSubmit={handleSubmit} className="rounded-brand-lg border border-brand-navy-border bg-brand-navy p-6">
         <label className="mb-1.5 block text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted" htmlFor="acceptance-criteria-input">
-          Your acceptance criteria
+          Your answer
         </label>
         <textarea
           id="acceptance-criteria-input"
@@ -46,12 +46,8 @@ export function AcceptanceCriteriaWritingScreen({
           onChange={(event) => setText(event.target.value)}
           disabled={submitting}
           rows={8}
-          placeholder="Given ..., when ..., then ..."
-          className="block w-full resize-y rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm leading-relaxed text-brand-ink outline-none transition focus:border-brand-purple disabled:cursor-not-allowed disabled:opacity-60"
+          className="mb-5 block w-full resize-y rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm leading-relaxed text-brand-ink outline-none transition focus:border-brand-purple disabled:cursor-not-allowed disabled:opacity-60"
         />
-        <p className="mb-5 mt-1.5 text-xs font-semibold text-brand-ink-muted">
-          Write one or more Given/When/Then criteria. Aim for criteria that are specific, testable, and clearly connected to the story above.
-        </p>
 
         <button
           type="submit"

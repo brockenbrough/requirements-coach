@@ -11,14 +11,17 @@ import type { Role } from '../components/UserProvider';
  * below fires after first render, so returning null (or a loading state) until then is what
  * keeps a mismatched role from seeing a flash of the wrong page.
  *
- * The two roles are deliberately asymmetric about a missing profile (profile === null, i.e. the
- * "user" row hasn't been created yet — normal right after registration):
- * - required: 'student' allows it through. The DB default is 'student', there is nothing to
- *   fail closed against, and every existing student page already tolerated a profile-less
- *   account before this hook existed.
- * - required: 'instructor' does not. Only an explicit profile.role === 'instructor' grants
- *   access; an unconfirmed account is sent to /profile to finish setup first (the same step
- *   every new account has to take anyway) rather than rendering instructor data on a guess.
+ * GitHub #441: a missing profile (profile === null, i.e. the "user" row hasn't been created
+ * yet — normal right after registration, or if the create-profile form was navigated away from
+ * before it was submitted) sends the account to /profile for *both* roles now, not just
+ * 'instructor'. It used to let a profile-less 'student' account through on the theory that the
+ * DB role defaults to 'student' and there was nothing to fail closed against — but several
+ * student pages (app/courses/page.tsx, app/activities/page.tsx, "My Courses") derive their own
+ * data from the profile row and rendered a blank screen instead of a loading/redirect state when
+ * it didn't exist. Routing every required role through /profile first — the same step every new
+ * account has to take anyway — means a half-registered account can't reach a broken page, and,
+ * since this check re-runs on every protected page load, a student who navigates away without
+ * finishing the form is sent right back next time they land on a gated page or log back in.
  */
 export function useRequireRole(requiredRole: Role) {
   const router = useRouter();
@@ -32,23 +35,27 @@ export function useRequireRole(requiredRole: Role) {
       return;
     }
 
+    if (!profile) {
+      router.replace('/profile');
+      return;
+    }
+
     if (requiredRole === 'instructor') {
-      if (!profile) {
-        router.replace('/profile');
-      } else if (profile.role !== 'instructor') {
+      if (profile.role !== 'instructor') {
         router.replace('/dashboard');
       }
       return;
     }
 
-    if (profile && profile.role === 'instructor') {
+    if (profile.role === 'instructor') {
       router.replace('/instructor');
     }
   }, [loading, token, profile, requiredRole, router]);
 
   const authorized =
     Boolean(token) &&
-    (requiredRole === 'instructor' ? profile?.role === 'instructor' : !profile || profile.role !== 'instructor');
+    Boolean(profile) &&
+    (requiredRole === 'instructor' ? profile?.role === 'instructor' : profile?.role !== 'instructor');
 
   return { token, profile, loading, authorized };
 }

@@ -106,7 +106,7 @@ describe('GET /api/leaderboard', () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body.entries).toEqual([{ rank: 1, studentId: 'student-1', username: 'ada', avatarUrl: null, points: 100, streak: 1 }]);
+    expect(body.entries).toEqual([{ rank: 1, studentId: 'student-1', username: 'ada', avatarUrl: null, title: null, points: 100, streak: 1 }]);
   });
 
   it('returns 500 when the enrolled-courses lookup fails', async () => {
