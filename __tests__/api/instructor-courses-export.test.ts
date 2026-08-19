@@ -125,7 +125,7 @@ describe('GET /api/instructor/courses/[id]/export', () => {
     expect(await res.text()).toBe('');
   });
 
-  it('returns a depersonalized CSV with no student ID or name column anywhere', async () => {
+  it('returns a CSV identified by student id (not name), one row per question', async () => {
     queueRole('instructor');
     queue('course', { data: courseRow(), error: null });
     queue('student_course', {
@@ -133,8 +133,27 @@ describe('GET /api/instructor/courses/[id]/export', () => {
       error: null,
     });
     queue('session_log', { data: [sessionRow()], error: null });
-    queue('session_to_question', { data: [], error: null });
-    queue('answered_question_log', { data: [], error: null });
+    queue('session_to_question', {
+      data: [
+        { session_id: 'session-1', position: 0, question_id: 'q1' },
+        { session_id: 'session-1', position: 1, question_id: 'q2' },
+      ],
+      error: null,
+    });
+    queue('answered_question_log', {
+      data: [{ session_id: 'session-1', question_id: 'q1', submitted_option: 'a1' }],
+      error: null,
+    });
+    queue('session_to_user_story', { data: [], error: null });
+    queue('submission', { data: [], error: null });
+    queue('question', {
+      data: [
+        { question_id: 'q1', question_prompt: 'Which user story is weakest?' },
+        { question_id: 'q2', question_prompt: 'Which user story is best?' },
+      ],
+      error: null,
+    });
+    queue('answer', { data: [{ answer_id: 'a1', option_text: 'Option A' }], error: null });
 
     const res = await GET(getRequest(), params);
     expect(res.status).toBe(200);
@@ -142,10 +161,11 @@ describe('GET /api/instructor/courses/[id]/export', () => {
     expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="course-ABCDEF-report.csv"');
 
     const csv = await res.text();
-    expect(csv).not.toMatch(/Alex|Chen|achen|student-1/);
+    expect(csv).not.toMatch(/Alex|Chen|achen/);
     expect(csv).toBe(
-      'activityType,difficultyLevel,status,startedAt,endedAt,cumulativeScore,maxScore,passed,questionCount,answeredCount\r\n' +
-        'IDENTIFY_WEAK_USER_STORIES,1,completed,2026-08-01T10:00:00Z,2026-08-01T10:10:00Z,3,4,true,0,0\r\n',
+      'userId,Catalog,difficultyLevel,status,startedAt,endedAt,cumulativeScore,maxScore,passed,questionCount,answeredCount,Question,Question Text,Answer\r\n' +
+        'student-1,IDENTIFY_WEAK_USER_STORIES,1,completed,2026-08-01T10:00:00Z,2026-08-01T10:10:00Z,3,4,true,2,1,Question 1,Which user story is weakest?,Option A\r\n' +
+        'student-1,IDENTIFY_WEAK_USER_STORIES,1,completed,2026-08-01T10:00:00Z,2026-08-01T10:10:00Z,3,4,true,2,1,Question 2,Which user story is best?,\r\n',
     );
   });
 
@@ -158,7 +178,7 @@ describe('GET /api/instructor/courses/[id]/export', () => {
     expect(res.status).toBe(200);
     const csv = await res.text();
     expect(csv).toBe(
-      'activityType,difficultyLevel,status,startedAt,endedAt,cumulativeScore,maxScore,passed,questionCount,answeredCount\r\n',
+      'userId,Catalog,difficultyLevel,status,startedAt,endedAt,cumulativeScore,maxScore,passed,questionCount,answeredCount,Question,Question Text,Answer\r\n',
     );
     expect(h.state.tables).not.toContain('session_log');
   });

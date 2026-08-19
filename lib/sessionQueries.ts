@@ -480,7 +480,7 @@ function studentDisplayName(student: EmbeddedStudent): string {
  * since ownedMcqTypes is already pre-filtered to mcq-kind keys the caller owns before it ever
  * reaches this function.)
  *
- * loadStudentActivityForIds has no such second source to double against — the course CSV export
+ * loadStudentActivityForIds has no such second source to double against — the course roster page
  * is the only thing that reads it, and there's no separate submissions merge there — so it
  * deliberately keeps including every activity type.
  *
@@ -597,6 +597,215 @@ export async function loadStudentActivityForIds(supabase: SupabaseClient, studen
   });
 
   return { activities, error: null };
+}
+
+/**
+ * One drawn question/prompt from one session, carrying that session's own fields (REQ-PL-3.4.5
+ * on top of loadStudentActivityForIds's session-level shape) plus the question's own text and
+ * the student's answer to it.
+ */
+export type StudentQuestionActivityRow = {
+  userId: string;
+  activityType: string;
+  difficultyLevel: number;
+  status: string;
+  startedAt: string;
+  endedAt: string | null;
+  cumulativeScore: number;
+  maxScore: number;
+  passed: boolean;
+  questionCount: number;
+  answeredCount: number;
+  /** 1-based position within its own session's draw (session_to_question/session_to_user_story's position + 1). */
+  questionNumber: number;
+  questionText: string;
+  /** null when the question/prompt was drawn but never answered/submitted — still a row, not omitted. */
+  answerText: string | null;
+};
+
+/**
+ * The per-question counterpart to loadStudentActivityForIds (REQ-PL-3.4.5): every session-level
+ * field that function already returns, repeated onto one row per question or prompt drawn into
+ * that session, rather than collapsed into a single row per session. Backs the course CSV
+ * export's per-question breakdown — each row carries the question/prompt's own text and the
+ * student's submitted answer (blank/null if the question was drawn but never answered) alongside
+ * the session it belongs to.
+ *
+ * A session's draw lives in session_to_question (MCQ) or session_to_user_story (LLM-graded), never
+ * both, so both are read for every session and only the one that has rows contributes output. A
+ * session with nothing drawn yet contributes no rows — unlike the session-granularity function,
+ * there is no "row per question" to stand in for it.
+ *
+ * Chunked by session id the same way loadProgressForSessions is (GitHub #275) — a course-wide
+ * caller can pass several hundred session ids — and the question/answer/user_story text lookups
+ * are themselves chunked by the ids actually referenced, for the same reason.
+ */
+export async function loadStudentQuestionActivityForIds(
+  supabase: SupabaseClient,
+  studentIds: string[],
+): Promise<{ rows: StudentQuestionActivityRow[] | null; error: unknown }> {
+  if (studentIds.length === 0) return { rows: [], error: null };
+
+  const { data: sessionData, error: sessionError } = await supabase
+    .from('session_log')
+    .select(SESSION_COLUMNS)
+    .in('user_id', studentIds)
+    .order('ended_at', { ascending: false })
+    .order('started_at', { ascending: false });
+
+  if (sessionError) return { rows: null, error: sessionError };
+
+  const sessions = (sessionData ?? []) as SessionRecord[];
+  const sessionIds = sessions.map((s) => s.session_id);
+
+  if (sessionIds.length === 0) return { rows: [], error: null };
+
+  const [
+    { data: questionPositions, error: qpError },
+    { data: answeredLogs, error: alError },
+    { data: storyPositions, error: spError },
+    { data: submissions, error: subError },
+  ] = await Promise.all([
+    fetchAllRowsByIds(sessionIds, (chunk, from, to) =>
+      supabase.from('session_to_question').select('session_id, position, question_id').in('session_id', chunk).range(from, to),
+    ),
+    fetchAllRowsByIds(sessionIds, (chunk, from, to) =>
+      supabase
+        .from('answered_question_log')
+        .select('session_id, question_id, submitted_option')
+        .in('session_id', chunk)
+        .range(from, to),
+    ),
+    fetchAllRowsByIds(sessionIds, (chunk, from, to) =>
+      supabase.from('session_to_user_story').select('session_id, position, user_story_id').in('session_id', chunk).range(from, to),
+    ),
+    fetchAllRowsByIds(sessionIds, (chunk, from, to) =>
+      supabase.from('submission').select('session_id, user_story_id, submitted_text').in('session_id', chunk).range(from, to),
+    ),
+  ]);
+
+  const positionError = qpError ?? alError ?? spError ?? subError ?? null;
+  if (positionError) return { rows: null, error: positionError };
+
+  type QuestionPosition = { session_id: string; position: number; question_id: string };
+  type AnsweredLog = { session_id: string; question_id: string; submitted_option: string };
+  type StoryPosition = { session_id: string; position: number; user_story_id: string };
+  type Submission = { session_id: string; user_story_id: string; submitted_text: string };
+
+  const questionRows = (questionPositions ?? []) as QuestionPosition[];
+  const answeredRows = (answeredLogs ?? []) as AnsweredLog[];
+  const storyRows = (storyPositions ?? []) as StoryPosition[];
+  const submissionRows = (submissions ?? []) as Submission[];
+
+  const questionIds = [...new Set(questionRows.map((r) => r.question_id))];
+  const answerIds = [...new Set(answeredRows.map((r) => r.submitted_option))];
+  const userStoryIds = [...new Set(storyRows.map((r) => r.user_story_id))];
+
+  const [
+    { data: questionTextRows, error: qError },
+    { data: answerTextRows, error: aError },
+    { data: storyTextRows, error: usError },
+  ] = await Promise.all([
+    fetchAllRowsByIds(questionIds, (chunk, from, to) =>
+      supabase.from('question').select('question_id, question_prompt').in('question_id', chunk).range(from, to),
+    ),
+    fetchAllRowsByIds(answerIds, (chunk, from, to) =>
+      supabase.from('answer').select('answer_id, option_text').in('answer_id', chunk).range(from, to),
+    ),
+    fetchAllRowsByIds(userStoryIds, (chunk, from, to) =>
+      supabase.from('user_story').select('user_story_id, story_text').in('user_story_id', chunk).range(from, to),
+    ),
+  ]);
+
+  const textError = qError ?? aError ?? usError ?? null;
+  if (textError) return { rows: null, error: textError };
+
+  const questionTextById = new Map(
+    ((questionTextRows ?? []) as { question_id: string; question_prompt: string }[]).map((r) => [
+      r.question_id,
+      r.question_prompt,
+    ]),
+  );
+  const answerTextById = new Map(
+    ((answerTextRows ?? []) as { answer_id: string; option_text: string }[]).map((r) => [r.answer_id, r.option_text]),
+  );
+  const storyTextById = new Map(
+    ((storyTextRows ?? []) as { user_story_id: string; story_text: string }[]).map((r) => [r.user_story_id, r.story_text]),
+  );
+
+  const submittedOptionByKey = new Map(answeredRows.map((r) => [`${r.session_id}:${r.question_id}`, r.submitted_option]));
+  const submittedTextByKey = new Map(submissionRows.map((r) => [`${r.session_id}:${r.user_story_id}`, r.submitted_text]));
+
+  const questionRowsBySession = new Map<string, QuestionPosition[]>();
+  for (const row of questionRows) {
+    (questionRowsBySession.get(row.session_id) ?? questionRowsBySession.set(row.session_id, []).get(row.session_id)!).push(row);
+  }
+
+  const storyRowsBySession = new Map<string, StoryPosition[]>();
+  for (const row of storyRows) {
+    (storyRowsBySession.get(row.session_id) ?? storyRowsBySession.set(row.session_id, []).get(row.session_id)!).push(row);
+  }
+
+  const answeredCountBySession = new Map<string, number>();
+  for (const [sessionId, list] of questionRowsBySession) {
+    answeredCountBySession.set(
+      sessionId,
+      list.filter((row) => submittedOptionByKey.has(`${sessionId}:${row.question_id}`)).length,
+    );
+  }
+  for (const [sessionId, list] of storyRowsBySession) {
+    answeredCountBySession.set(
+      sessionId,
+      list.filter((row) => submittedTextByKey.has(`${sessionId}:${row.user_story_id}`)).length,
+    );
+  }
+
+  const rows: StudentQuestionActivityRow[] = [];
+
+  for (const session of sessions) {
+    const sessionFields = {
+      userId: session.user_id,
+      activityType: session.activity_type,
+      difficultyLevel: session.difficulty_level,
+      status: session.status,
+      startedAt: session.started_at,
+      endedAt: session.ended_at,
+      cumulativeScore: session.cumulative_score,
+      maxScore: session.max_score,
+      passed: session.passed,
+    };
+
+    const mcqRows = (questionRowsBySession.get(session.session_id) ?? []).slice().sort((a, b) => a.position - b.position);
+    const storyRowsForSession = (storyRowsBySession.get(session.session_id) ?? []).slice().sort((a, b) => a.position - b.position);
+    const questionCount = mcqRows.length + storyRowsForSession.length;
+    const answeredCount = answeredCountBySession.get(session.session_id) ?? 0;
+
+    for (const row of mcqRows) {
+      const submittedOption = submittedOptionByKey.get(`${row.session_id}:${row.question_id}`);
+
+      rows.push({
+        ...sessionFields,
+        questionCount,
+        answeredCount,
+        questionNumber: row.position + 1,
+        questionText: questionTextById.get(row.question_id) ?? '',
+        answerText: submittedOption !== undefined ? answerTextById.get(submittedOption) ?? '' : null,
+      });
+    }
+
+    for (const row of storyRowsForSession) {
+      rows.push({
+        ...sessionFields,
+        questionCount,
+        answeredCount,
+        questionNumber: row.position + 1,
+        questionText: storyTextById.get(row.user_story_id) ?? '',
+        answerText: submittedTextByKey.get(`${row.session_id}:${row.user_story_id}`) ?? null,
+      });
+    }
+  }
+
+  return { rows, error: null };
 }
 
 /**
