@@ -19,6 +19,7 @@ const h = vi.hoisted(() => {
       select: () => builder,
       eq: () => builder,
       in: () => builder,
+      range: () => builder,
       limit: () => builder,
       order: (column: string, opts?: { ascending?: boolean }) => {
         state.orders.push({ table, column, ascending: opts?.ascending ?? true });

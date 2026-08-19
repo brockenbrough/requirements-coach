@@ -12,6 +12,7 @@ import {
 import type { InstructorActivityEntry, InstructorSessionEntry, SessionListEntry, SessionRecord } from './sessionTypes';
 import { shuffleArray } from './shuffleArray';
 import { listCoursesForActivityTypes } from './activityCourseQueries';
+import { fetchAllRowsByIds } from './supabasePaging';
 
 export type SupabaseClient = NonNullable<ReturnType<typeof getSupabaseClient>>;
 
@@ -647,6 +648,13 @@ export async function loadAllStudentSessions(supabase: SupabaseClient) {
  * `user_story_id` is carried in SessionPosition's `question_id` field and submission's
  * `user_story_id` in the `answered` set's question-id slot — same shape nextUnansweredPosition
  * already accepts, so "which position comes next" needs no AC-specific derivation.
+ *
+ * GitHub #275 load test (150 students/course): a course-wide caller (loadStudentActivityForIds)
+ * can pass several hundred session ids here. A bare .in('session_id', sessionIds) put every id in
+ * one query string — ~600 ids reliably timed out against Supabase (12s+, then a 500) instead of
+ * erroring loudly, exactly the failure mode lib/supabasePaging.ts's header comment warns about.
+ * fetchAllRowsByIds chunks each of the four queries the same way; still four Promise.all'd calls,
+ * just each one now safe at class scale.
  */
 export async function loadProgressForSessions(supabase: SupabaseClient, sessionIds: string[]) {
   if (sessionIds.length === 0) {
@@ -659,22 +667,18 @@ export async function loadProgressForSessions(supabase: SupabaseClient, sessionI
     { data: storyRows, error: storyError },
     { data: submissionRows, error: submissionError },
   ] = await Promise.all([
-    supabase
-      .from('session_to_question')
-      .select('session_id, position, question_id')
-      .in('session_id', sessionIds),
-    supabase
-      .from('answered_question_log')
-      .select('session_id, question_id')
-      .in('session_id', sessionIds),
-    supabase
-      .from('session_to_user_story')
-      .select('session_id, position, user_story_id')
-      .in('session_id', sessionIds),
-    supabase
-      .from('submission')
-      .select('session_id, user_story_id')
-      .in('session_id', sessionIds),
+    fetchAllRowsByIds(sessionIds, (chunk, from, to) =>
+      supabase.from('session_to_question').select('session_id, position, question_id').in('session_id', chunk).range(from, to),
+    ),
+    fetchAllRowsByIds(sessionIds, (chunk, from, to) =>
+      supabase.from('answered_question_log').select('session_id, question_id').in('session_id', chunk).range(from, to),
+    ),
+    fetchAllRowsByIds(sessionIds, (chunk, from, to) =>
+      supabase.from('session_to_user_story').select('session_id, position, user_story_id').in('session_id', chunk).range(from, to),
+    ),
+    fetchAllRowsByIds(sessionIds, (chunk, from, to) =>
+      supabase.from('submission').select('session_id, user_story_id').in('session_id', chunk).range(from, to),
+    ),
   ]);
 
   const error = positionError ?? answerError ?? storyError ?? submissionError ?? null;
