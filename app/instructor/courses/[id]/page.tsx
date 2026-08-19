@@ -8,12 +8,14 @@ import { AddStudentModal } from '../../../../components/AddStudentModal';
 import { CopyCodeButton } from '../../../../components/CopyCodeButton';
 import { CourseQuizzesList } from '../../../../components/CourseQuizzesList';
 import { CourseStudentsDrawer } from '../../../../components/CourseStudentsDrawer';
+import { CreateQuizModal } from '../../../../components/CreateQuizModal';
 import { DeleteCourseModal } from '../../../../components/DeleteCourseModal';
 import { DuplicateCourseModal } from '../../../../components/DuplicateCourseModal';
 import { EditCourseModal } from '../../../../components/EditCourseModal';
 import {
   exportCourseReport,
   loadCourse,
+  loadCourses,
   loadCourseQuizzes,
   loadCourseClassStats,
   removeStudentFromCourse,
@@ -24,6 +26,8 @@ import {
 } from '../../../../lib/courseClient';
 import { CourseClassStats } from '../../../../components/CourseClassStats';
 import type { AssembledQuizSummary } from '../../../../lib/assembledQuizClient';
+import { loadQuizzes, type QuizSummary } from '../../../../lib/quizClient';
+import type { GradingKind } from '../../../../lib/activityTypes';
 import { clearCachedInstructorStudents } from '../../../../lib/instructorStudentsStore';
 import { useRequireRole } from '../../../../lib/useRequireRole';
 
@@ -100,6 +104,9 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
   const [quizzes, setQuizzes] = useState<AssembledQuizSummary[] | null>(null);
   const [quizzesLoadFailed, setQuizzesLoadFailed] = useState(false);
   const [quizzesRetryCount, setQuizzesRetryCount] = useState(0);
+  const [catalogs, setCatalogs] = useState<QuizSummary[] | null>(null);
+  const [allCourses, setAllCourses] = useState<CourseSummary[] | null>(null);
+  const [createQuizModalOpen, setCreateQuizModalOpen] = useState(false);
   const [classStats, setClassStats] = useState<CourseClassStatsData | null>(null);
   const [error, setError] = useState('');
   const [exporting, setExporting] = useState(false);
@@ -140,6 +147,25 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
       cancelled = true;
     };
   }, [token, params.id, quizzesRetryCount]);
+
+  // Feeds the Create Quiz popup (GitHub #467) — loaded up front, same as the assembled-quizzes
+  // page does, so the "+" button next to Quizzes can open the modal instantly instead of showing
+  // its own loading state. A failure here just means the button opens nothing until retried; it
+  // doesn't block the rest of the page.
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+
+    Promise.all([loadQuizzes(token), loadCourses(token)]).then(([catalogsResult, coursesResult]) => {
+      if (cancelled) return;
+      if (catalogsResult.ok) setCatalogs([...catalogsResult.data.quizzes, ...catalogsResult.data.exampleCatalogs]);
+      if (coursesResult.ok) setAllCourses(coursesResult.data.courses);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   // Also independent (GitHub #315): class engagement has nothing to do with the roster fetch or
   // the Quizzes section above, and a failure here shouldn't block either of them — it just leaves
@@ -289,7 +315,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
             ) : quizzes === null ? (
               <p className="text-sm font-semibold text-gray-500">Loading…</p>
             ) : (
-              <CourseQuizzesList quizzes={quizzes} courseId={params.id} />
+              <CourseQuizzesList quizzes={quizzes} onAddQuiz={() => setCreateQuizModalOpen(true)} />
             )}
           </>
         )}
@@ -365,6 +391,45 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
           onAdded={(student) => {
             setError('');
             setCourse((current) => (current ? { ...current, students: [...current.students, student] } : current));
+          }}
+        />
+      ) : null}
+
+      {createQuizModalOpen && course && catalogs && allCourses ? (
+        <CreateQuizModal
+          token={token}
+          courses={allCourses}
+          catalogs={catalogs}
+          initialCourseId={course.id}
+          onClose={() => setCreateQuizModalOpen(false)}
+          onCreated={(quiz: {
+            id: string;
+            name: string;
+            description: string | null;
+            courseId: string;
+            gradingKind: GradingKind;
+            questionsPerLevel: number;
+            catalogs: { activityType: string; name: string; gradingKind: GradingKind }[];
+            catalogNames: string[];
+          }) => {
+            // The modal's Course field defaults to this course but is still editable — only
+            // reflect the new quiz here if the instructor actually kept it scoped to this course.
+            if (quiz.courseId !== course.id) return;
+            setQuizzes((current) => [
+              {
+                id: quiz.id,
+                name: quiz.name,
+                description: quiz.description,
+                courseId: quiz.courseId,
+                courseName: course.name,
+                gradingKind: quiz.gradingKind,
+                questionsPerLevel: quiz.questionsPerLevel,
+                catalogs: quiz.catalogs,
+                catalogNames: quiz.catalogNames,
+                createdAt: new Date().toISOString(),
+              },
+              ...(current ?? []),
+            ]);
           }}
         />
       ) : null}

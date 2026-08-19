@@ -61,12 +61,15 @@ export function CreateQuizModal({
   token,
   courses,
   catalogs,
+  initialCourseId,
   onClose,
   onCreated,
 }: {
   token: string;
   courses: CourseSummary[];
   catalogs: QuizSummary[];
+  /** Pre-selects the Course field — used when the modal is opened from that course's own detail page (GitHub #467). */
+  initialCourseId?: string;
   onClose: () => void;
   /**
    * catalogNames travels alongside the created quiz because POST /api/instructor/assembled-quizzes
@@ -86,7 +89,7 @@ export function CreateQuizModal({
 }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [courseId, setCourseId] = useState('');
+  const [courseId, setCourseId] = useState(initialCourseId ?? '');
   // Starts null with no pre-selection, same reasoning as CreateCatalogModal's own gradingKind
   // state: creation cannot proceed without this choice only if nothing is pre-picked for the
   // instructor to accept without looking.
