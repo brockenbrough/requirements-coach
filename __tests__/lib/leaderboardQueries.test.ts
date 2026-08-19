@@ -339,6 +339,19 @@ describe('computeCourseLeaderboard', () => {
 
     expect(result).toEqual({ data: null, error: { message: 'db down' } });
   });
+
+  // AC: Daily Challenge isn't scoped to any course, so a course leaderboard must not add it to a
+  // student's course-specific total, unlike computeGlobalLeaderboard below.
+  it('never queries daily_challenge_attempt at all', async () => {
+    queue('student_course', { data: [rosterRow('stu-1', 'ada')], error: null });
+    queue('assembled_quiz_catalog', { data: [catalogLinkRow('IDENTIFY_WEAK_USER_STORIES')], error: null });
+    queue('session_log', { data: [sessionRow('stu-1', 'IDENTIFY_WEAK_USER_STORIES', 1, 100)], error: null });
+
+    const result = await computeCourseLeaderboard(makeSupabase(), COURSE_ID);
+
+    expect(state.tables).not.toContain('daily_challenge_attempt');
+    expect(result.data).toEqual([{ rank: 1, studentId: 'stu-1', username: 'ada', avatarUrl: null, points: 100, streak: 0, title: null }]);
+  });
 });
 
 function globalUserRow(userId: string, username: string, avatarUrl: string | null = null, selectedTitle: string | null = null) {
@@ -426,6 +439,76 @@ describe('computeGlobalLeaderboard', () => {
   it('returns the error and no data when the session query fails', async () => {
     queue('user', { data: [globalUserRow('stu-1', 'ada')], error: null });
     queue('session_log', { data: null, error: { message: 'db down' } });
+
+    const result = await computeGlobalLeaderboard(makeSupabase());
+
+    expect(result).toEqual({ data: null, error: { message: 'db down' } });
+  });
+
+  // AC: the bug this suite covers — "All" must agree with computeStudentScore (the sidebar pill)
+  // about a student's total, which already includes every daily_challenge_attempt.score.
+  it("adds a student's daily challenge points on top of their session points", async () => {
+    queue('user', { data: [globalUserRow('stu-1', 'ada')], error: null });
+    queue('session_log', { data: [sessionRow('stu-1', 'SOME_CATALOG', 1, 50)], error: null });
+    queue('daily_challenge_attempt', { data: [{ user_id: 'stu-1', score: 20 }], error: null });
+
+    const result = await computeGlobalLeaderboard(makeSupabase());
+
+    expect(result.data).toEqual([{ rank: 1, studentId: 'stu-1', username: 'ada', avatarUrl: null, title: null, points: 70, streak: 0 }]);
+  });
+
+  // AC: like computeStudentScore, every submitted attempt counts (uq_daily_challenge_attempt_user_date
+  // caps the table at one per day, so there's no key to dedupe on) and a null score (unsubmitted or
+  // expired) contributes 0.
+  it("sums every one of a student's daily challenge attempts flat, treating a null score as 0", async () => {
+    queue('user', { data: [globalUserRow('stu-1', 'ada')], error: null });
+    queue('session_log', { data: [], error: null });
+    queue('daily_challenge_attempt', {
+      data: [
+        { user_id: 'stu-1', score: 10 },
+        { user_id: 'stu-1', score: 6 },
+        { user_id: 'stu-1', score: null },
+      ],
+      error: null,
+    });
+
+    const result = await computeGlobalLeaderboard(makeSupabase());
+
+    expect(result.data?.[0].points).toBe(16);
+  });
+
+  // AC: a student who's only done the daily challenge, never a session, still shows up scored.
+  it('gives a student with only daily challenge attempts their points, with no session history', async () => {
+    queue('user', { data: [globalUserRow('stu-1', 'ada'), globalUserRow('stu-2', 'bea')], error: null });
+    queue('session_log', { data: [], error: null });
+    queue('daily_challenge_attempt', { data: [{ user_id: 'stu-1', score: 12 }], error: null });
+
+    const result = await computeGlobalLeaderboard(makeSupabase());
+
+    expect(result.data).toEqual([
+      { rank: 1, studentId: 'stu-1', username: 'ada', avatarUrl: null, title: null, points: 12, streak: 0 },
+      { rank: 2, studentId: 'stu-2', username: 'bea', avatarUrl: null, title: null, points: 0, streak: 0 },
+    ]);
+  });
+
+  it('scopes the daily_challenge_attempt query to the roster', async () => {
+    queue('user', { data: [globalUserRow('stu-1', 'ada'), globalUserRow('stu-2', 'bea')], error: null });
+    queue('session_log', { data: [], error: null });
+    queue('daily_challenge_attempt', { data: [], error: null });
+
+    await computeGlobalLeaderboard(makeSupabase());
+
+    expect(state.filters).toContainEqual({
+      table: 'daily_challenge_attempt',
+      column: 'user_id',
+      value: ['stu-1', 'stu-2'],
+    });
+  });
+
+  it('returns the error and no data when the daily_challenge_attempt query fails', async () => {
+    queue('user', { data: [globalUserRow('stu-1', 'ada')], error: null });
+    queue('session_log', { data: [], error: null });
+    queue('daily_challenge_attempt', { data: null, error: { message: 'db down' } });
 
     const result = await computeGlobalLeaderboard(makeSupabase());
 
