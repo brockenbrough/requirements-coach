@@ -40,9 +40,9 @@ export default function LoginPage() {
       <section className="w-full max-w-md rounded-[20px] border border-[#332b6b] bg-[#241f52] p-8">
         <div className="mb-6 flex items-center gap-2.5">
           <span className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-[#FFD666] bg-[#1b1642] text-xs font-extrabold text-[#FFD666]">
-            RC
+            TG
           </span>
-          <span className="text-lg font-extrabold text-[#FFD666]">Requirements Coach</span>
+          <span className="text-lg font-extrabold text-[#FFD666]">Training Ground</span>
         </div>
         <h1 className="text-2xl font-extrabold text-[#F3F1FF]">Welcome back</h1>
         <p className="mt-2 text-sm font-semibold text-[#A79FC9]">Log in to continue your training.</p>

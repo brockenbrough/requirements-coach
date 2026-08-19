@@ -1,6 +1,6 @@
 # Administrator Manual
 
-This is for whoever administers a live deployment of Requirements Coach — usually the professor
+This is for whoever administers a live deployment of Training Ground — usually the professor
 running the course, sometimes a TA or IT person helping them. It covers the things that are **not
 obvious from using the app itself**: values that live in environment variables, one-time setup
 steps, and "what do I do when a professor asks me X" situations.

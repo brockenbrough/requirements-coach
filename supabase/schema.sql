@@ -1,5 +1,5 @@
 -- =====================================================================
--- Requirements Coach — database schema
+-- Training Ground — database schema
 --
 -- Run this in your Supabase SQL editor, then supabase/seed.sql for the
 -- question bank. The script assumes a fresh database; see "Migration

@@ -4,8 +4,8 @@ import { UserProvider } from '../components/UserProvider';
 
 export const metadata = {
   title: {
-    default: 'Requirements Coach',
-    template: '%s – Requirements Coach',
+    default: 'Training Ground',
+    template: '%s – Training Ground',
   },
   description: 'Practice writing and evaluating software requirements, with gamified feedback.',
 };

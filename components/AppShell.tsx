@@ -318,7 +318,7 @@ export function AppShell({
           <CloseIcon />
         </button>
 
-        <div className="mb-5 text-xl font-extrabold text-[#FFD666]">Requirements Coach</div>
+        <div className="-mt-2 mb-5 text-center text-xl font-extrabold text-[#FFD666]">Training Ground</div>
 
         <div className="mb-4 text-center">
           {/*
