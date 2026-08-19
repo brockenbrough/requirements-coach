@@ -20,7 +20,6 @@ import { PROMPT_PASS_SCORE } from '../lib/llmActivityRules';
 import type { LlmGradingResult } from '../lib/llmActivityTypes';
 import { clearCachedLeaderboard } from '../lib/leaderboardStore';
 import { loadActivityLog, loadCompletedAttempts } from '../lib/sessionClient';
-import { deriveStoryTitle } from '../lib/storyMarkdown';
 import { useRequireRole } from '../lib/useRequireRole';
 import { useUser } from './UserProvider';
 
@@ -288,7 +287,10 @@ export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
     const submission = session.submissions.find((s) => s.userStoryId === story.userStoryId);
     return {
       key: story.userStoryId,
-      label: deriveStoryTitle(story.description),
+      // Positional, not derived from the story text (see lib/storyMarkdown.ts's docblock) — every
+      // story in a session shares the same activity name, so a per-row label has to come from
+      // somewhere else to still tell the rows apart.
+      label: `Question ${story.position + 1}`,
       scoreLabel: submission ? `${submission.score} / 10` : '—',
       passed: (submission?.score ?? 0) >= PROMPT_PASS_SCORE,
     };
@@ -303,7 +305,7 @@ export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
             <span className="text-sm font-bold text-gray-500">
               {allStoriesComplete
                 ? `${storyTotal} of ${storyTotal} complete`
-                : `Prompt ${storyPosition} of ${storyTotal}`}
+                : `Question ${storyPosition} of ${storyTotal}`}
             </span>
           </div>
         ) : null}
@@ -318,7 +320,7 @@ export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
           />
         ) : outcome ? (
           <>
-            <AcceptanceCriteriaFeedbackScreen userStory={outcome.userStory} result={outcome.result} />
+            <AcceptanceCriteriaFeedbackScreen activityName={activity.name} userStory={outcome.userStory} result={outcome.result} />
             <div className="mt-5 flex justify-end">
               <button
                 type="button"
@@ -333,6 +335,7 @@ export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
           <>
             <AcceptanceCriteriaWritingScreen
               key={currentStory.userStoryId}
+              activityName={activity.name}
               userStory={currentStory}
               submitting={submitting}
               onSubmit={handleSubmit}
