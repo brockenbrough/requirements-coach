@@ -360,6 +360,33 @@ describe('POST /api/sessions', () => {
     links.forEach((l) => expect(pool.map((q) => q.question_id)).toContain(l.question_id));
   });
 
+  // GitHub #583: the resolved granting quiz (accessLink.assembledQuizId, from queueEnrolled's
+  // assembled_quiz_catalog fixture) is persisted onto the session, not just used transiently for
+  // exclusion filtering — this is what lets two quizzes sharing a catalog be tracked separately.
+  it("persists the granting quiz's id onto the session", async () => {
+    queueHappyPath();
+
+    const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES' }));
+    expect(response.status).toBe(201);
+
+    const sessionInsert = h.state.inserts.find((i) => i.table === 'session_log')!.payload as Record<string, unknown>;
+    expect(sessionInsert).toMatchObject({ assembled_quiz_id: 'quiz-1' });
+  });
+
+  it('accepts an explicit assembledQuizId in the request body without erroring', async () => {
+    queueHappyPath();
+
+    const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES', assembledQuizId: 'quiz-1' }));
+    expect(response.status).toBe(201);
+  });
+
+  it('returns 400 when assembledQuizId is not a string', async () => {
+    queueValidActivityType();
+
+    const response = await POST(req({ activityType: 'IDENTIFY_WEAK_USER_STORIES', assembledQuizId: 42 }));
+    expect(response.status).toBe(400);
+  });
+
   it('starts the next session at the next difficulty level once the current one is passed', async () => {
     queueValidActivityType();
     queue('session_log', { data: null, error: null }); // no session in progress

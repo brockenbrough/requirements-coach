@@ -196,6 +196,26 @@ describe('GET /api/sessions/completed', () => {
     ]);
   });
 
+  // GitHub #583: an assembledQuizId query param scopes history to one quiz, so two quizzes
+  // sharing a catalog don't show each other's completed attempts.
+  it('additionally filters by assembled_quiz_id when the query param is present', async () => {
+    queueValidActivityType();
+    queue('session_log', { data: [], error: null });
+
+    await GET(req(`?activityType=${ACTIVITY}&assembledQuizId=quiz-1`));
+
+    expect(h.state.filters).toContainEqual({ table: 'session_log', column: 'assembled_quiz_id', value: 'quiz-1' });
+  });
+
+  it('does not filter by assembled_quiz_id when the query param is absent', async () => {
+    queueValidActivityType();
+    queue('session_log', { data: [], error: null });
+
+    await GET(req());
+
+    expect(h.state.filters.some((f) => f.column === 'assembled_quiz_id')).toBe(false);
+  });
+
   it('returns 500 when the session_log query fails', async () => {
     queueValidActivityType();
     queue('session_log', { data: null, error: { message: 'db down' } });

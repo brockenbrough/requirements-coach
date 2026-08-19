@@ -16,6 +16,7 @@ function session(overrides: Partial<SessionListEntry> = {}): SessionListEntry {
     session_id: 'session-1',
     user_id: 'student-1',
     activity_type: 'TEST_CATALOG',
+    assembled_quiz_id: null,
     difficulty_level: 1,
     started_at: '2026-08-01T10:00:00.000Z',
     ended_at: '2026-08-01T10:20:00.000Z',

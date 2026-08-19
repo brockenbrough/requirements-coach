@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { AppShell } from "../../../../components/AppShell";
 import { FeedbackCard } from "../../../../components/FeedbackCard";
 import { QuestionCard } from "../../../../components/QuestionCard";
@@ -42,15 +42,20 @@ type AnswerOutcome = {
  */
 function QuizPlayView({
   params,
+  assembledQuizId,
 }: {
   params: { slug: string };
+  /** GitHub #583: the ?quiz= the wrapper below already parsed — passed down rather than a second
+   *  useSearchParams() call, since this component's own useResolvedActivity call is otherwise the
+   *  only reason it needs to know about the URL at all (see this function's own header comment). */
+  assembledQuizId?: string;
 }) {
   const router = useRouter();
   // Also redirects an instructor account away (GitHub #82) — this page is the "quiz
   // durchführen" flow itself, exactly what an instructor must not be able to reach.
   const { token, profile, loading, authorized } = useRequireRole("student");
   const { refreshScore } = useUser();
-  const { activity, status: activityStatus } = useResolvedActivity(token, params.slug);
+  const { activity, status: activityStatus } = useResolvedActivity(token, params.slug, assembledQuizId);
 
   const [session, setSession] = useState<CurrentSessionResult | null>(null);
   const [nextPosition, setNextPosition] = useState<number | null>(null);
@@ -79,10 +84,14 @@ function QuizPlayView({
    * without any explicit reload: syncFromServer's identity changes whenever token does, and
    * UserProvider refreshes the token on its own 45-minute timer.
    */
+  // GitHub #583: appended to every internal navigation back to the detail page, so the quiz
+  // context this session was resolved through survives the round trip.
+  const quizQuery = activity?.assembledQuizId ? `?quiz=${encodeURIComponent(activity.assembledQuizId)}` : '';
+
   const syncFromServer = useCallback(async () => {
     if (!token || !activity || showSummary) return;
 
-    const result = await loadCurrentSession(token, activity.activityType);
+    const result = await loadCurrentSession(token, activity.activityType, activity.assembledQuizId ?? undefined);
 
     if (!result.ok) {
       // The session expired mid-play: back to login, not a dead-end error screen.
@@ -96,7 +105,7 @@ function QuizPlayView({
 
     // Nothing running: the student got here without starting, or already finished.
     if (!result.data.session) {
-      router.replace(`/activities/${activity.slug}`);
+      router.replace(`/activities/${activity.slug}${quizQuery}`);
       return;
     }
 
@@ -105,7 +114,7 @@ function QuizPlayView({
     setCumulativeScore(result.data.session.cumulative_score);
     setAnsweredCount(result.data.answers.length);
     setOutcome(null);
-  }, [token, activity, router, showSummary]);
+  }, [token, activity, router, showSummary, quizQuery]);
 
   useEffect(() => {
     void syncFromServer();
@@ -309,6 +318,7 @@ function QuizPlayView({
         }),
         loadCompletedAttempts(token, profile.user_id, activity!.activityType, {
           forceRefresh: true,
+          assembledQuizId: activity!.assembledQuizId ?? undefined,
         }),
       ]);
     }
@@ -318,7 +328,7 @@ function QuizPlayView({
     // caches above, not awaited: nothing on this page reads it, only the leaderboard page and
     // preview do, on their own next mount) rather than a targeted, per-course forceRefresh.
     clearCachedLeaderboard();
-    router.push(`/activities/${activity!.slug}`);
+    router.push(`/activities/${activity!.slug}${quizQuery}`);
   }
 
   // Once the session is complete, currentQuestion legitimately becomes undefined (nextPosition
@@ -440,14 +450,21 @@ function QuizPlayView({
  * slugs useResolvedActivity answers synchronously from the static ACTIVITIES array at zero network
  * cost, and paying one extra fetch in the custom-catalog case is cheaper than threading the
  * resolved activity through a body this issue is otherwise not touching at all.
+ *
+ * Split out because useSearchParams() (GitHub #583's ?quiz=) forces the nearest Suspense boundary
+ * to render client-side — without one, `npm run build` fails prerendering this route, the same
+ * reason app/activities/[slug]/page.tsx is split into a Content component this way.
  */
-export default function PlayActivityPage({
+function PlayActivityContent({
   params,
 }: {
   params: { slug: string };
 }) {
   const { token, loading, authorized } = useRequireRole("student");
-  const { activity, status: activityStatus } = useResolvedActivity(token, params.slug);
+  // GitHub #583: the ?quiz= a student followed from a course page card, or carried over from the
+  // detail page's own navigation into here (see QuizPlayView/LlmPlayView's quizQuery).
+  const quizParam = useSearchParams().get('quiz') ?? undefined;
+  const { activity, status: activityStatus } = useResolvedActivity(token, params.slug, quizParam);
 
   if (loading || !authorized) return null;
   if (activityStatus === 'loading') return null;
@@ -470,6 +487,18 @@ export default function PlayActivityPage({
   return activity.gradingKind === 'llm-graded' ? (
     <LlmPlayView activity={activity} />
   ) : (
-    <QuizPlayView params={params} />
+    <QuizPlayView params={params} assembledQuizId={quizParam} />
+  );
+}
+
+export default function PlayActivityPage({
+  params,
+}: {
+  params: { slug: string };
+}) {
+  return (
+    <Suspense fallback={null}>
+      <PlayActivityContent params={params} />
+    </Suspense>
   );
 }

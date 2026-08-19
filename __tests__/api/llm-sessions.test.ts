@@ -394,6 +394,33 @@ describe('POST /api/activities/[activityType]/llm/sessions', () => {
     expect((await response.json()).error).toMatch(/profile/i);
   });
 
+  // GitHub #583: the granting quiz's id (resolved by getAccessibleCourseForActivity, queueEnrolled's
+  // fixture returns 'quiz-1') is persisted onto the session, the same as POST /api/sessions.
+  it("persists the granting quiz's id onto the session", async () => {
+    queueHappyPath();
+
+    const response = await POST(req(), PARAMS());
+
+    expect(response.status).toBe(201);
+    const sessionInsert = h.state.inserts.find((i) => i.table === 'session_log')!.payload as Record<string, unknown>;
+    expect(sessionInsert).toMatchObject({ assembled_quiz_id: 'quiz-1' });
+  });
+
+  it('accepts an explicit assembledQuizId in the request body without erroring', async () => {
+    queueHappyPath();
+
+    const response = await POST(req({ assembledQuizId: 'quiz-1' }), PARAMS());
+
+    expect(response.status).toBe(201);
+  });
+
+  it('returns 400 when assembledQuizId is not a string', async () => {
+    const response = await POST(req({ assembledQuizId: 42 }), PARAMS());
+
+    expect(response.status).toBe(400);
+    expect(h.state.tables).toEqual([]);
+  });
+
   it('removes the session when its prompts could not be stored', async () => {
     queueGradingKind('llm-graded');
     queueEnrolled();

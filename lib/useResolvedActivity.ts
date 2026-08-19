@@ -24,16 +24,23 @@ export type ResolvedActivity = { activity: ActivityDefinition | null; status: Re
  * enforces the same course-enrollment gate POST /api/sessions does — a 403 there means the caller
  * genuinely cannot see this activity, not that it doesn't exist, and the two are surfaced
  * separately (status: 'forbidden' vs 'not-found') so the page can say which.
+ *
+ * GitHub #583: an optional assembledQuizId (the ?quiz= a student followed from a course page
+ * card) always triggers the network call, even for a static slug — a built-in activity is equally
+ * subject to two-quizzes-one-catalog, so its own zero-network-cost fast path is deliberately
+ * skipped in this case to validate+attach the specific quiz. Omitted -> today's behavior,
+ * unchanged (a bare/bookmarked link resolves the static entry with assembledQuizId: null).
  */
-export function useResolvedActivity(token: string | null, slug: string): ResolvedActivity {
+export function useResolvedActivity(token: string | null, slug: string, assembledQuizId?: string): ResolvedActivity {
   const staticActivity = getActivity(slug);
+  const skipFastPath = Boolean(staticActivity && assembledQuizId);
 
   const [dynamic, setDynamic] = useState<ResolvedActivity>(
-    staticActivity ? { activity: staticActivity, status: 'found' } : { activity: null, status: 'loading' },
+    staticActivity && !skipFastPath ? { activity: staticActivity, status: 'found' } : { activity: null, status: 'loading' },
   );
 
   useEffect(() => {
-    if (staticActivity) {
+    if (staticActivity && !skipFastPath) {
       setDynamic({ activity: staticActivity, status: 'found' });
       return;
     }
@@ -45,7 +52,7 @@ export function useResolvedActivity(token: string | null, slug: string): Resolve
     let cancelled = false;
     setDynamic({ activity: null, status: 'loading' });
 
-    loadActivityMeta(token, slug).then((result) => {
+    loadActivityMeta(token, slug, assembledQuizId).then((result) => {
       if (cancelled) return;
       if (result.ok) {
         setDynamic({ activity: buildCustomActivityDefinition(result.data.activity), status: 'found' });
@@ -61,7 +68,7 @@ export function useResolvedActivity(token: string | null, slug: string): Resolve
     return () => {
       cancelled = true;
     };
-  }, [token, slug, staticActivity]);
+  }, [token, slug, staticActivity, skipFastPath, assembledQuizId]);
 
   return dynamic;
 }

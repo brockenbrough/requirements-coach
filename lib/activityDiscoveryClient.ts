@@ -17,6 +17,9 @@ export type CourseActivity = {
   gradingKind: GradingKind;
   courseId: string;
   courseName: string;
+  /** GitHub #583: the specific assembled_quiz this entry came from — see
+   *  lib/activityContent.ts's ActivityDefinition.assembledQuizId for why this matters. */
+  assembledQuizId: string;
 };
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number; error: string };
@@ -62,7 +65,16 @@ export function loadAvailableActivities(
  * app/activities/[slug]/page.tsx and its play page use when the slug isn't one of the three
  * built-ins lib/activityContent.ts knows statically, i.e. a course-scoped custom catalog reached
  * directly by its activity_type key.
+ *
+ * GitHub #583: an optional assembledQuizId (the ?quiz= a student followed from a course page
+ * card) disambiguates which of possibly several assembled quizzes composing this catalog is
+ * meant; the route 403s if it names one that doesn't actually grant access.
  */
-export function loadActivityMeta(token: string, activityType: string): Promise<ApiResult<{ activity: CourseActivity }>> {
-  return request<{ activity: CourseActivity }>(`/api/activities/${encodeURIComponent(activityType)}`, token);
+export function loadActivityMeta(
+  token: string,
+  activityType: string,
+  assembledQuizId?: string,
+): Promise<ApiResult<{ activity: CourseActivity }>> {
+  const query = assembledQuizId ? `?assembledQuizId=${encodeURIComponent(assembledQuizId)}` : '';
+  return request<{ activity: CourseActivity }>(`/api/activities/${encodeURIComponent(activityType)}${query}`, token);
 }

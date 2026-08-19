@@ -25,6 +25,7 @@ const SESSION: InstructorActivityEntry = {
   session_id: 'session-1',
   user_id: 'student-1',
   activity_type: 'weak-user-stories',
+  assembled_quiz_id: null,
   difficulty_level: 1,
   started_at: '2026-01-01T10:00:00.000Z',
   ended_at: '2026-01-01T10:05:00.000Z',
@@ -37,6 +38,8 @@ const SESSION: InstructorActivityEntry = {
   studentId: 'student-1',
   studentName: 'Ada Lovelace',
   nextPosition: null,
+  courses: [],
+  quizName: null,
 };
 
 afterEach(() => {

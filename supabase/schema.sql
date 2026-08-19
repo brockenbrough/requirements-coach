@@ -439,6 +439,15 @@ CREATE TABLE session_log (
     session_id        uuid        NOT NULL,
     user_id           uuid        NOT NULL,
     activity_type     varchar(50) NOT NULL,
+    -- Which assembled_quiz a session was started through, so two different quizzes composed from
+    -- the same catalog can be tracked as genuinely separate attempts instead of colliding on
+    -- (user_id, activity_type) alone. Nullable: a bare/bookmarked /activities/{activityType} link
+    -- with no ?quiz= context, or a legacy row from before this column existed, has no quiz to
+    -- attribute the session to and falls back to the same "first match" resolution
+    -- getAccessibleCourseForActivity already uses when no specific quiz is requested. ON DELETE
+    -- SET NULL (below) rather than CASCADE: deleting the quiz must not destroy attempt history,
+    -- same reasoning as every other assembled_quiz-owned table that protects student history.
+    assembled_quiz_id uuid,
     difficulty_level  int2        NOT NULL DEFAULT 1,
     started_at        timestamp   NOT NULL DEFAULT now(),
     ended_at          timestamp,
@@ -620,6 +629,8 @@ ALTER TABLE answered_question_log ADD CONSTRAINT fk_answered_question_log_sessio
 
 ALTER TABLE session_log ADD CONSTRAINT fk_session_log_user FOREIGN KEY (user_id) REFERENCES "user" (user_id);
 ALTER TABLE session_log ADD CONSTRAINT fk_session_log_activity_type FOREIGN KEY (activity_type) REFERENCES activity_type (activity_type);
+-- ON DELETE SET NULL: see session_log.assembled_quiz_id's own column comment above.
+ALTER TABLE session_log ADD CONSTRAINT fk_session_log_assembled_quiz FOREIGN KEY (assembled_quiz_id) REFERENCES assembled_quiz (assembled_quiz_id) ON DELETE SET NULL;
 
 ALTER TABLE session_to_question ADD CONSTRAINT fk_session_to_question_session FOREIGN KEY (session_id) REFERENCES session_log (session_id) ON DELETE CASCADE;
 ALTER TABLE session_to_question ADD CONSTRAINT fk_session_to_question_question FOREIGN KEY (question_id) REFERENCES question (question_id);
@@ -738,12 +749,26 @@ CREATE INDEX ix_quiz_excluded_user_story_quiz_id ON quiz_excluded_user_story (as
 ALTER TABLE assembled_quiz_extra_user_story ADD CONSTRAINT uq_assembled_quiz_extra_user_story UNIQUE (assembled_quiz_id, user_story_id);
 CREATE INDEX ix_assembled_quiz_extra_user_story_quiz_id ON assembled_quiz_extra_user_story (assembled_quiz_id);
 
--- At most one running session per student and activity type. This is what
--- makes POST /api/sessions idempotent: "start" and "resume" are the same
--- call, and two devices cannot build up independent state.
+-- At most one running session per student, activity type, and quiz. This is what makes
+-- POST /api/sessions idempotent: "start" and "resume" are the same call, and two devices cannot
+-- build up independent state. assembled_quiz_id is the newer dimension (two different quizzes
+-- composed from the same catalog now get independent "in progress" slots); activity_type is kept
+-- alongside it because a single quiz can compose more than one catalog (assembled_quiz_catalog is
+-- m:n), so assembled_quiz_id alone wouldn't be enough to tell two of that quiz's catalogs apart.
+--
+-- Indexed via COALESCE to a fixed sentinel rather than the raw nullable column: Postgres treats
+-- every NULL as distinct from every other NULL, so indexing assembled_quiz_id directly would stop
+-- protecting the one-active-session guarantee entirely for any session with no quiz context (a
+-- bare/bookmarked link, or any caller that hasn't started sending assembledQuizId yet) — two such
+-- sessions on the same catalog would no longer collide. The sentinel makes every "no quiz known"
+-- session contend for one shared slot per (user, activity_type), exactly as before this column
+-- existed.
 CREATE UNIQUE INDEX uq_session_log_one_active
-  ON session_log (user_id, activity_type)
+  ON session_log (user_id, COALESCE(assembled_quiz_id, '00000000-0000-0000-0000-000000000000'::uuid), activity_type)
   WHERE status = 'in-progress';
+
+-- The reverse lookup ("every session started through this quiz") and the FK's own scan.
+CREATE INDEX ix_session_log_assembled_quiz_id ON session_log (assembled_quiz_id);
 
 -- At most one active LLM config across all instructors (global, unlike
 -- uq_session_log_one_active which partitions by user_id/activity_type).
@@ -1314,14 +1339,18 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 -- and unlink (DELETE FROM assembled_quiz_catalog ...) the mismatched rows by hand.
 
 -- Custom grading rubric, per catalog: activity_type.rating_prompt. An earlier iteration of this
--- feature put the rubric on assembled_quiz (per quiz) instead — if your database still has that
--- column (and session_log.assembled_quiz_id, added alongside it), drop both as part of this same
--- migration:
+-- feature put the rubric on assembled_quiz (per quiz) instead, along with a session_log.assembled_quiz_id
+-- column to resolve which quiz's rubric a submission should be graded against — if your database
+-- still has the rubric column, drop it as part of this same migration:
 --
 --   ALTER TABLE activity_type ADD COLUMN IF NOT EXISTS rating_prompt text;
 --   ALTER TABLE assembled_quiz DROP COLUMN IF EXISTS rating_prompt;
---   ALTER TABLE session_log DROP CONSTRAINT IF EXISTS fk_session_log_assembled_quiz;
---   ALTER TABLE session_log DROP COLUMN IF EXISTS assembled_quiz_id;
+--
+-- Leave session_log.assembled_quiz_id alone (do NOT drop it) — a later, unrelated change
+-- reintroduced that exact column for session-identity tracking (see its own migration note further
+-- below, near "Two different quizzes composed from the same catalog"); if your database already
+-- has it from this earlier rubric iteration, it's already in the right shape for that migration to
+-- build on, no action needed here.
 --
 -- Additive only, no backfill possible: every catalog created before this column existed has no
 -- custom rubric until an instructor sets one (buildRatingPrompt, lib/llm/promptUtils.ts, already
@@ -1352,3 +1381,42 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 -- Instructor → Settings after this deploys; grading against the old row 500s with "Configured
 -- LLM provider key could not be read" until they do. See docs/manuals/administrator-manual.md's
 -- "Setting up LLM grading" section for the operator-facing version of this note.
+
+-- session_log.assembled_quiz_id: two different quizzes composed from the same catalog used to be
+-- indistinguishable to a student — session identity was tracked purely by (user_id, activity_type),
+-- so completing one silently marked the other as already-completed, and only one showed up in the
+-- course's discovery list at all. This column records which assembled_quiz a session was actually
+-- started through. (If your database still has this exact column from the earlier, unrelated
+-- rubric-tracking attempt described further above, this is the same column, already the right
+-- shape — just run the backfill/index statements below, the ADD COLUMN/ADD CONSTRAINT are
+-- idempotent via IF NOT EXISTS either way.)
+--
+--   ALTER TABLE session_log ADD COLUMN IF NOT EXISTS assembled_quiz_id uuid;
+--   ALTER TABLE session_log DROP CONSTRAINT IF EXISTS fk_session_log_assembled_quiz;
+--   ALTER TABLE session_log ADD CONSTRAINT fk_session_log_assembled_quiz
+--     FOREIGN KEY (assembled_quiz_id) REFERENCES assembled_quiz (assembled_quiz_id) ON DELETE SET NULL;
+--
+-- Best-effort backfill for existing rows: attribute each one to the first assembled_quiz found for
+-- its catalog. Same accepted "first match wins" convention already used elsewhere in this schema
+-- (listCoursesForActivityTypes, getAccessibleCourseForActivity) for the identical ambiguity — a
+-- catalog composed into more than one quiz has no way to say, after the fact, which one a given
+-- historical session actually came through, because that information was never recorded. For a
+-- student who hit the original bug, this can attribute their pre-migration history to the "wrong"
+-- one of the two quizzes; there is no way to do better retroactively.
+--
+--   UPDATE session_log sl SET assembled_quiz_id = (
+--     SELECT aqc.assembled_quiz_id FROM assembled_quiz_catalog aqc
+--     WHERE aqc.activity_type = sl.activity_type
+--     ORDER BY aqc.assembled_quiz_catalog_id LIMIT 1
+--   ) WHERE sl.assembled_quiz_id IS NULL;
+--
+-- Then replace the old activity_type-only uniqueness guarantee with the quiz-aware one (see that
+-- index's own comment above for why it's COALESCE'd to a sentinel rather than indexing the raw
+-- nullable column):
+--
+--   DROP INDEX IF EXISTS uq_session_log_one_active;
+--   CREATE UNIQUE INDEX uq_session_log_one_active
+--     ON session_log (user_id, COALESCE(assembled_quiz_id, '00000000-0000-0000-0000-000000000000'::uuid), activity_type)
+--     WHERE status = 'in-progress';
+--
+--   CREATE INDEX IF NOT EXISTS ix_session_log_assembled_quiz_id ON session_log (assembled_quiz_id);

@@ -88,8 +88,8 @@ const existingSubmissions = [
   },
 ];
 
-function req(token: string | null = 'valid-token') {
-  return new Request('http://localhost/api/activities/write-acceptance-criteria/sessions/current', {
+function req(token: string | null = 'valid-token', query = '') {
+  return new Request(`http://localhost/api/activities/write-acceptance-criteria/sessions/current${query}`, {
     headers: token ? { authorization: `Bearer ${token}` } : {},
   });
 }
@@ -209,5 +209,19 @@ describe('GET /api/activities/[activityType]/llm/sessions/current', () => {
     const body = await (await GET(req(), PARAMS())).json();
 
     expect(body.nextPosition).toBe(1);
+  });
+
+  // GitHub #583: an assembledQuizId query param must be accepted and forwarded without erroring
+  // — the underlying filter itself is verified at the source in __tests__/lib/sessionQueries.test.ts.
+  it('accepts an assembledQuizId query param and resumes normally', async () => {
+    queue('session_log', { data: sessionRow, error: null });
+    queue('session_to_user_story', { data: drawnStories, error: null });
+    queue('submission', { data: existingSubmissions, error: null });
+
+    const response = await GET(req('valid-token', '?assembledQuizId=quiz-1'), PARAMS());
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.session).toEqual(sessionRow);
   });
 });

@@ -29,9 +29,14 @@ function getToken(request: Request): string | null {
  * collapse to the same outcome, the same reasoning checkActivityAccess documents for its own
  * 'forbidden' status.
  *
+ * GitHub #583: dedupeByQuiz: true, so two assembled quizzes composed from the same catalog for
+ * the same course both appear here as distinct entries (each carrying its own assembledQuizId)
+ * rather than collapsing to one — previously a student enrolled in a course with two such quizzes
+ * only ever saw one of them.
+ *
  * - 401 missing/invalid bearer token
  * - 403 courseId given but the caller isn't enrolled in it (no body)
- * - 200 { activities: [{ activityType, name, description, courseId, courseName }] }
+ * - 200 { activities: [{ activityType, name, description, courseId, courseName, assembledQuizId }] }
  * - 500 Supabase not configured, or either query fails
  */
 export async function GET(request: Request) {
@@ -56,7 +61,11 @@ export async function GET(request: Request) {
     scopedCourseIds = [requestedCourseId];
   }
 
-  const { activities, error } = await listActivityTypesForCourses(supabase, scopedCourseIds);
+  // GitHub #583: dedupeByQuiz so two quizzes composed from the same catalog both surface here as
+  // distinct entries instead of collapsing to one — the direct fix for "only one of two quizzes
+  // shows to students". Other callers of listActivityTypesForCourses (loadAvailableTitleLadders,
+  // computeCourseLeaderboard) do not opt in, since titles stay catalog-scoped by design.
+  const { activities, error } = await listActivityTypesForCourses(supabase, scopedCourseIds, { dedupeByQuiz: true });
   if (error || !activities) {
     return Response.json({ error: error?.message ?? 'Could not load activities.' }, { status: 500 });
   }

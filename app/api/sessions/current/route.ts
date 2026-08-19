@@ -27,10 +27,15 @@ export async function GET(request: Request) {
   const token = getToken(request);
   if (!token) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const activityType = new URL(request.url).searchParams.get('activityType');
+  const searchParams = new URL(request.url).searchParams;
+  const activityType = searchParams.get('activityType');
   // Narrows activityType to string for the rest of the function — isActivityType's async check
   // below can no longer double as a type predicate the way the old synchronous version did.
   if (activityType === null) return Response.json({ error: 'Unknown activity type.' }, { status: 400 });
+
+  // GitHub #583: optional — scopes the lookup to a specific quiz when the caller knows one, so
+  // two quizzes composed from the same catalog don't resume each other's session.
+  const assembledQuizId = searchParams.get('assembledQuizId') ?? undefined;
 
   const supabase = getSupabaseClient();
   if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
@@ -45,7 +50,7 @@ export async function GET(request: Request) {
   const { data: { user }, error: authError } = await supabase.auth.getUser(token);
   if (authError || !user) return Response.json({ error: 'Invalid or expired token.' }, { status: 401 });
 
-  const { session, error: sessionError } = await findInProgressSession(supabase, user.id, activityType);
+  const { session, error: sessionError } = await findInProgressSession(supabase, user.id, activityType, assembledQuizId);
   if (sessionError) return Response.json({ error: sessionError.message }, { status: 500 });
 
   // Nothing in progress is a normal answer, not a 404: the client offers "start" instead of

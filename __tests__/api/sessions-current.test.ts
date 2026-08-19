@@ -256,4 +256,21 @@ describe('GET /api/sessions/current', () => {
 
     expect(body.nextPosition).toBe(2);
   });
+
+  // GitHub #583: an assembledQuizId query param must be accepted and forwarded without erroring
+  // — the underlying filter itself is verified at the source in __tests__/lib/sessionQueries.test.ts,
+  // since this harness's .eq() is a no-op and can't record it.
+  it('accepts an assembledQuizId query param and resumes normally', async () => {
+    queueValidActivityType();
+    queue('session_log', { data: sessionRow, error: null });
+    queue('session_to_question', { data: drawnQuestions, error: null });
+    queue('answered_question_log', { data: submittedAnswers, error: null });
+
+    const url = `http://localhost/api/sessions/current?activityType=${ACTIVITY}&assembledQuizId=quiz-1`;
+    const response = await GET(new Request(url, { headers: { authorization: 'Bearer valid-token' } }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.session).toEqual(sessionRow);
+  });
 });
