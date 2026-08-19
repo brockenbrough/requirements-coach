@@ -1,7 +1,10 @@
 import { ActivityLogRow } from './ActivityLogRow';
 import type { ActivityLogEntry } from '../lib/activityLogTypes';
 
-const COLUMNS = ['Activity', 'Level', 'Date & time', 'Score', 'Result'];
+// GitHub #500: "Quiz" rather than "Activity" — every row is a specific quiz/catalog attempt, and
+// the column now shows the quiz's own name (toStudentActivitySummary/toAcSubmissionRow), not a
+// generic "activity" label.
+const COLUMNS = ['Quiz', 'Level', 'Date & time', 'Score', 'Result'];
 
 /**
  * getStudentName is how the Instructor Dashboard (GitHub #82) reuses this same table for

@@ -229,6 +229,31 @@ describe('GET /api/instructor/activities', () => {
     const body = await response.json();
 
     expect(body.sessions[0].courses).toEqual([]);
+    expect(body.sessions[0].quizName).toBeNull();
+  });
+
+  // GitHub #500 follow-up: the combined instructor table's QUIZ column reads this instead of
+  // falling back to the raw activity_type key — the assembled quiz's own name, not the catalog's.
+  it("attaches the assembled quiz's own name, distinct from the catalog's quiz_name", async () => {
+    queueRole('instructor');
+    queueOwnedActivityTypeSummaries([{ activityType: 'IDENTIFY_WEAK_USER_STORIES', name: 'Identify Weak User Stories', gradingKind: 'mcq' }]);
+    queue('session_log', { data: [sessionRow()], error: null });
+    queue('session_to_question', { data: [], error: null });
+    queue('answered_question_log', { data: [], error: null });
+    queue('assembled_quiz_catalog', {
+      data: [
+        {
+          activity_type: 'IDENTIFY_WEAK_USER_STORIES',
+          assembled_quiz: { course_id: 'course-1', quiz_name: 'Week 3 Quiz', course: { course_name: 'Requirements 101' } },
+        },
+      ],
+      error: null,
+    });
+
+    const response = await GET(request('valid-token'));
+    const body = await response.json();
+
+    expect(body.sessions[0].quizName).toBe('Week 3 Quiz');
   });
 
   it('returns the instructor’s owned activity types alongside the sessions', async () => {

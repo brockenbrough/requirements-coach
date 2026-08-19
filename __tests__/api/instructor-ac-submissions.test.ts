@@ -150,6 +150,7 @@ describe('GET /api/instructor/acceptance-criteria/submissions', () => {
         submittedAt: '2026-08-01T10:00:00.000Z',
         gradedAt: '2026-08-01T10:05:00.000Z',
         courses: [],
+        quizName: null,
       },
       {
         submissionId: 'submission-2',
@@ -164,6 +165,7 @@ describe('GET /api/instructor/acceptance-criteria/submissions', () => {
         submittedAt: '2026-08-01T10:00:00.000Z',
         gradedAt: null,
         courses: [],
+        quizName: null,
       },
     ]);
   });
@@ -189,6 +191,29 @@ describe('GET /api/instructor/acceptance-criteria/submissions', () => {
 
     expect(response.status).toBe(200);
     expect(body.submissions[0].courses).toEqual([{ courseId: 'course-1', courseName: 'Requirements 101' }]);
+  });
+
+  // GitHub #500 follow-up: same assembled_quiz_catalog query as the courses test above — the
+  // instructor table's QUIZ column reads this, not the catalog's own quiz_name.
+  it("attaches the assembled quiz's own name, not the catalog's", async () => {
+    queueRole('instructor');
+    queueOwnedActivityTypes(['MY_LLM_CATALOG']);
+    queue('submission', { data: [submissionRow()], error: null });
+    queue('assembled_quiz_catalog', {
+      data: [
+        {
+          activity_type: 'MY_LLM_CATALOG',
+          assembled_quiz: { course_id: 'course-1', quiz_name: 'Sprint 3 Acceptance Criteria', course: { course_name: 'Requirements 101' } },
+        },
+      ],
+      error: null,
+    });
+
+    const response = await GET(request(undefined, 'valid-token'));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.submissions[0].quizName).toBe('Sprint 3 Acceptance Criteria');
   });
 
   it('filters to role student, so an instructor’s own submissions stay out of their report', async () => {

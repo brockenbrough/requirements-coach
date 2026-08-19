@@ -11,17 +11,17 @@ npm run build      # production build
 npm test           # run all tests (vitest)
 npx vitest run __tests__/api/sessions.test.ts              # run a single test file
 npx vitest run __tests__/api/sessions.test.ts -t "resume"  # run tests matching a name
-npm run seed:load-test      # provision 3 courses x 150 students of realistic activity (GitHub #275)
-npm run cleanup:load-test -- --confirm  # undo the above (dry-run without --confirm)
+npm run seed:load-test              # seed 3 courses / 450 students of realistic activity data (GitHub #275/REQ-PL-3.4.4)
+npm run cleanup:load-test -- --confirm  # undo it (dry-run without --confirm)
 ```
 
 There is no lint or typecheck script; `npm run build` is the type check.
 
-`scripts/seed-load-test.js`/`cleanup-load-test.js` (+ shared `scripts/loadTestConfig.js`) exist to reproduce class-scale data (REQ-PL-3.4.4: 3 courses, 150 students each) for load-testing the instructor dashboard, leaderboard, and activity log against realistic volume rather than a handful of dev-seeded rows. Both are idempotent, find their own targets deterministically (an `@test.local` email suffix, fixed course codes, derived catalog `activity_type` keys — never a stored "is test data" flag), and are safe to rerun.
+`scripts/seed-load-test.js`/`cleanup-load-test.js` (+ shared `scripts/loadTestConfig.js`) exist to reproduce class-scale data (REQ-PL-3.4.4: 3 courses, 150 students each) for load-testing the instructor dashboard, leaderboard, and activity log against realistic volume rather than a handful of dev-seeded rows. Both are idempotent, identifying their own rows by deterministic anchors (an `@test.local` email suffix, fixed course codes, derived catalog `activity_type` keys) rather than a stored "is test data" flag — see each script's header comment before changing either — so both are safe to rerun.
 
 ## Environment setup
 
-Copy `.env.example` to `.env.local` and fill in your Supabase credentials. Then, in the Supabase SQL editor, run `supabase/schema.sql` followed by `supabase/seed.sql` (the question bank — without it every session start returns 400), and create two **public** Storage buckets: `avatars` for profile images, and `course-covers` (GitHub #363 follow-up) for instructor-uploaded course cover images. (README.md's mention of a `myapp_profile` table is stale — the profile table is `"user"`.)
+Copy `.env.example` to `.env.local` and fill in your Supabase credentials. Then, in the Supabase SQL editor, run `supabase/schema.sql` followed by `supabase/seed.sql` (the question bank — without it every session start returns 400), and create two **public** Storage buckets: `avatars` for profile images (Allowed MIME types `image/png, image/jpeg, image/webp`, file size limit 2 MB — the upload route enforces the same rules, but the bucket is public, so the bucket-level limit is a second line of defence), and `course-covers` (GitHub #363 follow-up) for instructor-uploaded course cover images. (README.md's mention of a `myapp_profile` table is stale — the profile table is `"user"`.)
 
 `INSTRUCTOR_SIGNUP_CODE` (the invite code that grants the instructor role at registration, see "Auth flow" below) must be set to a real, random, per-deployment value — generate one yourself (e.g. `openssl rand -base64 24`) and set it only in each deployment's own environment (`.env.local` locally, Vercel Environment Variables in production, etc.). It must never be committed to the repo, in `.env.example` or anywhere else.
 

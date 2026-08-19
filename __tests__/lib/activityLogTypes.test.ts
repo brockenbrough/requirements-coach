@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   deriveActivityFilterOptions,
   summarizeStudents,
+  toAcSubmissionRow,
   toActivityLogEntry,
+  toStudentActivitySummary,
   type ActivityLogEntry,
   type StudentActivitySummary,
 } from '../../lib/activityLogTypes';
-import type { SessionListEntry } from '../../lib/sessionTypes';
+import type { InstructorACSubmission } from '../../lib/llmActivityClient';
+import type { InstructorActivityEntry, SessionListEntry } from '../../lib/sessionTypes';
 
 function session(overrides: Partial<SessionListEntry> = {}): SessionListEntry {
   return {
@@ -73,6 +76,85 @@ describe('toActivityLogEntry', () => {
     expect(entry.passed).toBe(false);
     expect(entry.status).toBe('completed');
     expect(entry.dateTime).toBe('2026-08-01T10:20:00.000Z');
+  });
+});
+
+function instructorEntry(overrides: Partial<InstructorActivityEntry> = {}): InstructorActivityEntry {
+  return {
+    ...session(),
+    studentId: 'student-1',
+    studentName: 'Ann Attempter',
+    courses: [],
+    quizName: null,
+    ...overrides,
+  };
+}
+
+// GitHub #500: the combined Instructor Dashboard table's QUIZ column used to fall straight
+// through to toActivityLogEntry's raw-key fallback for any custom catalog, since nothing called
+// it with a nameByType map on this path — indistinguishable for two quizzes composed from the
+// same catalog. quizName (resolved server-side, the assembled quiz's own name) fixes that without
+// a second name-resolution mechanism: it's threaded through as a single-entry nameByType map.
+describe('toStudentActivitySummary', () => {
+  it("prefers the assembled quiz's name over the raw activity_type key", () => {
+    const summary = toStudentActivitySummary(instructorEntry({ activity_type: 'TEST_CATALOG', quizName: 'Week 3 Quiz' }));
+
+    expect(summary.activityName).toBe('Week 3 Quiz');
+  });
+
+  it('falls back to the raw key when quizName is null (catalog not linked to any quiz yet)', () => {
+    const summary = toStudentActivitySummary(instructorEntry({ activity_type: 'TEST_CATALOG', quizName: null }));
+
+    expect(summary.activityName).toBe('TEST_CATALOG');
+  });
+
+  it("still resolves a built-in activity type's curated name when quizName is null", () => {
+    const summary = toStudentActivitySummary(instructorEntry({ activity_type: 'IDENTIFY_WEAK_USER_STORIES', quizName: null }));
+
+    expect(summary.activityName).toBe('Identify Weak User Stories');
+  });
+
+  it('carries studentId/studentName/courses through unchanged', () => {
+    const summary = toStudentActivitySummary(
+      instructorEntry({ studentId: 'student-9', studentName: 'Zoe', courses: [{ courseId: 'c1', courseName: 'Requirements 101' }] }),
+    );
+
+    expect(summary.studentId).toBe('student-9');
+    expect(summary.studentName).toBe('Zoe');
+    expect(summary.courses).toEqual([{ courseId: 'c1', courseName: 'Requirements 101' }]);
+  });
+});
+
+function acSubmission(overrides: Partial<InstructorACSubmission> = {}): InstructorACSubmission {
+  return {
+    submissionId: 'submission-1',
+    studentId: 'student-1',
+    studentName: 'Ann Attempter',
+    userStoryDescription: 'As a shopper, I want to check out.',
+    activityType: 'MY_LLM_CATALOG',
+    difficultyLevel: 1,
+    submittedText: 'Given a cart, when checkout, then order created.',
+    llmScore: 8,
+    llmFeedback: 'Solid.',
+    submittedAt: '2026-08-01T10:00:00.000Z',
+    gradedAt: '2026-08-01T10:05:00.000Z',
+    courses: [],
+    quizName: null,
+    ...overrides,
+  };
+}
+
+describe('toAcSubmissionRow', () => {
+  it("prefers the assembled quiz's name over the raw activity_type key", () => {
+    const row = toAcSubmissionRow(acSubmission({ activityType: 'MY_LLM_CATALOG', quizName: 'Sprint 3 Acceptance Criteria' }));
+
+    expect(row.activityName).toBe('Sprint 3 Acceptance Criteria');
+  });
+
+  it('falls back to the raw key when quizName is null', () => {
+    const row = toAcSubmissionRow(acSubmission({ activityType: 'MY_LLM_CATALOG', quizName: null }));
+
+    expect(row.activityName).toBe('MY_LLM_CATALOG');
   });
 });
 
