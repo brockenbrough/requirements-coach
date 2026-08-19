@@ -70,6 +70,7 @@ export function ActivityCard({
   level,
   title,
   status,
+  courseId,
 }: {
   activity: ActivityCardData;
   level: Difficulty;
@@ -80,6 +81,11 @@ export function ActivityCard({
    */
   title: string | null;
   status: ActivityCardStatus;
+  /**
+   * GitHub #524: the course this card was rendered under — threaded onto the link so the detail
+   * and play pages can offer a "back to this course" link instead of only "back to My Courses".
+   */
+  courseId: string;
 }) {
   const badgeBg = activity.category === 'Acceptance Criteria' || activity.category === 'Write Acceptance Criteria' ? 'bg-[#2DD4BF]/15' : 'bg-[#7C4DFF]/15';
 
@@ -88,7 +94,7 @@ export function ActivityCard({
       // The level query param lets the activity detail page (app/activities/[slug]/page.tsx)
       // render this exact level on its first paint instead of a hardcoded easy-level default
       // that then jumps once its own data finishes loading — see that page's initialLevel.
-      href={`/activities/${activity.slug}?level=${level}`}
+      href={`/activities/${activity.slug}?level=${level}&course=${encodeURIComponent(courseId)}`}
       className="flex flex-col gap-3 rounded-2xl border border-[#332b6b] bg-[#1b1642] p-5 text-left text-[#F3F1FF] transition hover:-translate-y-0.5 hover:border-[#8b5cf6] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#2DD4BF]"
     >
       <span className={`flex h-11 w-11 items-center justify-center rounded-[10px] ${badgeBg}`}>

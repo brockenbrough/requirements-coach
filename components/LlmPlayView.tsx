@@ -35,12 +35,23 @@ type Outcome = { userStory: LlmSessionStory; result: LlmGradingResult; completed
  * Rendered by app/activities/[slug]/play/page.tsx, which resolves the slug and branches on
  * activity.gradingKind. The MCQ flow lives in that same file, untouched.
  */
-export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
+export function LlmPlayView({
+  activity,
+  courseId,
+}: {
+  activity: ActivityDefinition;
+  /** GitHub #524: the course this activity was reached from, for the "back to course" link below. */
+  courseId: string | null;
+}) {
   const router = useRouter();
   // Also redirects an instructor account away (GitHub #82) — this page is the "activity
   // durchführen" flow itself, exactly what an instructor must not be able to reach.
   const { token, profile, loading, authorized } = useRequireRole('student');
   const { refreshScore } = useUser();
+  // GitHub #524: appended to every internal navigation back to the detail page, so the course
+  // context this session was reached through survives the round trip.
+  const courseQuery = courseId ? `?course=${encodeURIComponent(courseId)}` : '';
+  const backHref = courseId ? `/courses/${courseId}` : `/activities/${activity.slug}`;
 
   const [session, setSession] = useState<CurrentLlmSessionResult | null>(null);
   const [nextPosition, setNextPosition] = useState<number | null>(null);
@@ -78,7 +89,7 @@ export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
 
     // Nothing running: the student got here without starting, or already finished.
     if (!result.data.session) {
-      router.replace(`/activities/${activity.slug}`);
+      router.replace(`/activities/${activity.slug}${courseQuery}`);
       return;
     }
 
@@ -92,7 +103,7 @@ export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
     if (result.data.nextPosition === null) {
       setShowSummary(true);
     }
-  }, [token, router, showSummary, activity.activityType]);
+  }, [token, router, showSummary, activity.activityType, courseQuery]);
 
   useEffect(() => {
     void syncFromServer();
@@ -105,7 +116,7 @@ export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
       <AppShell active="activities">
         <div className="mx-auto max-w-xl rounded-brand-lg border border-brand-danger/40 bg-brand-danger/10 p-6 text-sm font-semibold text-brand-danger-light">
           {error}
-          <Link href={`/activities/${activity.slug}`} className="ml-1 underline hover:text-white">
+          <Link href={`/activities/${activity.slug}${courseQuery}`} className="ml-1 underline hover:text-white">
             Back to the activity
           </Link>
         </div>
@@ -244,7 +255,7 @@ export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
     // PlayActivityPage's own handleFinishSummary, which already clears this cache. Missing here
     // until now, so the leaderboard kept showing the pre-session rank after an LLM-graded pass.
     clearCachedLeaderboard();
-    router.push(`/activities/${activity.slug}`);
+    router.push(`/activities/${activity.slug}${courseQuery}`);
   }
 
   // Once the session is complete, currentStory legitimately becomes undefined (nextPosition is
@@ -300,14 +311,25 @@ export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
     <AppShell active="activities">
       <div className="mx-auto max-w-xl">
         {!showSummary ? (
-          <div className="mb-5 flex items-center justify-between">
-            <SessionProgressDots statuses={dotStatuses} />
-            <span className="text-sm font-bold text-gray-500">
-              {allStoriesComplete
-                ? `${storyTotal} of ${storyTotal} complete`
-                : `Question ${storyPosition} of ${storyTotal}`}
-            </span>
-          </div>
+          <>
+            {/* GitHub #524: this screen had no way back at all — a student could only abandon
+                the tab or wait to finish. Leaving mid-quiz doesn't abandon the session (it's
+                still resumable server-side), it just navigates away from this screen. */}
+            <Link
+              href={backHref}
+              className="mb-3 inline-flex items-center gap-1 text-sm font-bold text-gray-500 hover:text-[#1B1642]"
+            >
+              {courseId ? '← Back to course' : '← Back to the activity'}
+            </Link>
+            <div className="mb-5 flex items-center justify-between">
+              <SessionProgressDots statuses={dotStatuses} />
+              <span className="text-sm font-bold text-gray-500">
+                {allStoriesComplete
+                  ? `${storyTotal} of ${storyTotal} complete`
+                  : `Question ${storyPosition} of ${storyTotal}`}
+              </span>
+            </div>
+          </>
         ) : null}
 
         {showSummary ? (

@@ -84,11 +84,19 @@ function ActivityDetailContent({
   const { token, profile, loading, authorized } = useRequireRole('student');
   const { activity, status: activityStatus } = useResolvedActivity(token, params.slug);
 
+  const searchParams = useSearchParams();
   // The level ActivityCard was already showing for this activity on the activities list page
   // (components/ActivityCard.tsx's ?level= link) — used only to seed the first paint below so
   // it doesn't default to level 1 and then jump once this page's own data has loaded; the effect
   // further down still recomputes and corrects it from real data once that arrives.
-  const initialLevel = parseLevelParam(useSearchParams().get('level'));
+  const initialLevel = parseLevelParam(searchParams.get('level'));
+  // GitHub #524: the course ActivityCard's link carried this activity's card from — carried
+  // forward into the /play link too, so the quiz play screen's own back link can return to this
+  // same course instead of only "back to My Courses". null for a bookmarked/direct link, which
+  // falls back to that same "My Courses" behavior below.
+  const courseId = searchParams.get('course');
+  const backHref = courseId ? `/courses/${courseId}` : '/activities';
+  const courseQuery = courseId ? `?course=${encodeURIComponent(courseId)}` : '';
 
   // The server is the only source of "does this activity have a run in progress" (REQ-PL-6.3) —
   // there is no local/mock notion of progress anymore. null means "not checked yet or nothing
@@ -273,10 +281,10 @@ function ActivityDetailContent({
       <AppShell active="activities">
         <div className="mx-auto max-w-lg">
           <Link
-            href="/activities"
+            href={backHref}
             className="mb-5 inline-flex items-center gap-1 text-sm font-bold text-gray-500 hover:text-[#1B1642]"
           >
-            ← Back to My Courses
+            {courseId ? '← Back to course' : '← Back to My Courses'}
           </Link>
           <p className="rounded-2xl border border-brand-danger/40 bg-brand-danger/10 p-6 text-sm font-semibold text-brand-danger-light">
             {activityStatus === 'forbidden'
@@ -307,7 +315,7 @@ function ActivityDetailContent({
       if (profile?.user_id) {
         void loadActivityLog(token, profile.user_id, { forceRefresh: true });
       }
-      router.push(`/activities/${activity!.slug}/play`);
+      router.push(`/activities/${activity!.slug}/play${courseQuery}`);
       return;
     }
 
@@ -326,7 +334,7 @@ function ActivityDetailContent({
   function handleResume() {
     // The whole point of a running session is that it is already in hand server-side —
     // resuming is just navigating there, not another start/resume network round trip.
-    router.push(`/activities/${activity!.slug}/play`);
+    router.push(`/activities/${activity!.slug}/play${courseQuery}`);
   }
 
   async function handleAbandon() {
@@ -384,10 +392,10 @@ function ActivityDetailContent({
     <AppShell active="activities">
       <div className="mx-auto max-w-lg">
         <Link
-          href="/activities"
+          href={backHref}
           className="mb-5 inline-flex items-center gap-1 text-sm font-bold text-gray-500 hover:text-[#1B1642]"
         >
-          ← Back to My Courses
+          {courseId ? '← Back to course' : '← Back to My Courses'}
         </Link>
 
         {isLoading ? (

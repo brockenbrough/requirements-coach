@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { AppShell } from "../../../../components/AppShell";
 import { FeedbackCard } from "../../../../components/FeedbackCard";
 import { QuestionCard } from "../../../../components/QuestionCard";
@@ -42,8 +42,11 @@ type AnswerOutcome = {
  */
 function QuizPlayView({
   params,
+  courseId,
 }: {
   params: { slug: string };
+  /** GitHub #524: the course this quiz was reached from, for the "back to course" link below. */
+  courseId: string | null;
 }) {
   const router = useRouter();
   // Also redirects an instructor account away (GitHub #82) — this page is the "quiz
@@ -51,6 +54,10 @@ function QuizPlayView({
   const { token, profile, loading, authorized } = useRequireRole("student");
   const { refreshScore } = useUser();
   const { activity, status: activityStatus } = useResolvedActivity(token, params.slug);
+  // GitHub #524: appended to every internal navigation back to the detail page, so the course
+  // context this session was reached through survives the round trip.
+  const courseQuery = courseId ? `?course=${encodeURIComponent(courseId)}` : '';
+  const backHref = courseId ? `/courses/${courseId}` : `/activities/${params.slug}`;
 
   const [session, setSession] = useState<CurrentSessionResult | null>(null);
   const [nextPosition, setNextPosition] = useState<number | null>(null);
@@ -96,7 +103,7 @@ function QuizPlayView({
 
     // Nothing running: the student got here without starting, or already finished.
     if (!result.data.session) {
-      router.replace(`/activities/${activity.slug}`);
+      router.replace(`/activities/${activity.slug}${courseQuery}`);
       return;
     }
 
@@ -105,7 +112,7 @@ function QuizPlayView({
     setCumulativeScore(result.data.session.cumulative_score);
     setAnsweredCount(result.data.answers.length);
     setOutcome(null);
-  }, [token, activity, router, showSummary]);
+  }, [token, activity, router, showSummary, courseQuery]);
 
   useEffect(() => {
     void syncFromServer();
@@ -152,7 +159,7 @@ function QuizPlayView({
         <div className="mx-auto max-w-xl rounded-brand-lg border border-brand-danger/40 bg-brand-danger/10 p-6 text-sm font-semibold text-brand-danger-light">
           {error}
           <Link
-            href={`/activities/${activity.slug}`}
+            href={`/activities/${activity.slug}${courseQuery}`}
             className="ml-1 underline hover:text-white"
           >
             Back to the activity
@@ -318,7 +325,7 @@ function QuizPlayView({
     // caches above, not awaited: nothing on this page reads it, only the leaderboard page and
     // preview do, on their own next mount) rather than a targeted, per-course forceRefresh.
     clearCachedLeaderboard();
-    router.push(`/activities/${activity!.slug}`);
+    router.push(`/activities/${activity!.slug}${courseQuery}`);
   }
 
   // Once the session is complete, currentQuestion legitimately becomes undefined (nextPosition
@@ -366,13 +373,24 @@ function QuizPlayView({
     <AppShell active="activities">
       <div className="mx-auto max-w-xl">
         {!showSummary ? (
-          <div className="mb-5 flex items-center justify-between">
-            <SessionProgressDots statuses={dotStatuses} />
-            <span className="text-sm font-bold text-gray-500">
-              Question {Math.min(answeredDots + 1, totalQuestions)} of{" "}
-              {totalQuestions} · {cumulativeScore} pts
-            </span>
-          </div>
+          <>
+            {/* GitHub #524: the quiz play screen had no way back at all — a student could only
+                abandon the tab or wait to finish. Leaving mid-quiz doesn't abandon the session
+                (it's still resumable server-side), it just navigates away from this screen. */}
+            <Link
+              href={backHref}
+              className="mb-3 inline-flex items-center gap-1 text-sm font-bold text-gray-500 hover:text-[#1B1642]"
+            >
+              {courseId ? '← Back to course' : '← Back to the activity'}
+            </Link>
+            <div className="mb-5 flex items-center justify-between">
+              <SessionProgressDots statuses={dotStatuses} />
+              <span className="text-sm font-bold text-gray-500">
+                Question {Math.min(answeredDots + 1, totalQuestions)} of{" "}
+                {totalQuestions} · {cumulativeScore} pts
+              </span>
+            </div>
+          </>
         ) : null}
 
         {showSummary ? (
@@ -440,14 +458,21 @@ function QuizPlayView({
  * slugs useResolvedActivity answers synchronously from the static ACTIVITIES array at zero network
  * cost, and paying one extra fetch in the custom-catalog case is cheaper than threading the
  * resolved activity through a body this issue is otherwise not touching at all.
+ *
+ * Split out because useSearchParams() (GitHub #524's ?course=) forces the nearest Suspense
+ * boundary to render client-side — without one, `npm run build` fails prerendering this route,
+ * the same reason app/activities/[slug]/page.tsx is split into a Content component this way.
  */
-export default function PlayActivityPage({
+function PlayActivityContent({
   params,
 }: {
   params: { slug: string };
 }) {
   const { token, loading, authorized } = useRequireRole("student");
   const { activity, status: activityStatus } = useResolvedActivity(token, params.slug);
+  // GitHub #524: the course the student followed from a course page card, or carried over from
+  // the detail page's own navigation into here (see QuizPlayView/LlmPlayView's courseQuery).
+  const courseId = useSearchParams().get('course');
 
   if (loading || !authorized) return null;
   if (activityStatus === 'loading') return null;
@@ -459,8 +484,8 @@ export default function PlayActivityPage({
           {activityStatus === 'forbidden'
             ? "You're not enrolled in a course that offers this activity."
             : "This activity doesn't exist."}
-          <Link href="/activities" className="ml-1 underline hover:text-white">
-            Back to My Courses
+          <Link href={courseId ? `/courses/${courseId}` : '/activities'} className="ml-1 underline hover:text-white">
+            {courseId ? 'Back to course' : 'Back to My Courses'}
           </Link>
         </div>
       </AppShell>
@@ -468,8 +493,20 @@ export default function PlayActivityPage({
   }
 
   return activity.gradingKind === 'llm-graded' ? (
-    <LlmPlayView activity={activity} />
+    <LlmPlayView activity={activity} courseId={courseId} />
   ) : (
-    <QuizPlayView params={params} />
+    <QuizPlayView params={params} courseId={courseId} />
+  );
+}
+
+export default function PlayActivityPage({
+  params,
+}: {
+  params: { slug: string };
+}) {
+  return (
+    <Suspense fallback={null}>
+      <PlayActivityContent params={params} />
+    </Suspense>
   );
 }
