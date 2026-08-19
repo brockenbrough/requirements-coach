@@ -179,10 +179,18 @@ function patchJson(payload: unknown): RequestInit {
  * the student has already passed it (403 otherwise). Conditionally spread rather than always
  * sent, so an omitted level can't be confused with an explicit one server-side.
  */
-export function startSession(token: string, activityType: ActivityType, options: { difficultyLevel?: number } = {}) {
+export function startSession(
+  token: string,
+  activityType: ActivityType,
+  options: { difficultyLevel?: number; assembledQuizId?: string } = {},
+) {
   return request<StartSessionResult>(
     '/api/sessions',
-    postJson({ activityType, ...(options.difficultyLevel !== undefined ? { difficultyLevel: options.difficultyLevel } : {}) }),
+    postJson({
+      activityType,
+      ...(options.difficultyLevel !== undefined ? { difficultyLevel: options.difficultyLevel } : {}),
+      ...(options.assembledQuizId !== undefined ? { assembledQuizId: options.assembledQuizId } : {}),
+    }),
     token,
   );
 }
@@ -200,12 +208,11 @@ export function abandonSession(token: string, sessionId: string) {
  * The running session with its questions and the answers given so far.
  * session: null (with a 200) means nothing is in progress — not an error.
  */
-export function loadCurrentSession(token: string, activityType: ActivityType) {
-  return request<CurrentSessionResult>(
-    `/api/sessions/current?activityType=${encodeURIComponent(activityType)}`,
-    { method: 'GET' },
-    token,
-  );
+export function loadCurrentSession(token: string, activityType: ActivityType, assembledQuizId?: string) {
+  const query = assembledQuizId
+    ? `activityType=${encodeURIComponent(activityType)}&assembledQuizId=${encodeURIComponent(assembledQuizId)}`
+    : `activityType=${encodeURIComponent(activityType)}`;
+  return request<CurrentSessionResult>(`/api/sessions/current?${query}`, { method: 'GET' }, token);
 }
 
 /**
@@ -249,12 +256,12 @@ export function loadSessions(
   });
 }
 
-function fetchCompletedAttempts(token: string, studentId: string, activityType: ActivityType) {
-  return request<{ attempts: CompletedAttempt[] }>(
-    `/api/sessions/completed?activityType=${encodeURIComponent(activityType)}`,
-    { method: 'GET' },
-    token,
-  ).then((result) => {
+function fetchCompletedAttempts(token: string, studentId: string, activityType: ActivityType, assembledQuizId?: string) {
+  const query = assembledQuizId
+    ? `activityType=${encodeURIComponent(activityType)}&assembledQuizId=${encodeURIComponent(assembledQuizId)}`
+    : `activityType=${encodeURIComponent(activityType)}`;
+
+  return request<{ attempts: CompletedAttempt[] }>(`/api/sessions/completed?${query}`, { method: 'GET' }, token).then((result) => {
     if (!result.ok) return result;
 
     // completedAt comes from session_log.ended_at, which carries no zone — pinned to UTC before
@@ -264,7 +271,7 @@ function fetchCompletedAttempts(token: string, studentId: string, activityType: 
       completedAt: attempt.completedAt === null ? null : toInstant(attempt.completedAt),
     }));
 
-    setCachedCompletedAttempts(studentId, activityType, attempts);
+    setCachedCompletedAttempts(studentId, activityType, attempts, assembledQuizId);
     return { ok: true as const, data: { attempts } };
   });
 }
@@ -288,14 +295,14 @@ export function loadCompletedAttempts(
   token: string,
   studentId: string,
   activityType: ActivityType,
-  options: { forceRefresh?: boolean; onRevalidate?: (attempts: CompletedAttempt[]) => void } = {},
+  options: { forceRefresh?: boolean; onRevalidate?: (attempts: CompletedAttempt[]) => void; assembledQuizId?: string } = {},
 ) {
   if (!options.forceRefresh) {
-    const cached = getCachedCompletedAttempts(studentId, activityType);
+    const cached = getCachedCompletedAttempts(studentId, activityType, options.assembledQuizId);
     if (cached !== null) {
       if (options.onRevalidate) {
         const onRevalidate = options.onRevalidate;
-        fetchCompletedAttempts(token, studentId, activityType).then((result) => {
+        fetchCompletedAttempts(token, studentId, activityType, options.assembledQuizId).then((result) => {
           if (result.ok && JSON.stringify(result.data.attempts) !== JSON.stringify(cached)) {
             onRevalidate(result.data.attempts);
           }
@@ -305,7 +312,7 @@ export function loadCompletedAttempts(
     }
   }
 
-  return fetchCompletedAttempts(token, studentId, activityType);
+  return fetchCompletedAttempts(token, studentId, activityType, options.assembledQuizId);
 }
 
 function fetchStudentScore(token: string, studentId: string) {
