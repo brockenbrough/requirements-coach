@@ -8,9 +8,12 @@ import { FeedbackCard } from '../../components/FeedbackCard';
 import { QuestionCard } from '../../components/QuestionCard';
 import { useUser } from '../../components/UserProvider';
 import { loadDailyChallenge, startDailyChallenge, submitDailyChallengeAnswer } from '../../lib/dailyChallengeClient';
+import { nextChallengeAt } from '../../lib/dailyChallengeRules';
+import { formatCountdown } from '../../lib/dailyChallengeStatus';
 import type { DailyChallengeState } from '../../lib/dailyChallengeTypes';
 import { toInstant } from '../../lib/dateTime';
 import { clearCachedLeaderboard } from '../../lib/leaderboardStore';
+import { useCountdown } from '../../lib/useCountdown';
 import { useRequireRole } from '../../lib/useRequireRole';
 
 function formatRemaining(ms: number): string {
@@ -111,6 +114,13 @@ export default function DailyChallengePage() {
       clearInterval(interval);
     };
   }, [state?.attempt, state?.expired, refresh]);
+
+  // Once today's attempt is submitted or expired, show a live countdown to the next UTC calendar
+  // day (nextChallengeAt) rather than a static "come back tomorrow" — re-fetches on hitting zero,
+  // the same "server's version wins" reasoning the deadline countdown above already follows.
+  const isDone = !!state?.attempt && (!!state.attempt.submitted_at || !!state.expired);
+  const nextAvailableAt = isDone && state?.attempt ? nextChallengeAt(state.attempt.challenge_date).toISOString() : null;
+  const nextAttemptMs = useCountdown(nextAvailableAt, refresh);
 
   if (loading || !authorized) return null;
 
@@ -251,6 +261,11 @@ export default function DailyChallengePage() {
             <p className="mt-5 text-center text-sm font-semibold text-gray-500">
               That’s today’s Daily Challenge — come back tomorrow for another one.
             </p>
+            {nextAttemptMs !== null ? (
+              <p className="mt-1 text-center text-sm font-extrabold text-gray-700">
+                Next attempt in {formatCountdown(nextAttemptMs)}
+              </p>
+            ) : null}
           </>
         ) : state.expired ? (
           <div className="rounded-2xl border border-[#332b6b] bg-[#1b1642] p-6 text-[#F3F1FF]">
@@ -258,6 +273,11 @@ export default function DailyChallengePage() {
             <p className="mb-4 text-sm font-semibold text-[#A79FC9]">
               Today’s attempt has closed. Come back tomorrow for a new question.
             </p>
+            {nextAttemptMs !== null ? (
+              <p className="mb-4 text-sm font-extrabold text-white">
+                Next attempt in {formatCountdown(nextAttemptMs)}
+              </p>
+            ) : null}
             <Link
               href="/dashboard"
               className="inline-block rounded-[10px] bg-[#7C4DFF] px-5 py-2.5 text-sm font-extrabold text-white hover:bg-[#6234d1]"

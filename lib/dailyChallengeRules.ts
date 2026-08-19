@@ -26,3 +26,15 @@ export function scoreForDailyChallenge(isCorrect: boolean, questionMaxScore: num
 export function isExpired(deadlineAt: string, now: Date = new Date()): boolean {
   return now.getTime() > new Date(toInstant(deadlineAt)).getTime();
 }
+
+/**
+ * The instant a fresh Daily Challenge becomes drawable again — the start of the UTC calendar day
+ * after `challengeDate` (today's attempt's own date, in the "YYYY-MM-DD" shape todayUtc()
+ * produces). uq_daily_challenge_attempt_user_date caps a student at one attempt per UTC day, so
+ * this is always the exact instant, not an estimate.
+ */
+export function nextChallengeAt(challengeDate: string): Date {
+  const next = new Date(`${challengeDate}T00:00:00Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  return next;
+}
