@@ -19,6 +19,7 @@ const h = vi.hoisted(() => {
       select: () => builder,
       eq: () => builder,
       in: () => builder,
+      is: () => builder,
       range: () => builder,
       limit: () => builder,
       order: (column: string, opts?: { ascending?: boolean }) => {

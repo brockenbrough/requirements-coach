@@ -24,18 +24,24 @@ import type { SupabaseClient } from './sessionQueries';
  * error is only set on an actual database failure (distinct from "not found", which is a normal
  * `{ valid: false, error: null }`) so callers can tell "400: unknown activity type" apart from
  * "500: could not check".
+ *
+ * GitHub #525: excludes a soft-deleted catalog (activity_type.deleted_at) by default — a deleted
+ * catalog must act "unknown" for starting/resuming a session, authoring content, etc. The two or
+ * three callers that read a student's own already-recorded history (GET /api/sessions/completed,
+ * GET /api/instructor/students/{id}/history, GET /api/sessions/in-progress) pass
+ * includeDeleted: true, since that history must stay readable after the catalog is gone.
  */
 export async function isActivityType(
   supabase: SupabaseClient,
   value: unknown,
+  options: { includeDeleted?: boolean } = {},
 ): Promise<{ valid: boolean; error: { message: string } | null }> {
   if (typeof value !== 'string' || value.trim() === '') return { valid: false, error: null };
 
-  const { data, error } = await supabase
-    .from('activity_type')
-    .select('activity_type')
-    .eq('activity_type', value)
-    .maybeSingle();
+  let query = supabase.from('activity_type').select('activity_type').eq('activity_type', value);
+  if (!options.includeDeleted) query = query.is('deleted_at', null);
+
+  const { data, error } = await query.maybeSingle();
 
   if (error) return { valid: false, error };
   return { valid: data !== null, error: null };
@@ -68,20 +74,25 @@ export function isGradingKind(value: unknown): value is GradingKind {
  * the CHECK constraint makes that unreachable through Postgres, and treating an unrecognised
  * value as "unknown activity" is the safe direction — it refuses the request rather than guessing
  * a grading path.
+ *
+ * GitHub #525: same includeDeleted escape hatch as isActivityType, for the same reason — a
+ * soft-deleted catalog must act "unknown" for new/ongoing interaction, but POST
+ * .../llm/submissions passes includeDeleted: true so a submission already in flight can still be
+ * graded even if the catalog is deleted mid-session.
  */
 export async function getGradingKind(
   supabase: SupabaseClient,
   activityType: unknown,
+  options: { includeDeleted?: boolean } = {},
 ): Promise<{ gradingKind: GradingKind | null; error: { message: string } | null }> {
   if (typeof activityType !== 'string' || activityType.trim() === '') {
     return { gradingKind: null, error: null };
   }
 
-  const { data, error } = await supabase
-    .from('activity_type')
-    .select('grading_kind')
-    .eq('activity_type', activityType)
-    .maybeSingle();
+  let query = supabase.from('activity_type').select('grading_kind').eq('activity_type', activityType);
+  if (!options.includeDeleted) query = query.is('deleted_at', null);
+
+  const { data, error } = await query.maybeSingle();
 
   if (error) return { gradingKind: null, error };
 

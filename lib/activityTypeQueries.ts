@@ -104,6 +104,8 @@ export async function listQuizzesWithAuthorAndCount(supabase: SupabaseClient, in
     .from('activity_type')
     .select(QUIZ_SUMMARY_SELECT)
     .eq('creator_id', instructorId)
+    // GitHub #525: a soft-deleted catalog no longer belongs on the browse page.
+    .is('deleted_at', null)
     .order('quiz_name', { ascending: true });
 
   if (error) return { quizzes: null, error };
@@ -124,6 +126,8 @@ export async function listExampleCatalogsWithCount(supabase: SupabaseClient) {
     .from('activity_type')
     .select(QUIZ_SUMMARY_SELECT)
     .is('creator_id', null)
+    // GitHub #525: a soft-deleted catalog no longer belongs on the browse page.
+    .is('deleted_at', null)
     .order('quiz_name', { ascending: true });
 
   if (error) return { quizzes: null, error };
@@ -152,6 +156,12 @@ export type QuizMeta = Omit<QuizSummary, 'questionCount' | 'quizCount'> & {
  * and the student-facing single-activity route (authorized via course enrollment). creatorId rides
  * along as a sibling field, not folded into QuizMeta, precisely so the two callers that don't need
  * it can keep destructuring only `quiz` without it ever reaching a JSON response by accident.
+ *
+ * GitHub #525: excludes a soft-deleted catalog — every one of its three callers treats a miss here
+ * as "doesn't exist" (404, or a fallback to a different resolution path), which is exactly the
+ * right behavior for a deleted catalog too. This is also what makes the duplicate route
+ * (app/api/instructor/quizzes/[activityType]/duplicate/route.ts) automatically 404 on a deleted
+ * source, with no separate check needed in duplicateCatalog itself.
  */
 export async function getQuizByActivityType(supabase: SupabaseClient, activityType: string) {
   const { data, error } = await supabase
@@ -160,6 +170,7 @@ export async function getQuizByActivityType(supabase: SupabaseClient, activityTy
       'activity_type, quiz_name, description, grading_kind, rating_prompt, creator_id, creator:creator_id(first_name, last_name, username)',
     )
     .eq('activity_type', activityType)
+    .is('deleted_at', null)
     .maybeSingle();
 
   if (error) return { quiz: null, creatorId: null, error };
@@ -356,51 +367,32 @@ type QuizLinkRow = {
 
 export type DeleteCatalogResult =
   | { status: 'ok' }
-  | { status: 'in_use' }
   | { status: 'linked'; quizzes: LinkedQuizSummary[] }
   | { status: 'error'; error: { message: string } };
 
 /**
- * Deletes a catalog (activity_type row) entirely: its own questions/answers (mcq) or user_story
- * prompts (llm-graded), and every assembled_quiz_catalog link that referenced it — a link to a
- * catalog that no longer exists is meaningless, so this is what removes a deleted catalog from
- * any quiz it was composed into. quiz_excluded_question and assembled_quiz_extra_question rows
- * cascade automatically (their FK to question is ON DELETE CASCADE, see supabase/schema.sql); no
- * manual cleanup needed for those.
+ * Soft-deletes a catalog (GitHub #525): sets activity_type.deleted_at rather than removing
+ * anything. The row itself, and every question/answer/user_story/title_definition that references
+ * it, stays exactly as it is — a student's history against this catalog is never touched, so it
+ * keeps reading correctly everywhere it's shown (completed-attempts lists, the instructor
+ * dashboard, per-student detail, class statistics). isActivityType/getGradingKind
+ * (lib/activityTypes.ts) exclude a soft-deleted catalog by default, which is what makes it stop
+ * being selectable, playable, or editable going forward without needing any cascading delete at
+ * all.
  *
- * Refuses with 'in_use' instead of deleting anything if a student has ever engaged with this
- * catalog: a session_log row for this activity_type — which a session_to_question or
- * session_to_user_story row always implies by construction, since a session only ever draws from
- * its own activity_type's pool — or, for an mcq catalog specifically, a daily_challenge_attempt
- * row for one of its questions (that table has no session_log/activity_type of its own to check
- * instead, unlike every other student-history table). None of session_to_question/
- * session_to_user_story/answered_question_log/submission/daily_challenge_attempt has an ON DELETE
- * clause on its FK into question/user_story, so a physical delete would either fail outright or,
- * attempted piecemeal, orphan a student's history — checking first avoids both, the same reasoning
- * DELETE /api/instructor/questions/{questionId} already documents for a single question.
+ * This used to hard-block ('in_use') the instant any student had ever engaged with the catalog —
+ * removed entirely per the product decision that historical attempts must never prevent deletion.
  *
- * Also refuses with 'linked' — a second, independent pre-flight check, orthogonal to the 'in_use'
- * one above — if any assembled_quiz_catalog row still references this catalog. Unlike deleting a
- * single question (which the DELETE /api/instructor/questions/{questionId}?force= path lets an
- * instructor push through with `force`), there is no "delete anyway" for a catalog: a catalog can
- * be composed into several quizzes/courses at once (see CLAUDE.md's Assembled quizzes section), so
- * silently cascading the unlink here — which is exactly what this function used to do, unyoking a
- * catalog from every quiz it was in without telling anyone — could quietly break a running course
- * out from under students. The instructor has to remove the catalog from each quiz by hand first
- * (DELETE /api/instructor/assembled-quizzes/{quizId}/catalogs/{activityType}, the existing "remove
- * a catalog from a quiz" action) before a delete here is allowed to proceed. This check runs before
- * the destructive per-kind deletes below so a rejection never leaves the catalog partially deleted.
+ * Still refuses with 'linked' if any assembled_quiz_catalog row references this catalog — the one
+ * precondition that remains. A catalog can be composed into several quizzes/courses at once (see
+ * CLAUDE.md's Assembled quizzes section), so silently unlinking it here on delete could quietly
+ * break a running course out from under students; the instructor removes it from each quiz by hand
+ * first (DELETE /api/instructor/assembled-quizzes/{quizId}/catalogs/{activityType}, the existing
+ * "remove a catalog from a quiz" action). This also guarantees a deletable catalog is already
+ * unreachable through any course/discovery/composition query before this even runs, since those
+ * all derive from assembled_quiz_catalog.
  */
-export async function deleteCatalog(supabase: SupabaseClient, activityType: string, gradingKind: GradingKind): Promise<DeleteCatalogResult> {
-  const { data: sessionUsage, error: sessionUsageError } = await supabase
-    .from('session_log')
-    .select('session_id')
-    .eq('activity_type', activityType)
-    .limit(1)
-    .maybeSingle();
-  if (sessionUsageError) return { status: 'error', error: sessionUsageError };
-  if (sessionUsage) return { status: 'in_use' };
-
+export async function deleteCatalog(supabase: SupabaseClient, activityType: string): Promise<DeleteCatalogResult> {
   const { data: quizLinkRows, error: quizLinkError } = await supabase
     .from('assembled_quiz_catalog')
     .select('assembled_quiz:assembled_quiz_id(assembled_quiz_id, quiz_name, course:course_id(course_name))')
@@ -417,59 +409,11 @@ export async function deleteCatalog(supabase: SupabaseClient, activityType: stri
     }));
   if (linkedQuizzes.length > 0) return { status: 'linked', quizzes: linkedQuizzes };
 
-  if (gradingKind === 'llm-graded') {
-    const { error: deleteStoriesError } = await supabase.from('user_story').delete().eq('activity_type', activityType);
-    if (deleteStoriesError) return { status: 'error', error: deleteStoriesError };
-  } else {
-    const { data: questionRows, error: questionsError } = await supabase
-      .from('question')
-      .select('question_id')
-      .eq('activity_type', activityType);
-    if (questionsError) return { status: 'error', error: questionsError };
-
-    const questionIds = ((questionRows ?? []) as { question_id: string }[]).map((row) => row.question_id);
-
-    if (questionIds.length > 0) {
-      const { data: dailyUsage, error: dailyUsageError } = await supabase
-        .from('daily_challenge_attempt')
-        .select('daily_challenge_attempt_id')
-        .in('question_id', questionIds)
-        .limit(1)
-        .maybeSingle();
-      if (dailyUsageError) return { status: 'error', error: dailyUsageError };
-      if (dailyUsage) return { status: 'in_use' };
-
-      const { data: linkRows, error: linkFetchError } = await supabase
-        .from('question_to_answer')
-        .select('answer_id')
-        .in('question_id', questionIds);
-      if (linkFetchError) return { status: 'error', error: linkFetchError };
-      const answerIds = ((linkRows ?? []) as { answer_id: string }[]).map((row) => row.answer_id);
-
-      const { error: unlinkError } = await supabase.from('question_to_answer').delete().in('question_id', questionIds);
-      if (unlinkError) return { status: 'error', error: unlinkError };
-
-      if (answerIds.length > 0) {
-        const { error: answerDeleteError } = await supabase.from('answer').delete().in('answer_id', answerIds);
-        if (answerDeleteError) return { status: 'error', error: answerDeleteError };
-      }
-
-      const { error: questionDeleteError } = await supabase.from('question').delete().in('question_id', questionIds);
-      if (questionDeleteError) return { status: 'error', error: questionDeleteError };
-    }
-  }
-
-  const { error: titleDeleteError } = await supabase.from('title_definition').delete().eq('activity_type', activityType);
-  if (titleDeleteError) return { status: 'error', error: titleDeleteError };
-
-  const { error: unlinkQuizError } = await supabase.from('assembled_quiz_catalog').delete().eq('activity_type', activityType);
-  if (unlinkQuizError) return { status: 'error', error: unlinkQuizError };
-
-  const { error: deleteError } = await supabase.from('activity_type').delete().eq('activity_type', activityType);
-  if (deleteError) {
-    if ((deleteError as { code?: string }).code === '23503') return { status: 'in_use' };
-    return { status: 'error', error: deleteError };
-  }
+  const { error: deleteError } = await supabase
+    .from('activity_type')
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('activity_type', activityType);
+  if (deleteError) return { status: 'error', error: deleteError };
 
   return { status: 'ok' };
 }
@@ -487,13 +431,16 @@ export type CatalogEditableCheck = { ok: true } | { ok: false; response: Respons
  *
  * An unknown activityType is let through here (`data` comes back null) rather than surfaced as a
  * second error — the caller's own validation (isActivityType/getGradingKind) already 400s that
- * case before this runs.
+ * case before this runs. GitHub #525: excludes a soft-deleted catalog for the same reason — its
+ * content can't be edited once deleted, though in practice the caller's own isActivityType/
+ * getGradingKind check already 400s first, making this a defense-in-depth duplicate.
  */
 export async function assertCatalogIsEditable(supabase: SupabaseClient, activityType: string): Promise<CatalogEditableCheck> {
   const { data, error } = await supabase
     .from('activity_type')
     .select('creator_id')
     .eq('activity_type', activityType)
+    .is('deleted_at', null)
     .maybeSingle();
 
   if (error) return { ok: false, response: Response.json({ error: error.message }, { status: 500 }) };

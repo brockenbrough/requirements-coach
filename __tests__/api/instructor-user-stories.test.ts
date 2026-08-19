@@ -21,6 +21,7 @@ const h = vi.hoisted(() => {
         state.inserts.push({ table, payload });
         return builder;
       },
+      is: () => builder,
       maybeSingle: async () => result,
       then: (onOk: (r: Result) => unknown, onErr?: (e: unknown) => unknown) =>
         Promise.resolve(result).then(onOk, onErr),
