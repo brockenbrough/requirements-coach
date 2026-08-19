@@ -149,6 +149,9 @@ export type InstructorACSubmission = {
   gradedAt: string | null;
   /** GitHub #474: every course this submission's catalog is currently linked to; [] means none yet. */
   courses: { courseId: string; courseName: string }[];
+  /** GitHub #500 follow-up: the assembled quiz's own name, not the catalog's — see
+   *  InstructorActivityEntry.quizName's own comment for the same reasoning and its known limit. */
+  quizName: string | null;
 };
 
 /** GET /api/instructor/acceptance-criteria/submissions — all AC submissions, optionally scoped to one student. */

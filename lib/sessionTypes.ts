@@ -47,6 +47,13 @@ export type InstructorActivityEntry = SessionListEntry & {
    * more than one course at once, so this is a list, not a single name.
    */
   courses: ActivityCourseRef[];
+  /**
+   * The assembled quiz's own name (GitHub #500 follow-up) — not the catalog's, so two different
+   * quizzes composed from the same catalog show up distinguishably. Null means the catalog isn't
+   * linked to any assembled quiz yet, the same case courses: [] represents; toActivityLogEntry
+   * falls back to the catalog lookup and then the raw key when this is null.
+   */
+  quizName: string | null;
 };
 
 /**
