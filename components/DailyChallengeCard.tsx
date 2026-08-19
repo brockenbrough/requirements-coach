@@ -1,8 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { dailyChallengeCardStatusLabel, deriveDailyChallengeCardStatus } from '../lib/dailyChallengeStatus';
+import { dailyChallengeCardStatusLabel, deriveDailyChallengeCardStatus, formatCountdown } from '../lib/dailyChallengeStatus';
 import type { DailyChallengeState } from '../lib/dailyChallengeTypes';
+import { useCountdown } from '../lib/useCountdown';
 
 /**
  * The dashboard's Daily Challenge entry point (GitHub #336) — same dark-card visual language as
@@ -13,6 +14,7 @@ export function DailyChallengeCard({ state }: { state: DailyChallengeState | nul
   const status = deriveDailyChallengeCardStatus(state);
   const label = dailyChallengeCardStatusLabel(status);
   const canPlay = status.kind === 'available' || status.kind === 'in-progress';
+  const remainingMs = useCountdown(status.kind === 'done' ? status.nextAvailableAt : null);
 
   return (
     <div className="mb-7 flex flex-col gap-5 rounded-2xl bg-[#1b1642] p-6 text-[#F3F1FF] sm:flex-row sm:items-center">
@@ -27,6 +29,11 @@ export function DailyChallengeCard({ state }: { state: DailyChallengeState | nul
         <p className={`mb-4 text-sm font-semibold text-[#A79FC9] ${status.kind === 'loading' ? 'opacity-60' : ''}`}>
           {label}
         </p>
+        {status.kind === 'done' && remainingMs !== null && remainingMs > 0 ? (
+          <p className="mb-4 text-xs font-bold uppercase tracking-wide text-[#A79FC9]">
+            Next attempt in <span className="text-white">{formatCountdown(remainingMs)}</span>
+          </p>
+        ) : null}
         {canPlay ? (
           <Link
             href="/daily-challenge"
