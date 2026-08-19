@@ -1,7 +1,22 @@
 import Link from 'next/link';
 import type { AssembledQuizSummary } from '../lib/assembledQuizClient';
 
-export function CourseQuizzesList({ quizzes, courseId }: { quizzes: AssembledQuizSummary[]; courseId: string }) {
+/**
+ * GitHub #467: the empty state used to send an instructor with no quizzes yet to the Question
+ * Catalogs page first (via a "Choose question catalogs" link into /instructor/quizzes) — the
+ * wrong destination, since composing a quiz is what this course actually needs and catalogs are
+ * only an ingredient of that (CreateQuizModal already lists/filters them). The single entry
+ * point is now the "+" button next to the Quizzes heading, which opens the Create Quiz popup
+ * (components/CreateQuizModal.tsx) pre-scoped to this course, regardless of whether any catalog
+ * is linked yet — the modal itself says "No catalogs of this type exist yet." when none are.
+ */
+export function CourseQuizzesList({
+  quizzes,
+  onAddQuiz,
+}: {
+  quizzes: AssembledQuizSummary[];
+  onAddQuiz: () => void;
+}) {
   const uniqueCatalogs = [
     ...new Map(
       quizzes.flatMap((q) => q.catalogs).map((c) => [c.activityType, c]),
@@ -31,36 +46,25 @@ export function CourseQuizzesList({ quizzes, courseId }: { quizzes: AssembledQui
         </div>
       ) : null}
 
-      <p className="mb-3 text-xs font-extrabold uppercase tracking-wide text-gray-400">
-        Quizzes {quizzes.length > 0 ? `(${quizzes.length})` : ''}
-      </p>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <p className="text-xs font-extrabold uppercase tracking-wide text-gray-400">
+          Quizzes {quizzes.length > 0 ? `(${quizzes.length})` : ''}
+        </p>
+        <button
+          type="button"
+          onClick={onAddQuiz}
+          className="flex flex-none items-center gap-2 rounded-full bg-brand-purple px-5 py-2.5 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark"
+        >
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          Create quiz
+        </button>
+      </div>
 
       {quizzes.length === 0 ? (
         <div className="rounded-brand-lg border border-gray-100 bg-gray-50 p-6 text-center">
-          {hasCatalogs ? (
-            <>
-              <p className="mb-4 text-sm font-semibold text-gray-500">No quizzes assigned to this course yet.</p>
-              <Link
-                href="/instructor/assembled-quizzes"
-                className="inline-flex items-center rounded-full bg-brand-purple px-5 py-2 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark"
-              >
-                Go to Quizzes
-              </Link>
-            </>
-          ) : (
-            <>
-              <p className="mb-1 text-sm font-extrabold text-brand-navy">Start with a question catalog</p>
-              <p className="mb-4 text-sm font-semibold text-gray-500">
-                Link a question catalog to this course before assembling a quiz.
-              </p>
-              <Link
-                href={`/instructor/quizzes?courseId=${encodeURIComponent(courseId)}`}
-                className="inline-flex items-center rounded-full bg-brand-purple px-5 py-2 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark"
-              >
-                Choose question catalogs
-              </Link>
-            </>
-          )}
+          <p className="text-sm font-semibold text-gray-500">No quizzes assigned to this course yet.</p>
         </div>
       ) : (
         <div className="flex flex-col gap-2.5">
