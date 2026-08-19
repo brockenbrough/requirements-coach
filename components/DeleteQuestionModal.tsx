@@ -147,12 +147,14 @@ export function DeleteQuestionModal({
               Already used by students
             </p>
             <p className="mt-1.5 text-sm font-semibold text-brand-ink">
-              {impact.pointsAtRisk > 0 ? (
+              {impact.pointsAlreadyEarned > 0 ? (
                 <>
                   {impact.studentsAffectedCount} student{impact.studentsAffectedCount === 1 ? '' : 's'} already
                   answered this question, earning{' '}
-                  <span className="font-extrabold text-white">{impact.pointsAtRisk} point{impact.pointsAtRisk === 1 ? '' : 's'}</span>{' '}
-                  total. Deleting it will remove those points from their score.
+                  <span className="font-extrabold text-white">
+                    {impact.pointsAlreadyEarned} point{impact.pointsAlreadyEarned === 1 ? '' : 's'}
+                  </span>{' '}
+                  total. They&rsquo;ll keep those points — only the question itself will be removed.
                 </>
               ) : (
                 <>

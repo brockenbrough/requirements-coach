@@ -196,15 +196,17 @@ type UsageSessionRow = {
  * `impact` payload (sessions/students/points affected) so the UI can show a real warning instead
  * of a dead end — see components/DeleteQuestionModal.tsx.
  *
- * Deleting with usage present rewinds the score, not just the row: every session that had this
- * question assigned has its cumulative_score reduced by whatever this question contributed there
- * (0 if it was assigned but never answered) and its max_score reduced by the question's own
- * max_score, so a session's pass ratio stays a fair reflection of the questions it actually has
- * left. A completed session's `passed` is recomputed from the new totals — a session sitting right
- * at the pass line can flip to failed if the deleted question was one of the correct answers, same
- * as it would have if that question had never been askable. `computeStudentScore` (lib/scoreQueries.ts)
- * only ever reads session_log.cumulative_score, so this is the only write needed to make the
- * points actually disappear from the student's score.
+ * Deleting with usage present never takes points away: a student's already-earned
+ * session_log.cumulative_score is never reduced, no matter how the question that earned it is
+ * later deleted — points can only ever go up, never down. max_score may still shrink by the
+ * question's own max_score (the question no longer exists to be worth points), but never below
+ * cumulative_score itself, which keeps cumulative_score <= max_score an invariant and guarantees
+ * `isPassing` can only improve, never regress: shrinking the denominator while holding the
+ * numerator fixed can only raise the ratio. A completed session's `passed` is recomputed from the
+ * new totals on that basis — it can flip failed-to-passed, never the reverse. `computeStudentScore`
+ * (lib/scoreQueries.ts) only ever reads session_log.cumulative_score, so leaving it untouched here
+ * is what keeps a student's total score from ever moving backwards because an instructor deleted
+ * content.
  *
  * daily_challenge_attempt rows referencing this question are cleaned up unconditionally (not
  * gated by ?force=true) since that table isn't part of the usage warning — its own score never
@@ -212,7 +214,7 @@ type UsageSessionRow = {
  * either, so leaving it alone would make the delete fail with an opaque database error for a
  * question that happened to be drawn for someone's daily challenge.
  *
- * Returns 200 with { questionId, pointsRemoved } on success.
+ * Returns 200 with { questionId, pointsPreserved } on success.
  */
 export async function DELETE(request: Request, { params }: { params: { questionId: string } }) {
   const supabase = getSupabaseClient();
@@ -256,7 +258,7 @@ export async function DELETE(request: Request, { params }: { params: { questionI
 
   const sessionIds = [...new Set(((usageRows ?? []) as { session_id: string }[]).map((row) => row.session_id))];
 
-  let pointsRemoved = 0;
+  let pointsPreserved = 0;
 
   if (sessionIds.length > 0) {
     const { data: logs, error: logsError } = await supabase
@@ -270,7 +272,7 @@ export async function DELETE(request: Request, { params }: { params: { questionI
     for (const log of (logs ?? []) as { session_id: string; score: number }[]) {
       scoreBySession.set(log.session_id, (scoreBySession.get(log.session_id) ?? 0) + log.score);
     }
-    pointsRemoved = [...scoreBySession.values()].reduce((sum, value) => sum + value, 0);
+    pointsPreserved = [...scoreBySession.values()].reduce((sum, value) => sum + value, 0);
 
     const { data: sessionRows, error: sessionRowsError } = await supabase
       .from('session_log')
@@ -285,14 +287,14 @@ export async function DELETE(request: Request, { params }: { params: { questionI
       return Response.json(
         {
           error:
-            pointsRemoved > 0
-              ? 'One or more students have already answered this question. Deleting it will remove the points they earned.'
+            pointsPreserved > 0
+              ? 'One or more students have already answered this question. They will keep the points they earned, but the question will be removed.'
               : 'This question is currently assigned to an in-progress session.',
           impact: {
             sessionsCount: sessionIds.length,
             answeredSessionsCount: scoreBySession.size,
             studentsAffectedCount: new Set(affectedSessions.map((row) => row.user_id)).size,
-            pointsAtRisk: pointsRemoved,
+            pointsAlreadyEarned: pointsPreserved,
           },
         },
         { status: 409 },
@@ -300,16 +302,12 @@ export async function DELETE(request: Request, { params }: { params: { questionI
     }
 
     for (const row of affectedSessions) {
-      const scoreToRemove = scoreBySession.get(row.session_id) ?? 0;
-      const newCumulativeScore = Math.max(0, row.cumulative_score - scoreToRemove);
-      const newMaxScore = Math.max(0, row.max_score - questionMaxScore);
+      // cumulative_score is never written here — a student's already-earned points never decrease.
+      const newMaxScore = Math.max(row.cumulative_score, row.max_score - questionMaxScore);
 
-      const updatePayload: Record<string, unknown> = {
-        cumulative_score: newCumulativeScore,
-        max_score: newMaxScore,
-      };
+      const updatePayload: Record<string, unknown> = { max_score: newMaxScore };
       if (row.status === 'completed') {
-        updatePayload.passed = isPassing(newCumulativeScore, newMaxScore);
+        updatePayload.passed = isPassing(row.cumulative_score, newMaxScore);
       }
 
       const { error: sessionUpdateError } = await supabase
@@ -363,5 +361,5 @@ export async function DELETE(request: Request, { params }: { params: { questionI
   const { error: questionDeleteError } = await supabase.from('question').delete().eq('question_id', questionId);
   if (questionDeleteError) return Response.json({ error: questionDeleteError.message }, { status: 500 });
 
-  return Response.json({ questionId, pointsRemoved }, { status: 200 });
+  return Response.json({ questionId, pointsPreserved }, { status: 200 });
 }

@@ -387,12 +387,12 @@ describe('DELETE /api/instructor/questions/[questionId]', () => {
       sessionsCount: 1,
       answeredSessionsCount: 0,
       studentsAffectedCount: 1,
-      pointsAtRisk: 0,
+      pointsAlreadyEarned: 0,
     });
     expect(h.state.deletes).toHaveLength(0);
   });
 
-  it('returns 409 with impact including points at risk when a student already answered it', async () => {
+  it('returns 409 with impact including points already earned when a student already answered it', async () => {
     queueRole('instructor');
     queueOwnedQuestion();
     queueUsage(['s-1', 's-2']);
@@ -406,24 +406,24 @@ describe('DELETE /api/instructor/questions/[questionId]', () => {
     const body = await res.json();
     expect(res.status).toBe(409);
     expect(body.error).toBe(
-      'One or more students have already answered this question. Deleting it will remove the points they earned.',
+      'One or more students have already answered this question. They will keep the points they earned, but the question will be removed.',
     );
     expect(body.impact).toEqual({
       sessionsCount: 2,
       answeredSessionsCount: 1,
       studentsAffectedCount: 2,
-      pointsAtRisk: 20,
+      pointsAlreadyEarned: 20,
     });
     expect(h.state.deletes).toHaveLength(0);
   });
 
-  it('force=true rewinds the affected session score and deletes the question anyway', async () => {
+  it('force=true never reduces the affected session score, but deletes the question anyway', async () => {
     queueRole('instructor');
     queueOwnedQuestion('instructor-1', null); // max_score null -> falls back to DEFAULT_QUESTION_MAX_SCORE (25)
     queueUsage(['s-1']);
     queueAnsweredLogs([{ session_id: 's-1', score: 20 }]);
     queueSessionRows([{ session_id: 's-1', user_id: 'student-1', cumulative_score: 60, max_score: 100, status: 'completed' }]);
-    queue('session_log', { data: null, error: null }); // session_log score-rewind update
+    queue('session_log', { data: null, error: null }); // session_log max_score/passed update
     queue('daily_challenge_attempt', { data: null, error: null }); // daily-challenge cleanup delete
     queue('answered_question_log', { data: null, error: null }); // answered_question_log delete
     queue('session_to_question', { data: null, error: null }); // session_to_question delete
@@ -435,11 +435,13 @@ describe('DELETE /api/instructor/questions/[questionId]', () => {
     const res = await deleteCall('valid-token', 'q-1', true);
     const body = await res.json();
     expect(res.status).toBe(200);
-    expect(body).toEqual({ questionId: 'q-1', pointsRemoved: 20 });
+    expect(body).toEqual({ questionId: 'q-1', pointsPreserved: 20 });
 
     const sessionUpdate = h.state.updates.find((u) => u.table === 'session_log');
-    // 100 - 25 (DEFAULT_QUESTION_MAX_SCORE) = 75 max; 60 - 20 = 40 cumulative; 40 < 75 * 0.75, so passed flips to false.
-    expect(sessionUpdate?.payload).toEqual({ cumulative_score: 40, max_score: 75, passed: false });
+    // cumulative_score (60) is never written. 100 - 25 (DEFAULT_QUESTION_MAX_SCORE) = 75 max,
+    // which is still >= cumulative_score so the floor is a no-op here; 60 >= 75 * 0.75 (56.25),
+    // so passed is now true (it can only improve, never regress, when max_score shrinks).
+    expect(sessionUpdate?.payload).toEqual({ max_score: 75, passed: true });
 
     expect(h.state.deletes).toContainEqual({ table: 'daily_challenge_attempt', column: 'question_id', value: 'q-1' });
     expect(h.state.deletes).toContainEqual({ table: 'answered_question_log', column: 'question_id', value: 'q-1' });
@@ -447,6 +449,31 @@ describe('DELETE /api/instructor/questions/[questionId]', () => {
     expect(h.state.deletes).toContainEqual({ table: 'question_to_answer', column: 'question_id', value: 'q-1' });
     expect(h.state.deletes).toContainEqual({ table: 'answer', column: 'answer_id', value: ['a-1', 'a-2'] });
     expect(h.state.deletes).toContainEqual({ table: 'question', column: 'question_id', value: 'q-1' });
+  });
+
+  it('force=true floors max_score at cumulative_score so a near-perfect score can never exceed 100%', async () => {
+    queueRole('instructor');
+    queueOwnedQuestion('instructor-1', null); // max_score null -> falls back to DEFAULT_QUESTION_MAX_SCORE (25)
+    queueUsage(['s-1']);
+    queueAnsweredLogs([{ session_id: 's-1', score: 25 }]); // the deleted question itself was answered correctly
+    queueSessionRows([{ session_id: 's-1', user_id: 'student-1', cumulative_score: 100, max_score: 100, status: 'completed' }]);
+    queue('session_log', { data: null, error: null }); // session_log max_score/passed update
+    queue('daily_challenge_attempt', { data: null, error: null }); // daily-challenge cleanup delete
+    queue('answered_question_log', { data: null, error: null }); // answered_question_log delete
+    queue('session_to_question', { data: null, error: null }); // session_to_question delete
+    queueExistingLinks([]);
+    queue('question_to_answer', { data: null, error: null }); // unlink delete
+    queue('question', { data: null, error: null }); // question delete
+
+    const res = await deleteCall('valid-token', 'q-1', true);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ questionId: 'q-1', pointsPreserved: 25 });
+
+    const sessionUpdate = h.state.updates.find((u) => u.table === 'session_log');
+    // Without the floor, 100 - 25 = 75 would leave cumulative_score (100) above max_score (75).
+    // The floor keeps max_score at 100, so the session can never read as "over 100%".
+    expect(sessionUpdate?.payload).toEqual({ max_score: 100, passed: true });
   });
 
   it('deletes the question_to_answer links, the answers, and the question, in that order, when unused', async () => {
@@ -462,7 +489,7 @@ describe('DELETE /api/instructor/questions/[questionId]', () => {
     const res = await deleteCall();
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ questionId: 'q-1', pointsRemoved: 0 });
+    expect(body).toEqual({ questionId: 'q-1', pointsPreserved: 0 });
 
     expect(h.state.deletes).toContainEqual({ table: 'daily_challenge_attempt', column: 'question_id', value: 'q-1' });
     expect(h.state.deletes).toContainEqual({ table: 'question_to_answer', column: 'question_id', value: 'q-1' });

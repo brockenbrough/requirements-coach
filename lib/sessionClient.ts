@@ -553,20 +553,20 @@ export type QuestionDeleteImpact = {
   sessionsCount: number;
   answeredSessionsCount: number;
   studentsAffectedCount: number;
-  pointsAtRisk: number;
+  pointsAlreadyEarned: number;
 };
 
 export type DeleteQuestionResult =
-  | { ok: true; data: { questionId: string; pointsRemoved: number } }
+  | { ok: true; data: { questionId: string; pointsPreserved: number } }
   | { ok: false; status: number; error: string; impact?: QuestionDeleteImpact };
 
 /**
  * Removes a question and its answers (DELETE /api/instructor/questions/{id}, GitHub #359). A
  * question already served to a student 409s with an `impact` payload (sessions/students/points
  * affected) rather than a bare message, unless `force` is passed — then the route deletes it
- * anyway and rewinds the points it contributed to every affected session's score. A bespoke fetch
- * rather than the generic `request` helper above, since `impact` on the failure body is specific
- * to this one route.
+ * anyway, but never reduces the points already earned on any affected session (only max_score may
+ * still shrink, and never below what's already been earned). A bespoke fetch rather than the
+ * generic `request` helper above, since `impact` on the failure body is specific to this one route.
  */
 export async function deleteQuestion(token: string, questionId: string, force = false): Promise<DeleteQuestionResult> {
   const url = `/api/instructor/questions/${encodeURIComponent(questionId)}${force ? '?force=true' : ''}`;
@@ -584,7 +584,7 @@ export async function deleteQuestion(token: string, questionId: string, force = 
     return { ok: false, status: response.status, error: body?.error || 'Something went wrong.', impact: body?.impact };
   }
 
-  return { ok: true, data: body as { questionId: string; pointsRemoved: number } };
+  return { ok: true, data: body as { questionId: string; pointsPreserved: number } };
 }
 
 /** One student row as returned by GET /api/instructor/students. */
