@@ -185,6 +185,57 @@ describe('getAccessibleCourseForActivity', () => {
 
     expect(result).toEqual({ link: null, error: { message: 'db down' } });
   });
+
+  // GitHub #583: a caller that already knows which quiz it means (e.g. the ?quiz= a student
+  // followed from a course page card) can disambiguate instead of always taking .limit(1)'s
+  // arbitrary first match — needed once a catalog can be composed into more than one quiz in the
+  // same course.
+  it('filters by assembledQuizId when the caller supplies one', async () => {
+    queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
+    queue('assembled_quiz_catalog', {
+      data: [
+        {
+          assembled_quiz: {
+            assembled_quiz_id: 'quiz-b',
+            course_id: 'course-1',
+            quiz_name: 'Quiz B',
+            description: null,
+            course: { course_name: 'Intro to SE' },
+          },
+          catalog: { quiz_name: 'Sprint 1 Check', description: null },
+        },
+      ],
+      error: null,
+    });
+
+    const result = await getAccessibleCourseForActivity(makeSupabase(), 'CUSTOM_QUIZ', 'student-1', {
+      assembledQuizId: 'quiz-b',
+    });
+
+    expect(result.link?.name).toBe('Quiz B');
+    expect(state.filters).toContainEqual({
+      table: 'assembled_quiz_catalog',
+      column: 'assembled_quiz.assembled_quiz_id',
+      value: 'quiz-b',
+    });
+  });
+
+  it('omits the assembledQuizId filter when none is supplied, reproducing the old first-match behavior', async () => {
+    queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
+    queue('assembled_quiz_catalog', {
+      data: [
+        {
+          assembled_quiz: { assembled_quiz_id: 'quiz-a', course_id: 'course-1', quiz_name: 'Quiz A', description: null, course: null },
+          catalog: { quiz_name: 'Sprint 1 Check', description: null },
+        },
+      ],
+      error: null,
+    });
+
+    await getAccessibleCourseForActivity(makeSupabase(), 'CUSTOM_QUIZ', 'student-1');
+
+    expect(state.filters.some((f) => f.column === 'assembled_quiz.assembled_quiz_id')).toBe(false);
+  });
 });
 
 describe('checkActivityAccess', () => {
@@ -294,12 +345,12 @@ describe('listActivityTypesForCourses', () => {
         {
           activity_type: 'CUSTOM_QUIZ',
           catalog: { quiz_name: 'Sprint 1 Check', description: null },
-          assembled_quiz: { course_id: 'course-1', quiz_name: 'Course 1 Sprint Check', description: null, course: { course_name: 'Intro to SE' } },
+          assembled_quiz: { assembled_quiz_id: 'quiz-1', course_id: 'course-1', quiz_name: 'Course 1 Sprint Check', description: null, course: { course_name: 'Intro to SE' } },
         },
         {
           activity_type: 'CUSTOM_QUIZ',
           catalog: { quiz_name: 'Sprint 1 Check', description: null },
-          assembled_quiz: { course_id: 'course-2', quiz_name: 'Course 2 Sprint Check', description: null, course: { course_name: 'Advanced SE' } },
+          assembled_quiz: { assembled_quiz_id: 'quiz-2', course_id: 'course-2', quiz_name: 'Course 2 Sprint Check', description: null, course: { course_name: 'Advanced SE' } },
         },
       ],
       error: null,
@@ -310,6 +361,55 @@ describe('listActivityTypesForCourses', () => {
     expect(result.activities).toHaveLength(1);
     expect(result.activities?.[0].courseId).toBe('course-1');
     expect(result.activities?.[0].name).toBe('Course 1 Sprint Check');
+  });
+
+  // GitHub #583: two assembled_quiz rows in the SAME course, both linking the SAME catalog — the
+  // bug's exact reproduction. Default behavior (titles/leaderboard callers) must keep collapsing
+  // to one row; only a caller that opts in sees both.
+  it('dedupeByQuiz: false (default) still collapses two quizzes in the same course sharing a catalog to one row', async () => {
+    queue('assembled_quiz_catalog', {
+      data: [
+        {
+          activity_type: 'SHARED_CATALOG',
+          catalog: { quiz_name: 'Shared Catalog', description: null },
+          assembled_quiz: { assembled_quiz_id: 'quiz-a', course_id: 'course-1', quiz_name: 'Quiz A', description: null, course: { course_name: 'Intro to SE' } },
+        },
+        {
+          activity_type: 'SHARED_CATALOG',
+          catalog: { quiz_name: 'Shared Catalog', description: null },
+          assembled_quiz: { assembled_quiz_id: 'quiz-b', course_id: 'course-1', quiz_name: 'Quiz B', description: null, course: { course_name: 'Intro to SE' } },
+        },
+      ],
+      error: null,
+    });
+
+    const result = await listActivityTypesForCourses(makeSupabase(), ['course-1']);
+
+    expect(result.activities).toHaveLength(1);
+  });
+
+  it('dedupeByQuiz: true surfaces both quizzes composed from the same catalog in the same course', async () => {
+    queue('assembled_quiz_catalog', {
+      data: [
+        {
+          activity_type: 'SHARED_CATALOG',
+          catalog: { quiz_name: 'Shared Catalog', description: null },
+          assembled_quiz: { assembled_quiz_id: 'quiz-a', course_id: 'course-1', quiz_name: 'Quiz A', description: null, course: { course_name: 'Intro to SE' } },
+        },
+        {
+          activity_type: 'SHARED_CATALOG',
+          catalog: { quiz_name: 'Shared Catalog', description: null },
+          assembled_quiz: { assembled_quiz_id: 'quiz-b', course_id: 'course-1', quiz_name: 'Quiz B', description: null, course: { course_name: 'Intro to SE' } },
+        },
+      ],
+      error: null,
+    });
+
+    const result = await listActivityTypesForCourses(makeSupabase(), ['course-1'], { dedupeByQuiz: true });
+
+    expect(result.activities).toHaveLength(2);
+    expect(result.activities?.map((a) => a.name).sort()).toEqual(['Quiz A', 'Quiz B']);
+    expect(result.activities?.map((a) => a.assembledQuizId).sort()).toEqual(['quiz-a', 'quiz-b']);
   });
 
   it('surfaces a query error', async () => {

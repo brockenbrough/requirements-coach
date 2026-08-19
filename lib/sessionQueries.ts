@@ -70,19 +70,30 @@ export type QuestionOption = {
   is_correct: boolean;
 };
 
-/** The student's running session for one activity type, or null. */
+/**
+ * The student's running session for one activity type, or null.
+ *
+ * GitHub #583: assembledQuizId, when given, scopes this to a session started through that
+ * specific quiz — two different quizzes composed from the same catalog otherwise collide on
+ * (user_id, activity_type) alone. Omitted -> the exact old behavior (matches any in-progress
+ * session for the catalog, regardless of quiz), for callers that don't know a specific quiz yet.
+ */
 export async function findInProgressSession(
   supabase: SupabaseClient,
   userId: string,
   activityType: string,
+  assembledQuizId?: string,
 ) {
-  const { data, error } = await supabase
+  let query = supabase
     .from('session_log')
     .select(SESSION_COLUMNS)
     .eq('user_id', userId)
     .eq('activity_type', activityType)
-    .eq('status', 'in-progress')
-    .maybeSingle();
+    .eq('status', 'in-progress');
+
+  if (assembledQuizId) query = query.eq('assembled_quiz_id', assembledQuizId);
+
+  const { data, error } = await query.maybeSingle();
 
   return { session: error ? null : data, error };
 }
@@ -95,17 +106,26 @@ export async function findInProgressSession(
  * This is also the ceiling POST /api/sessions's difficultyLevel replay override validates
  * against: a student may start at any level up to and including this one (any already-passed
  * level, or the one they'd auto-advance to anyway), never beyond it.
+ *
+ * GitHub #583: assembledQuizId, when given, makes difficulty progression per-quiz — a student's
+ * level on one quiz no longer has to match their level on a different quiz sharing the same
+ * catalog. highestPassedLevelByType itself is untouched; only the query feeding it is pre-filtered.
  */
 export async function findStartDifficultyLevel(
   supabase: SupabaseClient,
   userId: string,
   activityType: string,
+  assembledQuizId?: string,
 ) {
-  const { data, error } = await supabase
+  let query = supabase
     .from('session_log')
     .select('activity_type, difficulty_level, passed')
     .eq('user_id', userId)
     .eq('activity_type', activityType);
+
+  if (assembledQuizId) query = query.eq('assembled_quiz_id', assembledQuizId);
+
+  const { data, error } = await query;
 
   if (error) return { startLevel: null, error };
 
@@ -313,18 +333,27 @@ type CompletedAttemptRow = {
  * Sorted by ended_at, with started_at as a tiebreaker. Postgres orders DESC as NULLS FIRST,
  * so a completed row without ended_at would otherwise jump to the top — completeSession always
  * sets it, but the secondary key makes the order stable without relying on that.
+ *
+ * GitHub #583: assembledQuizId, when given, scopes the history to attempts made through that
+ * specific quiz — otherwise two quizzes sharing a catalog would show each other's history.
+ * Omitted -> the exact old behavior (every attempt at the catalog, regardless of quiz).
  */
 export async function loadCompletedAttempts(
   supabase: SupabaseClient,
   userId: string,
   activityType: string,
+  assembledQuizId?: string,
 ) {
-  const { data, error } = await supabase
+  let query = supabase
     .from('session_log')
     .select(COMPLETED_ATTEMPT_COLUMNS)
     .eq('user_id', userId)
     .eq('activity_type', activityType)
-    .eq('status', 'completed')
+    .eq('status', 'completed');
+
+  if (assembledQuizId) query = query.eq('assembled_quiz_id', assembledQuizId);
+
+  const { data, error } = await query
     .order('ended_at', { ascending: false })
     .order('started_at', { ascending: false });
 
