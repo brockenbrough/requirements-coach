@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { createQuiz, loadTitleNames, type CreatedQuiz } from '../lib/quizClient';
+import { loadLlmConfig } from '../lib/instructorLlmConfigClient';
 import type { GradingKind } from '../lib/activityTypes';
 import { useModalDismiss } from './useModalDismiss';
 import { RatingPromptModal } from './RatingPromptModal';
@@ -27,7 +28,7 @@ const KIND_OPTIONS: { value: GradingKind; label: string; hint: string }[] = [
   {
     value: 'llm-graded',
     label: 'LLM-Graded Task',
-    hint: 'Students write a free-text answer to a prompt. Scored 1-10 by your configured AI provider.',
+    hint: 'Students write a free-text answer to a question. Scored 1-10 by your configured AI provider.',
   },
 ];
 
@@ -53,6 +54,14 @@ const KIND_OPTIONS: { value: GradingKind; label: string; hint: string }[] = [
  * yet); dismissing it any other way resets gradingKind back to unselected, via
  * RatingPromptModal's own onCancel contract. Once set, a summary line with an Edit button lets the
  * instructor revise it before submitting, using the same popup pre-filled via initialValue.
+ *
+ * GitHub #520: the "LLM-Graded Task" radio is disabled (with an explanatory hint in place of its
+ * usual description) once loadLlmConfig confirms the instructor has no saved provider — without
+ * one, every prompt added to the new catalog would be permanently ungradeable. This is a head
+ * start on the error, not the enforcement itself: POST /api/activities/types checks the same thing
+ * server-side and 400s regardless, since the client-side check can be stale or its own fetch can
+ * fail (in which case hasLlmConfig stays null and the option is left enabled, same as
+ * titleSuggestions' own "swallow the failure" precedent below).
  */
 export function CreateCatalogModal({
   token,
@@ -74,6 +83,11 @@ export function CreateCatalogModal({
   const [error, setError] = useState('');
   const [titles, setTitles] = useState<TitleLadderDraft>(emptyTitleLadderDraft);
   const [titleSuggestions, setTitleSuggestions] = useState<string[]>([]);
+  // GitHub #520: null while unknown (still loading, or the check itself failed) — the radio stays
+  // enabled in that case, same "don't block on a convenience check" precedent as titleSuggestions
+  // below; POST /api/activities/types enforces the real rule regardless, so this is only ever a
+  // head start on the error, never the only thing stopping a misconfigured submission.
+  const [hasLlmConfig, setHasLlmConfig] = useState<boolean | null>(null);
 
   // Suggestions are a convenience, so a failure here is swallowed rather than surfaced: the fields
   // stay perfectly usable as plain text inputs, and blocking catalog creation on them would be a
@@ -82,6 +96,19 @@ export function CreateCatalogModal({
     let cancelled = false;
     loadTitleNames(token).then((result) => {
       if (!cancelled && result.ok) setTitleSuggestions(result.data.titleNames);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  // GitHub #520: an instructor with no LLM provider configured yet would create a catalog whose
+  // prompts can never be graded — disable the option up front rather than let them fill in a
+  // rubric and only find out at submit time.
+  useEffect(() => {
+    let cancelled = false;
+    loadLlmConfig(token).then((result) => {
+      if (!cancelled && result.ok) setHasLlmConfig(result.data.config !== null);
     });
     return () => {
       cancelled = true;
@@ -192,32 +219,40 @@ export function CreateCatalogModal({
               Activity type
             </legend>
             <div className="grid gap-2">
-              {KIND_OPTIONS.map((option) => (
-                <label
-                  key={option.value}
-                  className={`flex cursor-pointer gap-3 rounded-brand-md border px-3.5 py-3 transition ${
-                    gradingKind === option.value
-                      ? 'border-brand-purple bg-brand-purple/10'
-                      : 'border-brand-navy-border bg-brand-navy-2 hover:border-brand-purple/50'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="gradingKind"
-                    value={option.value}
-                    checked={gradingKind === option.value}
-                    onChange={() => {
-                      setGradingKind(option.value);
-                      if (option.value === 'llm-graded') setRatingPromptModalOpen(true);
-                    }}
-                    className="mt-0.5 h-4 w-4 flex-none accent-brand-purple"
-                  />
-                  <span className="block">
-                    <span className="block text-sm font-extrabold text-brand-ink">{option.label}</span>
-                    <span className="mt-0.5 block text-xs font-semibold text-brand-ink-muted">{option.hint}</span>
-                  </span>
-                </label>
-              ))}
+              {KIND_OPTIONS.map((option) => {
+                const disabled = option.value === 'llm-graded' && hasLlmConfig === false;
+                return (
+                  <label
+                    key={option.value}
+                    className={`flex gap-3 rounded-brand-md border px-3.5 py-3 transition ${
+                      disabled
+                        ? 'cursor-not-allowed border-brand-navy-border bg-brand-navy-2 opacity-50'
+                        : gradingKind === option.value
+                          ? 'cursor-pointer border-brand-purple bg-brand-purple/10'
+                          : 'cursor-pointer border-brand-navy-border bg-brand-navy-2 hover:border-brand-purple/50'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="gradingKind"
+                      value={option.value}
+                      checked={gradingKind === option.value}
+                      disabled={disabled}
+                      onChange={() => {
+                        setGradingKind(option.value);
+                        if (option.value === 'llm-graded') setRatingPromptModalOpen(true);
+                      }}
+                      className="mt-0.5 h-4 w-4 flex-none accent-brand-purple"
+                    />
+                    <span className="block">
+                      <span className="block text-sm font-extrabold text-brand-ink">{option.label}</span>
+                      <span className="mt-0.5 block text-xs font-semibold text-brand-ink-muted">
+                        {disabled ? 'Configure an LLM provider in Settings first.' : option.hint}
+                      </span>
+                    </span>
+                  </label>
+                );
+              })}
             </div>
             <p className="mt-1.5 text-xs font-semibold text-brand-ink-muted/70">
               This cannot be changed after the catalog is created.

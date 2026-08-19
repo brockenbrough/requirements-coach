@@ -3,6 +3,7 @@ import { requireInstructor } from '../../../../lib/instructorAuth';
 import { findOwnedCourse } from '../../../../lib/courseQueries';
 import { createAssembledQuiz, listAssembledQuizzesForInstructor } from '../../../../lib/assembledQuizQueries';
 import { isGradingKind } from '../../../../lib/activityTypes';
+import { hasLlmConfig } from '../../../../lib/instructorLlmConfigQueries';
 import { MIN_QUESTIONS_PER_LEVEL, QUESTIONS_PER_SESSION } from '../../../../lib/sessionRules';
 
 function getToken(request: Request): string | null {
@@ -65,6 +66,12 @@ export async function GET(request: Request) {
  *   (activity_type row) whose own grading_kind matches the submitted gradingKind — checked with
  *   one bulk query rather than N.
  *
+ * GitHub #520: an 'llm-graded' quiz also requires the caller to already have a saved
+ * instructor_llm_config row (hasLlmConfig, lib/instructorLlmConfigQueries.ts) — same gate as
+ * POST /api/activities/types and the catalog-duplicate route, applied here too since this is the
+ * other place an instructor can end up owning something that promises LLM grading. Checked right
+ * after gradingKind validation, before any course/catalog lookup. Not checked for 'mcq'.
+ *
  * Returns 201 with { quiz: { id, name, description, courseId, gradingKind, questionsPerLevel } }.
  */
 export async function POST(request: Request) {
@@ -108,6 +115,16 @@ export async function POST(request: Request) {
   }
   if (!isGradingKind(gradingKind)) {
     return Response.json({ error: 'gradingKind must be "mcq" or "llm-graded".' }, { status: 400 });
+  }
+  if (gradingKind === 'llm-graded') {
+    const { hasConfig, error: configError } = await hasLlmConfig(supabase, guard.user_id);
+    if (configError) return Response.json({ error: configError.message }, { status: 500 });
+    if (!hasConfig) {
+      return Response.json(
+        { error: 'Configure an LLM provider in Settings before creating an LLM-graded quiz.' },
+        { status: 400 },
+      );
+    }
   }
   if (
     questionsPerLevel !== undefined &&

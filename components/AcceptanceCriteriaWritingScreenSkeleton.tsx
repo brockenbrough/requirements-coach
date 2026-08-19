@@ -8,7 +8,7 @@
  */
 export function AcceptanceCriteriaWritingScreenSkeleton() {
   return (
-    <div role="status" aria-label="Loading writing prompt">
+    <div role="status" aria-label="Loading writing question">
       <div className="mb-5 rounded-brand-lg border border-brand-navy-border bg-brand-navy p-6">
         <span className="skeleton-block mb-2 block h-3 w-16 rounded-full" />
         <span className="skeleton-block mb-4 block h-4 w-1/2 rounded-full" />

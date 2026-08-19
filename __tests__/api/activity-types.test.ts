@@ -42,6 +42,7 @@ const h = vi.hoisted(() => {
         filters.push({ column, value });
         return builder;
       },
+      limit: () => builder,
       maybeSingle: async () => result,
       then: (onOk: (r: Result) => unknown, onErr?: (e: unknown) => unknown) =>
         Promise.resolve(result).then(onOk, onErr),
@@ -169,6 +170,7 @@ describe('POST /api/activities/types', () => {
 
   it('stores llm-graded when that kind is chosen, and reports it back', async () => {
     queueRole('instructor');
+    queue('instructor_llm_config', { data: { instructor_llm_config_id: 'config-1' }, error: null });
     queue('activity_type', {
       data: activityTypeRow({ grading_kind: 'llm-graded', rating_prompt: 'Score strictness: high.' }),
       error: null,
@@ -214,6 +216,40 @@ describe('POST /api/activities/types', () => {
     expect(body.error).toMatch(/4000/);
   });
 
+  // GitHub #520: without a configured provider, every prompt in the new catalog would be
+  // permanently ungradeable — the check runs before the catalog is ever created.
+  it('returns 400 for an llm-graded catalog when the instructor has no LLM config, without creating the catalog', async () => {
+    queueRole('instructor');
+    queue('instructor_llm_config', { data: null, error: null });
+
+    const res = await POST(makeRequest(validBody({ gradingKind: 'llm-graded', ratingPrompt: 'Be strict.' })));
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/configure an llm provider/i);
+    expect(h.state.tables).not.toContain('activity_type');
+  });
+
+  it('returns 500 when the LLM config existence check fails', async () => {
+    queueRole('instructor');
+    queue('instructor_llm_config', { data: null, error: { message: 'DB down' } });
+
+    const res = await POST(makeRequest(validBody({ gradingKind: 'llm-graded', ratingPrompt: 'Be strict.' })));
+
+    expect(res.status).toBe(500);
+    expect(h.state.tables).not.toContain('activity_type');
+  });
+
+  it('does not check for an LLM config when creating an mcq catalog', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: activityTypeRow(), error: null });
+
+    const res = await POST(makeRequest(validBody({ gradingKind: 'mcq' })));
+
+    expect(res.status).toBe(201);
+    expect(h.state.tables).not.toContain('instructor_llm_config');
+  });
+
   it('does not require ratingPrompt for an mcq catalog, and stores null', async () => {
     queueRole('instructor');
     queue('activity_type', { data: activityTypeRow(), error: null });
@@ -238,6 +274,7 @@ describe('POST /api/activities/types', () => {
 
   it('trims ratingPrompt before storing it for an llm-graded catalog', async () => {
     queueRole('instructor');
+    queue('instructor_llm_config', { data: { instructor_llm_config_id: 'config-1' }, error: null });
     queue('activity_type', {
       data: activityTypeRow({ grading_kind: 'llm-graded', rating_prompt: 'Trimmed rubric.' }),
       error: null,

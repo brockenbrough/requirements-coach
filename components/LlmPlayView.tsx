@@ -284,12 +284,12 @@ export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
   const storyCount = session.submissions.length;
   const summaryMessage =
     storyCount === 0
-      ? 'No prompts were graded in this session.'
+      ? 'No questions were graded in this session.'
       : passedCount === storyCount
-        ? `Great job — all ${storyCount} prompts passed!`
+        ? `Great job — all ${storyCount} questions passed!`
         : passedCount === 0
-          ? `Keep practicing — none of the ${storyCount} prompts passed this time.`
-          : `Nice progress — ${passedCount} of ${storyCount} prompts passed.`;
+          ? `Keep practicing — none of the ${storyCount} questions passed this time.`
+          : `Nice progress — ${passedCount} of ${storyCount} questions passed.`;
   const summaryItems: SessionSummaryItem[] = orderedStories.map((story) => {
     const submission = session.submissions.find((s) => s.userStoryId === story.userStoryId);
     return {

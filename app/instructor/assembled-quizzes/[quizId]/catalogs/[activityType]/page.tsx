@@ -185,7 +185,7 @@ export default function QuizCatalogQuestionsPage({ params }: { params: { quizId:
           <>
             <h1 className="mb-1.5 text-2xl font-extrabold text-brand-navy">{catalogName}</h1>
             <p className="mb-1 text-sm font-semibold text-gray-500">
-              Showing this catalog&apos;s {gradingKind === 'llm-graded' ? 'prompts' : 'questions'} as they apply to{' '}
+              Showing this catalog&apos;s questions as they apply to{' '}
               <span className="font-extrabold text-gray-700">{quiz.name}</span>.
             </p>
             <p className="mb-6 text-xs font-bold uppercase tracking-wide text-brand-purple">
@@ -202,7 +202,7 @@ export default function QuizCatalogQuestionsPage({ params }: { params: { quizId:
               <div className="space-y-4">
                 {userStories.length === 0 ? (
                   <p className="rounded-brand-lg border border-gray-100 bg-gray-50 p-6 text-center text-sm font-semibold text-gray-500">
-                    This catalog has no prompts yet.
+                    This catalog has no questions yet.
                   </p>
                 ) : (
                   userStories.map((story) => (
@@ -227,7 +227,7 @@ export default function QuizCatalogQuestionsPage({ params }: { params: { quizId:
                           type="button"
                           onClick={() => toggleUserStoryExclusion(story)}
                           disabled={pendingId === story.id}
-                          aria-label={story.excludedForQuiz ? 'Include this prompt in the quiz' : 'Exclude this prompt from the quiz'}
+                          aria-label={story.excludedForQuiz ? 'Include this question in the quiz' : 'Exclude this question from the quiz'}
                           title={story.excludedForQuiz ? 'Include in this quiz' : 'Exclude from this quiz'}
                           className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-extrabold transition disabled:cursor-not-allowed disabled:opacity-50 ${
                             story.excludedForQuiz
