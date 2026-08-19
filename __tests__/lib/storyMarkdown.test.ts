@@ -1,29 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deriveStoryTitle, formatStoryAsMarkdown } from '../../lib/storyMarkdown';
-
-describe('deriveStoryTitle', () => {
-  it('extracts the "I want to <goal>" clause as a title', () => {
-    expect(deriveStoryTitle('As a shopper, I want to apply a promo code at checkout, so that a valid discount is reflected in my order total before I pay.')).toBe(
-      'Apply a promo code at checkout',
-    );
-  });
-
-  it('works without a "to" after "I want"', () => {
-    expect(deriveStoryTitle('As a user, I want faster page loads, so that I do not get frustrated.')).toBe('Faster page loads');
-  });
-
-  it('is case-insensitive on "As a"/"I want"', () => {
-    expect(deriveStoryTitle('as a user, i want to log in, so that i can access my account.')).toBe('Log in');
-  });
-
-  it('falls back to a generic label when the story does not follow the template', () => {
-    expect(deriveStoryTitle('Users should be able to reset their password.')).toBe('User Story');
-  });
-
-  it('falls back to a generic label for an empty string', () => {
-    expect(deriveStoryTitle('')).toBe('User Story');
-  });
-});
+import { formatStoryAsMarkdown } from '../../lib/storyMarkdown';
 
 describe('formatStoryAsMarkdown', () => {
   it('formats title and description only when there are no acceptance criteria', () => {

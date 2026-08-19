@@ -13,9 +13,12 @@ import { StoryDisplayCard } from './StoryDisplayCard';
  * to put there yet, since the story itself never has pre-written criteria.
  */
 export function AcceptanceCriteriaFeedbackScreen({
+  activityName,
   userStory,
   result,
 }: {
+  /** The quiz's own name — StoryDisplayCard's Title field, unchanged across every story in it. */
+  activityName: string;
   userStory: UserStoryPrompt;
   result: LlmGradingResult;
 }) {
@@ -26,7 +29,7 @@ export function AcceptanceCriteriaFeedbackScreen({
 
   return (
     <>
-      <StoryDisplayCard description={userStory.description} acceptanceCriteria={result.submittedText} className="mb-5" />
+      <StoryDisplayCard title={activityName} description={userStory.description} acceptanceCriteria={result.submittedText} className="mb-5" />
 
       <div className={`mb-4 rounded-brand-lg p-6 text-center ${passed ? 'bg-gradient-to-br from-brand-teal-dark to-brand-navy-2' : 'bg-gradient-to-br from-brand-purple-dark to-brand-navy-2'}`}>
         <h2 className="text-xl font-extrabold text-white">{passed ? 'Nice work!' : 'Keep refining'}</h2>

@@ -15,10 +15,13 @@ import { StoryDisplayCard } from './StoryDisplayCard';
  * card with the input.
  */
 export function AcceptanceCriteriaWritingScreen({
+  activityName,
   userStory,
   submitting = false,
   onSubmit,
 }: {
+  /** The quiz's own name — StoryDisplayCard's Title field, unchanged across every story in it. */
+  activityName: string;
   userStory: UserStoryPrompt;
   submitting?: boolean;
   onSubmit: (submittedText: string) => void;
@@ -34,7 +37,7 @@ export function AcceptanceCriteriaWritingScreen({
 
   return (
     <>
-      <StoryDisplayCard description={userStory.description} className="mb-5" />
+      <StoryDisplayCard title={activityName} description={userStory.description} className="mb-5" />
 
       <form onSubmit={handleSubmit} className="rounded-brand-lg border border-brand-navy-border bg-brand-navy p-6">
         <label className="mb-1.5 block text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted" htmlFor="acceptance-criteria-input">

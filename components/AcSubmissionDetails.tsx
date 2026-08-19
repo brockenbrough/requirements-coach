@@ -13,7 +13,7 @@ export function AcSubmissionDetails({ submission }: { submission: AcSubmissionRo
 
   return (
     <div className="space-y-4">
-      <StoryDisplayCard description={submission.userStoryDescription} acceptanceCriteria={submission.submittedText} />
+      <StoryDisplayCard title={submission.activityName} description={submission.userStoryDescription} acceptanceCriteria={submission.submittedText} />
 
       <div className="rounded-brand-md border border-brand-navy-border bg-brand-navy p-4">
         <div className="mb-2 flex items-center justify-between gap-2">

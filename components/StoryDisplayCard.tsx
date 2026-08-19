@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { deriveStoryTitle, formatStoryAsMarkdown } from '../lib/storyMarkdown';
+import { formatStoryAsMarkdown } from '../lib/storyMarkdown';
 
 const COPIED_MESSAGE_MS = 2000;
 
@@ -34,12 +34,19 @@ function CheckIcon() {
  *
  * Title/Description/Acceptance Criteria use the same small-caps label style as "Your acceptance
  * criteria" above the textarea, so the card reads as distinct labeled fields rather than prose.
+ *
+ * `title` is the catalog's own name (ActivityDefinition.name), passed in by the caller — not
+ * derived from the story text (see lib/storyMarkdown.ts's docblock for why that used to be
+ * unreliable). It is the same for every story in a given quiz by construction, never a per-story
+ * value, and there is nothing here for an instructor to separately maintain.
  */
 export function StoryDisplayCard({
+  title,
   description,
   acceptanceCriteria,
   className = '',
 }: {
+  title: string;
   description: string;
   /** The student's own written criteria — pass only once a submission exists. */
   acceptanceCriteria?: string;
@@ -48,7 +55,6 @@ export function StoryDisplayCard({
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState('');
 
-  const title = deriveStoryTitle(description);
   const criteriaLines = (acceptanceCriteria ?? '')
     .split('\n')
     .map((line) => line.trim().replace(/^[-*]\s*/, ''))
