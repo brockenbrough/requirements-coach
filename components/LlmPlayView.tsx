@@ -35,12 +35,20 @@ type Outcome = { userStory: LlmSessionStory; result: LlmGradingResult; completed
  * Rendered by app/activities/[slug]/play/page.tsx, which resolves the slug and branches on
  * activity.gradingKind. The MCQ flow lives in that same file, untouched.
  */
-export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
+export function LlmPlayView({
+  activity,
+  courseId,
+}: {
+  activity: ActivityDefinition;
+  /** GitHub #524: the course this activity was reached from, for the "back to course" link below. */
+  courseId: string | null;
+}) {
   const router = useRouter();
   // Also redirects an instructor account away (GitHub #82) — this page is the "activity
   // durchführen" flow itself, exactly what an instructor must not be able to reach.
   const { token, profile, loading, authorized } = useRequireRole('student');
   const { refreshScore } = useUser();
+  const backHref = courseId ? `/courses/${courseId}` : `/activities/${activity.slug}`;
 
   const [session, setSession] = useState<CurrentLlmSessionResult | null>(null);
   const [nextPosition, setNextPosition] = useState<number | null>(null);
@@ -62,9 +70,16 @@ export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
    * answers for an in-progress one), so re-syncing at that point would find session: null and
    * navigate away, discarding the summary before the student has dismissed it.
    */
-  // GitHub #583: appended to every internal navigation back to the detail page, so the quiz
-  // context this session was resolved through survives the round trip.
-  const quizQuery = activity.assembledQuizId ? `?quiz=${encodeURIComponent(activity.assembledQuizId)}` : '';
+  // GitHub #524/#583: appended to every internal navigation back to the detail page, so both the
+  // course context this session was reached through and the specific assembled quiz it was
+  // resolved via survive the round trip.
+  const backQuery = (() => {
+    const params = new URLSearchParams();
+    if (courseId) params.set('course', courseId);
+    if (activity.assembledQuizId) params.set('quiz', activity.assembledQuizId);
+    const query = params.toString();
+    return query ? `?${query}` : '';
+  })();
 
   const syncFromServer = useCallback(async () => {
     if (!token || showSummary) return;
@@ -82,7 +97,7 @@ export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
 
     // Nothing running: the student got here without starting, or already finished.
     if (!result.data.session) {
-      router.replace(`/activities/${activity.slug}${quizQuery}`);
+      router.replace(`/activities/${activity.slug}${backQuery}`);
       return;
     }
 
@@ -96,7 +111,7 @@ export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
     if (result.data.nextPosition === null) {
       setShowSummary(true);
     }
-  }, [token, router, showSummary, activity.activityType, activity.assembledQuizId, activity.slug, quizQuery]);
+  }, [token, router, showSummary, activity.activityType, activity.assembledQuizId, activity.slug, backQuery]);
 
   useEffect(() => {
     void syncFromServer();
@@ -109,7 +124,7 @@ export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
       <AppShell active="activities">
         <div className="mx-auto max-w-xl rounded-brand-lg border border-brand-danger/40 bg-brand-danger/10 p-6 text-sm font-semibold text-brand-danger-light">
           {error}
-          <Link href={`/activities/${activity.slug}`} className="ml-1 underline hover:text-white">
+          <Link href={`/activities/${activity.slug}${backQuery}`} className="ml-1 underline hover:text-white">
             Back to the activity
           </Link>
         </div>
@@ -251,7 +266,7 @@ export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
     // PlayActivityPage's own handleFinishSummary, which already clears this cache. Missing here
     // until now, so the leaderboard kept showing the pre-session rank after an LLM-graded pass.
     clearCachedLeaderboard();
-    router.push(`/activities/${activity.slug}${quizQuery}`);
+    router.push(`/activities/${activity.slug}${backQuery}`);
   }
 
   // Once the session is complete, currentStory legitimately becomes undefined (nextPosition is
@@ -307,14 +322,25 @@ export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
     <AppShell active="activities">
       <div className="mx-auto max-w-xl">
         {!showSummary ? (
-          <div className="mb-5 flex items-center justify-between">
-            <SessionProgressDots statuses={dotStatuses} />
-            <span className="text-sm font-bold text-gray-500">
-              {allStoriesComplete
-                ? `${storyTotal} of ${storyTotal} complete`
-                : `Question ${storyPosition} of ${storyTotal}`}
-            </span>
-          </div>
+          <>
+            {/* GitHub #524: this screen had no way back at all — a student could only abandon
+                the tab or wait to finish. Leaving mid-quiz doesn't abandon the session (it's
+                still resumable server-side), it just navigates away from this screen. */}
+            <Link
+              href={backHref}
+              className="mb-3 inline-flex items-center gap-1 text-sm font-bold text-gray-500 hover:text-[#1B1642]"
+            >
+              {courseId ? '← Back to course' : '← Back to the activity'}
+            </Link>
+            <div className="mb-5 flex items-center justify-between">
+              <SessionProgressDots statuses={dotStatuses} />
+              <span className="text-sm font-bold text-gray-500">
+                {allStoriesComplete
+                  ? `${storyTotal} of ${storyTotal} complete`
+                  : `Question ${storyPosition} of ${storyTotal}`}
+              </span>
+            </div>
+          </>
         ) : null}
 
         {showSummary ? (

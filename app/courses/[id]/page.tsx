@@ -266,6 +266,7 @@ export default function CourseQuizzesPage({ params }: { params: { id: string } }
                       level={level}
                       title={earnedTitle(titleEntry)}
                       status={deriveActivityCardStatus(card.running, card.best, isMastered)}
+                      courseId={params.id}
                     />
                   );
                 })}

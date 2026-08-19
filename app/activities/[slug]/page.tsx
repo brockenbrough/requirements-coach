@@ -94,6 +94,12 @@ function ActivityDetailContent({
   // it doesn't default to level 1 and then jump once this page's own data has loaded; the effect
   // further down still recomputes and corrects it from real data once that arrives.
   const initialLevel = parseLevelParam(searchParams.get('level'));
+  // GitHub #524: the course ActivityCard's link carried this activity's card from — carried
+  // forward into the /play link too, so the quiz play screen's own back link can return to this
+  // same course instead of only "back to My Courses". null for a bookmarked/direct link, which
+  // falls back to that same "My Courses" behavior below.
+  const courseId = searchParams.get('course');
+  const backHref = courseId ? `/courses/${courseId}` : '/activities';
 
   // The server is the only source of "does this activity have a run in progress" (REQ-PL-6.3) —
   // there is no local/mock notion of progress anymore. null means "not checked yet or nothing
@@ -280,10 +286,10 @@ function ActivityDetailContent({
       <AppShell active="activities">
         <div className="mx-auto max-w-lg">
           <Link
-            href="/activities"
+            href={backHref}
             className="mb-5 inline-flex items-center gap-1 text-sm font-bold text-gray-500 hover:text-[#1B1642]"
           >
-            ← Back to My Courses
+            {courseId ? '← Back to course' : '← Back to My Courses'}
           </Link>
           <p className="rounded-2xl border border-brand-danger/40 bg-brand-danger/10 p-6 text-sm font-semibold text-brand-danger-light">
             {activityStatus === 'forbidden'
@@ -295,10 +301,16 @@ function ActivityDetailContent({
     );
   }
 
-  // GitHub #583: appended to every internal navigation into/back from the play page, so the quiz
-  // context a student arrived with survives the round trip instead of silently falling back to
-  // the first-match quiz on return.
-  const quizQuery = activity?.assembledQuizId ? `?quiz=${encodeURIComponent(activity.assembledQuizId)}` : '';
+  // GitHub #524/#583: appended to every internal navigation into/back from the play page, so both
+  // the course context and the specific assembled quiz a student arrived with survive the round
+  // trip instead of silently falling back to "My Courses" or the first-match quiz on return.
+  const playQuery = (() => {
+    const query = new URLSearchParams();
+    if (courseId) query.set('course', courseId);
+    if (activity.assembledQuizId) query.set('quiz', activity.assembledQuizId);
+    const value = query.toString();
+    return value ? `?${value}` : '';
+  })();
 
   // Starts at selectedLevel when one has been picked via LevelReplaySelector, otherwise the
   // server's auto-advance level (undefined difficultyLevel) — Start is the only thing that ever
@@ -320,7 +332,7 @@ function ActivityDetailContent({
       if (profile?.user_id) {
         void loadActivityLog(token, profile.user_id, { forceRefresh: true });
       }
-      router.push(`/activities/${activity!.slug}/play${quizQuery}`);
+      router.push(`/activities/${activity!.slug}/play${playQuery}`);
       return;
     }
 
@@ -339,7 +351,7 @@ function ActivityDetailContent({
   function handleResume() {
     // The whole point of a running session is that it is already in hand server-side —
     // resuming is just navigating there, not another start/resume network round trip.
-    router.push(`/activities/${activity!.slug}/play${quizQuery}`);
+    router.push(`/activities/${activity!.slug}/play${playQuery}`);
   }
 
   async function handleAbandon() {
@@ -397,10 +409,10 @@ function ActivityDetailContent({
     <AppShell active="activities">
       <div className="mx-auto max-w-lg">
         <Link
-          href="/activities"
+          href={backHref}
           className="mb-5 inline-flex items-center gap-1 text-sm font-bold text-gray-500 hover:text-[#1B1642]"
         >
-          ← Back to My Courses
+          {courseId ? '← Back to course' : '← Back to My Courses'}
         </Link>
 
         {isLoading ? (
