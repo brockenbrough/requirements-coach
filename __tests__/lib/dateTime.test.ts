@@ -11,8 +11,8 @@ describe('toInstant', () => {
   });
 
   it('leaves a value that already ends in Z alone', () => {
-    // lib/mockStudentAttempts.ts builds its dates with toISOString(); appending a second
-    // marker would turn them into unparseable garbage.
+    // A value built with toISOString() already carries one; appending a second marker
+    // would turn it into unparseable garbage.
     expect(toInstant('2026-08-02T10:15:00.000Z')).toBe('2026-08-02T10:15:00.000Z');
   });
 

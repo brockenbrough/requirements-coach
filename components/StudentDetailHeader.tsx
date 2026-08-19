@@ -19,8 +19,8 @@ export function StudentDetailHeader({
 
       <div className="mb-7 flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-3.5">
-          {/* No avatarUrl to pass: this page's data is still lib/mockStudentAttempts.ts, which
-              carries no photo — initials only, exactly as before. */}
+          {/* No avatarUrl to pass: GET /api/instructor/students/{id}/detail doesn't return one
+              (it's scoped to attempt history, not profile fields) — initials only. */}
           <Avatar fallbackName={studentName} size="md" />
           <div>
             <div className="flex flex-wrap items-center gap-2.5">
