@@ -1,4 +1,4 @@
-# Requirements Coach Platform
+# Training Ground Platform
 
 ## Purpose
 
@@ -204,7 +204,7 @@ As discussed in prior requirements, the user is presented with a question and po
 
 # Gamification Elements
 
-The Requirements Coach platform incorporates gamification elements to increase student engagement and provide a sense of progression and achievement. The goal is not to make the application feel like a game, but to give students clear feedback on their growth, motivate them to attempt harder challenges, and reward mastery with recognition that feels meaningful in an academic context.
+The Training Ground platform incorporates gamification elements to increase student engagement and provide a sense of progression and achievement. The goal is not to make the application feel like a game, but to give students clear feedback on their growth, motivate them to attempt harder challenges, and reward mastery with recognition that feels meaningful in an academic context.
 
 ## Cumulative Score
 **REQ-GAM-DL-1**

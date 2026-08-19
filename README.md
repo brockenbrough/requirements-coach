@@ -1,4 +1,4 @@
-# Requirements Coach
+# Training Ground
 
 A gamified practice app that helps students write and evaluate software requirements, built with Next.js, Tailwind CSS, and Supabase.
 
