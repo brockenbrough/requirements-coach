@@ -207,7 +207,7 @@ export function PromptFormModal({
               ref={firstFieldRef}
               value={storyText}
               onChange={(event) => setStoryText(event.target.value)}
-              rows={5}
+              rows={10}
               placeholder="e.g. As a shopper, I want to save items to a wishlist, so that I can buy them later."
               className="mt-1.5 block w-full resize-y rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none transition focus:border-brand-purple"
             />
