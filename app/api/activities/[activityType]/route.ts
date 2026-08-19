@@ -27,10 +27,16 @@ function getToken(request: Request): string | null {
  * assembled_quiz has no column for) — do not source name/description from it, that's the bug this
  * route used to have.
  *
+ * GitHub #583: an optional ?assembledQuizId= disambiguates which of possibly several assembled
+ * quizzes composing this catalog the caller means (the ?quiz= a student followed from a course
+ * page card) — passed straight through to getAccessibleCourseForActivity, which 403s if it names
+ * a quiz that doesn't actually grant access, the same as an unrecognized one would. Omitted ->
+ * today's first-match fallback, unchanged for a bare/bookmarked link.
+ *
  * - 401 missing/invalid bearer token
  * - 404 activityType matches no catalog
- * - 403 caller has no course granting access to this activity
- * - 200 { activity: { activityType, name, description, gradingKind, courseId, courseName } }
+ * - 403 caller has no course granting access to this activity (or the given assembledQuizId doesn't)
+ * - 200 { activity: { activityType, name, description, gradingKind, courseId, courseName, assembledQuizId } }
  * - 500 Supabase not configured, or a query fails
  */
 export async function GET(request: Request, { params }: { params: { activityType: string } }) {
@@ -44,12 +50,13 @@ export async function GET(request: Request, { params }: { params: { activityType
   if (authError || !user) return Response.json({ error: 'Invalid or expired token.' }, { status: 401 });
 
   const { activityType } = params;
+  const assembledQuizId = new URL(request.url).searchParams.get('assembledQuizId') ?? undefined;
 
   const { quiz, error: quizError } = await getQuizByActivityType(supabase, activityType);
   if (quizError) return Response.json({ error: quizError.message }, { status: 500 });
   if (!quiz) return Response.json({ error: 'Activity not found.' }, { status: 404 });
 
-  const { link, error: linkError } = await getAccessibleCourseForActivity(supabase, activityType, user.id);
+  const { link, error: linkError } = await getAccessibleCourseForActivity(supabase, activityType, user.id, { assembledQuizId });
   if (linkError) return Response.json({ error: linkError.message }, { status: 500 });
   if (!link) return new Response(null, { status: 403 });
 
@@ -65,6 +72,7 @@ export async function GET(request: Request, { params }: { params: { activityType
         gradingKind: quiz.gradingKind,
         courseId: link.courseId,
         courseName: link.courseName,
+        assembledQuizId: link.assembledQuizId,
       },
     },
     { status: 200 },

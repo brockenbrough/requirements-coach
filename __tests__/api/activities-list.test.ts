@@ -95,6 +95,7 @@ describe('GET /api/activities', () => {
           activity_type: 'IDENTIFY_WEAK_USER_STORIES',
           catalog: { quiz_name: 'Identify Weak User Stories', description: null, grading_kind: 'mcq' },
           assembled_quiz: {
+            assembled_quiz_id: 'quiz-1',
             course_id: 'course-1',
             quiz_name: 'Weak Stories — Sprint 2',
             description: 'Sprint 2 edition',
@@ -105,6 +106,7 @@ describe('GET /api/activities', () => {
           activity_type: 'MY_CUSTOM_QUIZ',
           catalog: { quiz_name: 'My Custom Quiz', description: 'A quiz about things', grading_kind: 'llm-graded' },
           assembled_quiz: {
+            assembled_quiz_id: 'quiz-2',
             course_id: 'course-2',
             quiz_name: 'Advanced Practice Set',
             description: 'For the advanced section',
@@ -127,6 +129,7 @@ describe('GET /api/activities', () => {
         gradingKind: 'mcq',
         courseId: 'course-1',
         courseName: 'Software Requirements',
+        assembledQuizId: 'quiz-1',
       },
       {
         activityType: 'MY_CUSTOM_QUIZ',
@@ -135,6 +138,7 @@ describe('GET /api/activities', () => {
         gradingKind: 'llm-graded',
         courseId: 'course-2',
         courseName: 'Advanced SE',
+        assembledQuizId: 'quiz-2',
       },
     ]);
 
@@ -171,6 +175,46 @@ describe('GET /api/activities', () => {
       column: 'assembled_quiz.course_id',
       value: ['course-1'],
     });
+  });
+
+  // GitHub #583: the actual bug — two assembled quizzes built on the same catalog for the same
+  // course used to collapse into a single discovery-list entry, so a student never saw the second.
+  it('surfaces two quizzes composed from the same catalog as separate entries', async () => {
+    queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
+    queue('assembled_quiz_catalog', {
+      data: [
+        {
+          activity_type: 'SHARED_CATALOG',
+          catalog: { quiz_name: 'Shared Catalog', description: null, grading_kind: 'mcq' },
+          assembled_quiz: {
+            assembled_quiz_id: 'quiz-a',
+            course_id: 'course-1',
+            quiz_name: 'Quiz A',
+            description: null,
+            course: { course_name: 'Software Requirements' },
+          },
+        },
+        {
+          activity_type: 'SHARED_CATALOG',
+          catalog: { quiz_name: 'Shared Catalog', description: null, grading_kind: 'mcq' },
+          assembled_quiz: {
+            assembled_quiz_id: 'quiz-b',
+            course_id: 'course-1',
+            quiz_name: 'Quiz B',
+            description: null,
+            course: { course_name: 'Software Requirements' },
+          },
+        },
+      ],
+      error: null,
+    });
+
+    const res = await GET(req());
+    const body = await res.json();
+
+    expect(body.activities).toHaveLength(2);
+    expect(body.activities.map((a: { name: string }) => a.name)).toEqual(['Quiz A', 'Quiz B']);
+    expect(body.activities.map((a: { assembledQuizId: string }) => a.assembledQuizId)).toEqual(['quiz-a', 'quiz-b']);
   });
 
   it('returns 403 with an empty body when ?courseId= is a course the caller is not enrolled in', async () => {
