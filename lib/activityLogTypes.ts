@@ -14,6 +14,16 @@ export type ActivityLogStatus = 'completed' | 'in-progress' | 'abandoned';
  */
 export type ActivityLogEntry = {
   id: string;
+  /**
+   * Which underlying attempt/session this row belongs to, for aggregation (summarizeStudents
+   * below) — not the same thing as `id` when a single attempt can produce more than one row.
+   * Defaults to `id` when absent, which is correct for every row kind except AcSubmissionRow: a
+   * quiz attempt's `id` already *is* its session_id (one row per session), but an AC submission's
+   * `id` is its own submission_id, one of several a single llm-graded session can produce — so
+   * toAcSubmissionRow sets this to the shared session_id instead, letting summarizeStudents count
+   * attempts instead of prompts.
+   */
+  attemptId?: string;
   activityType: ActivityType;
   /** Denormalized display name (e.g. "Identify Weak User Stories") — the row never looks this up itself. */
   activityName: string;
@@ -139,10 +149,16 @@ export function summarizeStudents(
           : Math.round(completed.reduce((sum, entry) => sum + (entry.score / entry.maxScore) * 100, 0) / completed.length);
       const abandonedCount = list.filter((entry) => entry.status === 'abandoned').length;
 
+      // Distinct attemptId (falling back to id — see ActivityLogEntry.attemptId's own comment),
+      // not list.length: several AcSubmissionRow entries can share one attemptId when a single
+      // llm-graded session produced more than one graded prompt, and counting each of those
+      // prompts as its own attempt is exactly the bug this guards against.
+      const attempts = new Set(list.map((entry) => entry.attemptId ?? entry.id)).size;
+
       return {
         studentId,
         studentName: nameById.get(studentId) ?? 'Unknown student',
-        attempts: list.length,
+        attempts,
         averageScore,
         abandonedCount,
         needsAttention: (averageScore !== null && averageScore < LOW_SCORE_THRESHOLD) || abandonedCount >= HIGH_ABANDON_THRESHOLD,
@@ -267,6 +283,12 @@ export function toAcSubmissionRow(submission: InstructorACSubmission): AcSubmiss
     // chance of missing a branch.
     kind: 'ac-submission',
     id: submission.submissionId,
+    // See ActivityLogEntry.attemptId's own comment: several submissions can share one session,
+    // so the roster must count sessions, not submissions. Falls back to the submission's own id
+    // only for a pre-session-wiring row with no sessionId (submission.session_id predates that
+    // column being required), so an old orphaned submission still counts as its own attempt
+    // rather than silently vanishing from the total.
+    attemptId: submission.sessionId ?? submission.submissionId,
     studentId: submission.studentId,
     studentName: submission.studentName,
     // GitHub #379: read off the submission rather than hardcoded — more than one activity can be

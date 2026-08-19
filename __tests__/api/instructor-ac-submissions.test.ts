@@ -99,6 +99,7 @@ function queueSharedCourseAccess(options: { courseId?: string; activityType?: st
 function submissionRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     submission_id: 'submission-1',
+    session_id: 'session-1',
     submitted_text: 'Given a cart with items, when checkout completes, then the order is created.',
     llm_score: 8,
     llm_feedback: 'Good coverage of the happy path.',
@@ -176,6 +177,7 @@ describe('GET /api/instructor/acceptance-criteria/submissions', () => {
     expect(body.submissions).toEqual([
       {
         submissionId: 'submission-1',
+        sessionId: 'session-1',
         studentId: 'student-1',
         studentName: 'Alex Chen',
         userStoryDescription: 'As a shopper, I want to check out.',
@@ -191,6 +193,7 @@ describe('GET /api/instructor/acceptance-criteria/submissions', () => {
       },
       {
         submissionId: 'submission-2',
+        sessionId: 'session-1',
         studentId: 'student-2',
         studentName: 'quiet-owl',
         userStoryDescription: 'As a shopper, I want to check out.',

@@ -129,6 +129,7 @@ describe('toStudentActivitySummary', () => {
 function acSubmission(overrides: Partial<InstructorACSubmission> = {}): InstructorACSubmission {
   return {
     submissionId: 'submission-1',
+    sessionId: 'session-1',
     studentId: 'student-1',
     studentName: 'Ann Attempter',
     userStoryDescription: 'As a shopper, I want to check out.',
@@ -156,6 +157,21 @@ describe('toAcSubmissionRow', () => {
     const row = toAcSubmissionRow(acSubmission({ activityType: 'MY_LLM_CATALOG', quizName: null }));
 
     expect(row.activityName).toBe('MY_LLM_CATALOG');
+  });
+
+  // GitHub bug fix: attemptId must be the shared session, not the submission's own id, so
+  // summarizeStudents can count sessions instead of prompts — see its own test below.
+  it('sets attemptId to the submission’s sessionId, distinct from its own id', () => {
+    const row = toAcSubmissionRow(acSubmission({ submissionId: 'submission-1', sessionId: 'session-1' }));
+
+    expect(row.id).toBe('submission-1');
+    expect(row.attemptId).toBe('session-1');
+  });
+
+  it('falls back to its own id when sessionId is null (a pre-session-wiring row)', () => {
+    const row = toAcSubmissionRow(acSubmission({ submissionId: 'submission-1', sessionId: null }));
+
+    expect(row.attemptId).toBe('submission-1');
   });
 });
 
@@ -249,6 +265,22 @@ describe('summarizeStudents', () => {
     const rows = summarizeStudents([attempt()], [{ studentId: 'student-z', studentName: 'Zoe Newcomer' }]);
 
     expect(rows.map((row) => row.studentId).sort()).toEqual(['student-a', 'student-z']);
+  });
+
+  // GitHub bug fix: the Instructor Dashboard's roster used to show one "attempt" per AC
+  // submission (one per graded prompt) instead of per session — a student who answered 4 prompts
+  // in each of 2 llm-graded sessions showed as 8 attempts, not 2. Rows that share an attemptId
+  // (multiple submissions from the same session) must collapse into a single attempt; rows with
+  // no attemptId (ordinary quiz sessions, one row per session already) are unaffected.
+  it('counts rows that share an attemptId as one attempt, not several', () => {
+    const rows = summarizeStudents([
+      attempt({ id: 'submission-1', attemptId: 'session-1', studentId: 'student-b', studentName: 'Bob Busy' }),
+      attempt({ id: 'submission-2', attemptId: 'session-1', studentId: 'student-b', studentName: 'Bob Busy' }),
+      attempt({ id: 'submission-3', attemptId: 'session-2', studentId: 'student-b', studentName: 'Bob Busy' }),
+    ]);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ studentId: 'student-b', attempts: 2 });
   });
 });
 

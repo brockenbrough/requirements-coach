@@ -12,6 +12,7 @@ function getToken(request: Request): string | null {
 type SubmissionRow = {
   submission_id: string;
   user_id: string;
+  session_id: string | null;
   submitted_text: string;
   llm_score: number | null;
   llm_feedback: string | null;
@@ -49,6 +50,14 @@ function studentDisplayName(student: SubmissionRow['student']): string {
  * (GitHub #500 follow-up) rides the same listCoursesForActivityTypes call — the assembled quiz's
  * own name, not the catalog's, so the combined instructor table's QUIZ column doesn't fall back
  * to the raw activity_type key the way it used to.
+ *
+ * sessionId (submission.session_id) rides along unchanged from the row, not derived — an
+ * llm-graded session draws STORIES_PER_SESSION prompts at once, so one attempt at the activity
+ * produces several submission rows here, not one. lib/activityLogTypes.ts's toAcSubmissionRow
+ * reads this to tell the Instructor Dashboard's roster (summarizeStudents) which submissions
+ * belong to the same underlying attempt, so a student who has answered e.g. 8 prompts across 2
+ * sessions is counted as 2 attempts, not 8 — before sessionId existed here, every submission row
+ * was indistinguishable from a full attempt, and the roster overcounted by exactly that factor.
  *
  * A submission only counts if its catalog is currently reachable via a live
  * assembled_quiz/assembled_quiz_catalog row for a course this instructor owns AND the submitting
@@ -95,7 +104,7 @@ export async function GET(request: Request) {
   let query = supabase
     .from('submission')
     .select(
-      'submission_id, submitted_text, llm_score, llm_feedback, submitted_at, graded_at, student:user!inner(user_id, first_name, last_name, username, role), story:user_story!inner(story_text, difficulty_level, activity_type)',
+      'submission_id, session_id, submitted_text, llm_score, llm_feedback, submitted_at, graded_at, student:user!inner(user_id, first_name, last_name, username, role), story:user_story!inner(story_text, difficulty_level, activity_type)',
     )
     .eq('student.role', 'student')
     .in('story.activity_type', ownedTypes)
@@ -131,6 +140,7 @@ export async function GET(request: Request) {
   const submissions = rows.map((r) => {
     return {
       submissionId: r.submission_id,
+      sessionId: r.session_id,
       studentId: r.student.user_id,
       studentName: studentDisplayName(r.student),
       userStoryDescription: r.story.story_text,
