@@ -202,7 +202,7 @@ export type ActivityCourseRef = { courseId: string; courseName: string };
 
 type ActivityCourseLinkRow = {
   activity_type: string;
-  assembled_quiz: { course_id: string; course: { course_name: string } | null } | null;
+  assembled_quiz: { course_id: string; quiz_name: string; course: { course_name: string } | null } | null;
 };
 
 /**
@@ -223,21 +223,38 @@ type ActivityCourseLinkRow = {
  *
  * activityTypes: [] short-circuits to an empty map without a query, same convention as
  * listActivityTypesForCourses's courseIds: [] handling.
+ *
+ * quizNameByActivityType (GitHub #500 follow-up) rides along on the same query and row set: an
+ * attempt's ACTIVITY/QUIZ column used to show the catalog's raw activity_type key (via
+ * toActivityLogEntry's getActivityByType-else-key fallback, which only knows the three built-in
+ * catalogs) instead of a real name — indistinguishable for two different quizzes composed from
+ * the same catalog. Same "first match wins" convention as listActivityTypesForCourses above for a
+ * catalog linked to more than one quiz — there is no assembled_quiz_id on session_log to say which
+ * one actually granted a given attempt access (see CLAUDE.md's GitHub #476 section for why that's
+ * a hard data-model limit, not a shortcut taken here) — but the common case (one quiz per catalog)
+ * resolves exactly right, and every case beats showing the raw key.
  */
 export async function listCoursesForActivityTypes(
   supabase: SupabaseClient,
   activityTypes: string[],
-): Promise<{ coursesByActivityType: Map<string, ActivityCourseRef[]> | null; error: { message: string } | null }> {
-  if (activityTypes.length === 0) return { coursesByActivityType: new Map(), error: null };
+): Promise<{
+  coursesByActivityType: Map<string, ActivityCourseRef[]> | null;
+  quizNameByActivityType: Map<string, string> | null;
+  error: { message: string } | null;
+}> {
+  if (activityTypes.length === 0) {
+    return { coursesByActivityType: new Map(), quizNameByActivityType: new Map(), error: null };
+  }
 
   const { data, error } = await supabase
     .from('assembled_quiz_catalog')
-    .select('activity_type, assembled_quiz:assembled_quiz_id!inner(course_id, course:course_id(course_name))')
+    .select('activity_type, assembled_quiz:assembled_quiz_id!inner(course_id, quiz_name, course:course_id(course_name))')
     .in('activity_type', activityTypes);
 
-  if (error) return { coursesByActivityType: null, error };
+  if (error) return { coursesByActivityType: null, quizNameByActivityType: null, error };
 
   const coursesByActivityType = new Map<string, ActivityCourseRef[]>();
+  const quizNameByActivityType = new Map<string, string>();
 
   for (const row of (data ?? []) as unknown as ActivityCourseLinkRow[]) {
     if (!row.assembled_quiz) continue;
@@ -248,7 +265,11 @@ export async function listCoursesForActivityTypes(
     const existing = coursesByActivityType.get(row.activity_type) ?? [];
     if (!existing.some((course) => course.courseId === courseId)) existing.push({ courseId, courseName });
     coursesByActivityType.set(row.activity_type, existing);
+
+    if (!quizNameByActivityType.has(row.activity_type)) {
+      quizNameByActivityType.set(row.activity_type, row.assembled_quiz.quiz_name);
+    }
   }
 
-  return { coursesByActivityType, error: null };
+  return { coursesByActivityType, quizNameByActivityType, error: null };
 }

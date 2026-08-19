@@ -44,7 +44,10 @@ function studentDisplayName(student: SubmissionRow['student']): string {
  * does for quiz attempts via session_log.difficulty_level.
  *
  * courses (GitHub #474) is the same per-catalog course lookup GET /api/instructor/activities
- * attaches to quiz attempts — [] means the catalog isn't linked to any course yet.
+ * attaches to quiz attempts — [] means the catalog isn't linked to any course yet. quizName
+ * (GitHub #500 follow-up) rides the same listCoursesForActivityTypes call — the assembled quiz's
+ * own name, not the catalog's, so the combined instructor table's QUIZ column doesn't fall back
+ * to the raw activity_type key the way it used to.
  *
  * An empty list is a 200.
  */
@@ -92,7 +95,7 @@ export async function GET(request: Request) {
   // GitHub #474: same "which course(s) is this catalog linked to" resolution
   // GET /api/instructor/activities uses for quiz attempts, scoped to ownedTypes so this stays one
   // extra round trip regardless of how many submissions there are.
-  const { coursesByActivityType, error: coursesError } = await listCoursesForActivityTypes(supabase, ownedTypes);
+  const { coursesByActivityType, quizNameByActivityType, error: coursesError } = await listCoursesForActivityTypes(supabase, ownedTypes);
   if (coursesError) return Response.json({ error: coursesError.message }, { status: 500 });
 
   const submissions = (data ?? []).map((row) => {
@@ -110,6 +113,7 @@ export async function GET(request: Request) {
       submittedAt: r.submitted_at,
       gradedAt: r.graded_at,
       courses: coursesByActivityType!.get(r.story.activity_type) ?? [],
+      quizName: quizNameByActivityType!.get(r.story.activity_type) ?? null,
     };
   });
 

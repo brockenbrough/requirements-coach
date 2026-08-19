@@ -514,7 +514,7 @@ export async function loadAllStudentActivity(supabase: SupabaseClient, ownedMcqT
 
   if (progressError) return { activities: null, error: progressError };
 
-  const { coursesByActivityType, error: coursesError } = await listCoursesForActivityTypes(supabase, ownedMcqTypes);
+  const { coursesByActivityType, quizNameByActivityType, error: coursesError } = await listCoursesForActivityTypes(supabase, ownedMcqTypes);
   if (coursesError) return { activities: null, error: coursesError };
 
   // The embed is destructured off rather than spread along: it carries role and username, which
@@ -530,6 +530,7 @@ export async function loadAllStudentActivity(supabase: SupabaseClient, ownedMcqT
       studentId: session.user_id,
       studentName: studentDisplayName(student),
       courses: coursesByActivityType!.get(session.activity_type) ?? [],
+      quizName: quizNameByActivityType!.get(session.activity_type) ?? null,
     };
   });
 
@@ -577,7 +578,7 @@ export async function loadStudentActivityForIds(supabase: SupabaseClient, studen
   // Unlike loadAllStudentActivity, this has no pre-known activity_type list to scope the course
   // lookup by — a roster can have attempted anything, not just catalogs linked to the course
   // being exported — so the distinct set is derived from the rows themselves after the fetch.
-  const { coursesByActivityType, error: coursesError } = await listCoursesForActivityTypes(supabase, [
+  const { coursesByActivityType, quizNameByActivityType, error: coursesError } = await listCoursesForActivityTypes(supabase, [
     ...new Set(rows.map((row) => row.activity_type)),
   ]);
   if (coursesError) return { activities: null, error: coursesError };
@@ -593,6 +594,7 @@ export async function loadStudentActivityForIds(supabase: SupabaseClient, studen
       studentId: session.user_id,
       studentName: studentDisplayName(student),
       courses: coursesByActivityType!.get(session.activity_type) ?? [],
+      quizName: quizNameByActivityType!.get(session.activity_type) ?? null,
     };
   });
 

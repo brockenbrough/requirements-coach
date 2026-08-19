@@ -370,6 +370,7 @@ describe('listCoursesForActivityTypes', () => {
     const result = await listCoursesForActivityTypes(makeSupabase(), []);
 
     expect(result.coursesByActivityType).toEqual(new Map());
+    expect(result.quizNameByActivityType).toEqual(new Map());
     expect(state.tables).toEqual([]);
   });
 
@@ -378,7 +379,7 @@ describe('listCoursesForActivityTypes', () => {
       data: [
         {
           activity_type: 'CUSTOM_QUIZ',
-          assembled_quiz: { course_id: 'course-1', course: { course_name: 'Intro to SE' } },
+          assembled_quiz: { course_id: 'course-1', quiz_name: 'Sprint 1 Quiz', course: { course_name: 'Intro to SE' } },
         },
       ],
       error: null,
@@ -387,6 +388,7 @@ describe('listCoursesForActivityTypes', () => {
     const result = await listCoursesForActivityTypes(makeSupabase(), ['CUSTOM_QUIZ']);
 
     expect(result.coursesByActivityType?.get('CUSTOM_QUIZ')).toEqual([{ courseId: 'course-1', courseName: 'Intro to SE' }]);
+    expect(result.quizNameByActivityType?.get('CUSTOM_QUIZ')).toBe('Sprint 1 Quiz');
     expect(state.filters).toContainEqual({ table: 'assembled_quiz_catalog', column: 'activity_type', value: ['CUSTOM_QUIZ'] });
   });
 
@@ -398,11 +400,11 @@ describe('listCoursesForActivityTypes', () => {
       data: [
         {
           activity_type: 'CUSTOM_QUIZ',
-          assembled_quiz: { course_id: 'course-1', course: { course_name: 'Intro to SE' } },
+          assembled_quiz: { course_id: 'course-1', quiz_name: 'Sprint 1 Quiz', course: { course_name: 'Intro to SE' } },
         },
         {
           activity_type: 'CUSTOM_QUIZ',
-          assembled_quiz: { course_id: 'course-2', course: { course_name: 'Advanced SE' } },
+          assembled_quiz: { course_id: 'course-2', quiz_name: 'Sprint 2 Quiz', course: { course_name: 'Advanced SE' } },
         },
       ],
       error: null,
@@ -414,6 +416,10 @@ describe('listCoursesForActivityTypes', () => {
       { courseId: 'course-1', courseName: 'Intro to SE' },
       { courseId: 'course-2', courseName: 'Advanced SE' },
     ]);
+    // quizNameByActivityType, unlike coursesByActivityType, has no way to represent "more than
+    // one" — it's the known, documented limitation (no assembled_quiz_id on session_log to say
+    // which quiz actually granted a given attempt access): first quiz found wins.
+    expect(result.quizNameByActivityType?.get('CUSTOM_QUIZ')).toBe('Sprint 1 Quiz');
   });
 
   it('deduplicates the same course reached through more than one assembled quiz', async () => {
@@ -421,11 +427,11 @@ describe('listCoursesForActivityTypes', () => {
       data: [
         {
           activity_type: 'CUSTOM_QUIZ',
-          assembled_quiz: { course_id: 'course-1', course: { course_name: 'Intro to SE' } },
+          assembled_quiz: { course_id: 'course-1', quiz_name: 'Sprint 1 Quiz', course: { course_name: 'Intro to SE' } },
         },
         {
           activity_type: 'CUSTOM_QUIZ',
-          assembled_quiz: { course_id: 'course-1', course: { course_name: 'Intro to SE' } },
+          assembled_quiz: { course_id: 'course-1', quiz_name: 'Sprint 1 Quiz', course: { course_name: 'Intro to SE' } },
         },
       ],
       error: null,
@@ -443,11 +449,12 @@ describe('listCoursesForActivityTypes', () => {
 
     expect(result.coursesByActivityType?.has('UNLINKED_QUIZ')).toBe(false);
     expect(result.coursesByActivityType?.get('UNLINKED_QUIZ') ?? []).toEqual([]);
+    expect(result.quizNameByActivityType?.has('UNLINKED_QUIZ')).toBe(false);
   });
 
   it('falls back to a placeholder name if the embedded course is missing', async () => {
     queue('assembled_quiz_catalog', {
-      data: [{ activity_type: 'CUSTOM_QUIZ', assembled_quiz: { course_id: 'course-1', course: null } }],
+      data: [{ activity_type: 'CUSTOM_QUIZ', assembled_quiz: { course_id: 'course-1', quiz_name: 'Sprint 1 Quiz', course: null } }],
       error: null,
     });
 
@@ -461,6 +468,6 @@ describe('listCoursesForActivityTypes', () => {
 
     const result = await listCoursesForActivityTypes(makeSupabase(), ['CUSTOM_QUIZ']);
 
-    expect(result).toEqual({ coursesByActivityType: null, error: { message: 'db down' } });
+    expect(result).toEqual({ coursesByActivityType: null, quizNameByActivityType: null, error: { message: 'db down' } });
   });
 });
