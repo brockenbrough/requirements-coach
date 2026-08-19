@@ -243,7 +243,7 @@ export function PromptFormModal({
               disabled={!canSubmit}
               className="rounded-brand-md bg-brand-purple px-5 py-2 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {submitting ? 'Saving…' : mode === 'edit' ? 'Save Changes' : 'Add Prompt'}
+              {submitting ? 'Saving…' : mode === 'edit' ? 'Save Changes' : 'Add Question'}
             </button>
           </div>
         </form>
