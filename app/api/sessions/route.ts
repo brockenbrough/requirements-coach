@@ -130,13 +130,25 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Invalid JSON body.' }, { status: 400 });
   }
 
-  const { activityType, difficultyLevel } = (body ?? {}) as { activityType?: unknown; difficultyLevel?: unknown };
+  const { activityType, difficultyLevel, assembledQuizId } = (body ?? {}) as {
+    activityType?: unknown;
+    difficultyLevel?: unknown;
+    assembledQuizId?: unknown;
+  };
 
   // AC 4: unknown activity type is a client error. Narrows activityType to string for the rest
   // of the function — isActivityType's async check below can no longer double as a type
   // predicate the way the old synchronous version did.
   if (typeof activityType !== 'string') {
     return Response.json({ error: 'Unknown activity type.' }, { status: 400 });
+  }
+
+  // GitHub #583: optional — a client that already knows which quiz it means (the ?quiz= a
+  // student followed from a course page card) disambiguates which of possibly several assembled
+  // quizzes composing this catalog granted access. Omitted -> today's first-match fallback,
+  // unchanged for any caller that doesn't send it yet.
+  if (assembledQuizId !== undefined && typeof assembledQuizId !== 'string') {
+    return Response.json({ error: 'assembledQuizId must be a string.' }, { status: 400 });
   }
 
   // Replay override (optional): a student may ask to start at a specific level instead of the
@@ -167,21 +179,29 @@ export async function POST(request: Request) {
   // one needs the caller's identity. Resolved via the richer link (not the plain
   // checkActivityAccess wrapper) because the draw below needs assembledQuizId to know which
   // quiz's exclusions/hand-picks govern this catalog's pool for this caller.
-  const { link: accessLink, error: accessError } = await getAccessibleCourseForActivity(supabase, activityType, user.id);
+  const { link: accessLink, error: accessError } = await getAccessibleCourseForActivity(supabase, activityType, user.id, {
+    assembledQuizId: assembledQuizId as string | undefined,
+  });
   if (accessError) return Response.json({ error: accessError.message }, { status: 500 });
   if (!accessLink) {
     return Response.json({ error: 'You are not enrolled in a course that offers this activity.' }, { status: 403 });
   }
 
-  const existing = await findInProgressSession(supabase, user.id, activityType);
+  const existing = await findInProgressSession(supabase, user.id, activityType, accessLink.assembledQuizId);
   if (existing.error) return Response.json({ error: existing.error.message }, { status: 500 });
   if (existing.session) return respondWithSession(supabase, existing.session, { created: false });
 
   // The student's next unpassed level for this activity: one past the highest difficulty_level
   // they've passed, capped at MAX_DIFFICULTY_LEVEL. No prior passed session -> level 1. This is
   // also the ceiling a replay override may request — any already-passed level, or this exact
-  // auto-advance level, but never past it.
-  const { startLevel: allowedLevel, error: levelError } = await findStartDifficultyLevel(supabase, user.id, activityType);
+  // auto-advance level, but never past it. GitHub #583: scoped to the granting quiz when known,
+  // so progression is per-quiz rather than shared across every quiz on this catalog.
+  const { startLevel: allowedLevel, error: levelError } = await findStartDifficultyLevel(
+    supabase,
+    user.id,
+    activityType,
+    accessLink.assembledQuizId,
+  );
   if (levelError) return Response.json({ error: levelError.message }, { status: 500 });
 
   let startLevel: number;
@@ -244,12 +264,15 @@ export async function POST(request: Request) {
   const sessionId = crypto.randomUUID();
 
   // AC 2: defaults are set by the server; the client cannot influence score, status or passed.
+  // assembled_quiz_id (GitHub #583) is always accessLink's resolved id, never the raw request
+  // body value — same "server derives it, client only hints" pattern as startLevel above.
   const { data: session, error: insertError } = await supabase
     .from('session_log')
     .insert({
       session_id: sessionId,
       user_id: user.id,
       activity_type: activityType,
+      assembled_quiz_id: accessLink.assembledQuizId,
       difficulty_level: startLevel,
       status: 'in-progress',
       cumulative_score: 0,
@@ -262,7 +285,7 @@ export async function POST(request: Request) {
   if (insertError || !session) {
     // A parallel request won the unique index — return that session instead of failing.
     if (insertError?.code === UNIQUE_VIOLATION) {
-      const raced = await findInProgressSession(supabase, user.id, activityType);
+      const raced = await findInProgressSession(supabase, user.id, activityType, accessLink.assembledQuizId);
       if (raced.session) return respondWithSession(supabase, raced.session, { created: false });
     }
     // session_log.user_id references "user"(user_id): the student is authenticated but has
