@@ -403,9 +403,10 @@ export function AppShell({
         </nav>
 
         <div className="flex gap-2">
-          {/* GitHub #150: role-dependent behavior — instructors open the LLM provider settings
-              modal; students have no settings surface yet, so this stays inert exactly as it
-              already was, rather than opening something that doesn't exist. */}
+          {/* GitHub #150/#500 follow-up: instructors open the LLM provider settings modal here.
+              Students have no settings surface (nothing for this gear to do), so nothing renders
+              for them at all — this used to render an inert, unclickable placeholder span with the
+              same gear icon, which looked like a dead button rather than simply not being one. */}
           {isInstructor ? (
             <button
               type="button"
@@ -420,14 +421,7 @@ export function AppShell({
             >
               <GearIcon />
             </button>
-          ) : (
-            <span
-              className="flex h-11 w-11 cursor-default items-center justify-center rounded-[9px] border border-[#332b6b] bg-[#241f52] text-[#A79FC9]"
-              title="Settings"
-            >
-              <GearIcon />
-            </span>
-          )}
+          ) : null}
           {/* GitHub #318: always-visible alternative to the Profile page's "Show tour again" —
               same startTour() from OnboardingTourProvider, so there is exactly one restart path,
               just two ways to reach it. Visible for both roles, unlike the gear button above,
