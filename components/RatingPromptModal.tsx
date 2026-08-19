@@ -80,7 +80,7 @@ export function RatingPromptModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="rating-prompt-modal-title"
-        className="w-full max-w-md rounded-brand-lg border border-brand-navy-border bg-brand-navy p-7"
+        className="w-full max-w-2xl rounded-brand-lg border border-brand-navy-border bg-brand-navy p-7"
       >
         <div className="mb-5 flex items-start justify-between gap-3">
           <div>
