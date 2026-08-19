@@ -185,6 +185,9 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
         totalQuestions: added?.questionCount ?? 0,
         excludedCount: 0,
         activeCount: added?.questionCount ?? 0,
+        // allCatalogs (GET /api/instructor/quizzes) only ever lists catalogs the caller created —
+        // a built-in catalog (creator_id IS NULL) never appears there to be added from here.
+        isBuiltIn: false,
       },
     ]);
     setSelectedCatalogToAdd('');
@@ -420,13 +423,17 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
                       className="flex flex-wrap items-center justify-between gap-3 rounded-brand-lg border border-gray-100 bg-gray-50 p-4"
                     >
                       <p className="min-w-0 flex-1 font-semibold text-brand-navy">{catalog.name}</p>
-                      <button
-                        type="button"
-                        onClick={() => setTitleLadderTarget(catalog)}
-                        className="flex-none rounded-full border border-gray-300 bg-white px-4 py-1.5 text-xs font-extrabold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple"
-                      >
-                        Edit titles
-                      </button>
+                      {catalog.isBuiltIn ? (
+                        <span className="flex-none text-xs font-bold text-gray-400">Built-in — read-only</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setTitleLadderTarget(catalog)}
+                          className="flex-none rounded-full border border-gray-300 bg-white px-4 py-1.5 text-xs font-extrabold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple"
+                        >
+                          Edit titles
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -454,13 +461,17 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
                           <p className="text-sm font-medium text-gray-400">Using the built-in default rubric.</p>
                         )}
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setRatingPromptTarget(catalog)}
-                        className="flex-none rounded-full border border-gray-300 bg-white px-4 py-1.5 text-xs font-extrabold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple"
-                      >
-                        {catalog.ratingPrompt ? 'Edit rubric' : 'Set rubric'}
-                      </button>
+                      {catalog.isBuiltIn ? (
+                        <span className="flex-none text-xs font-bold text-gray-400">Built-in — read-only</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setRatingPromptTarget(catalog)}
+                          className="flex-none rounded-full border border-gray-300 bg-white px-4 py-1.5 text-xs font-extrabold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple"
+                        >
+                          {catalog.ratingPrompt ? 'Edit rubric' : 'Set rubric'}
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>

@@ -41,6 +41,7 @@ const h = vi.hoisted(() => {
         state.orders.push({ table, column, ascending: opts?.ascending ?? true });
         return builder;
       },
+      limit: () => builder,
       maybeSingle: async () => result,
       then: (onOk: (r: Result) => unknown, onErr?: (e: unknown) => unknown) =>
         Promise.resolve(result).then(onOk, onErr),
@@ -287,6 +288,62 @@ describe('POST /api/instructor/assembled-quizzes', () => {
     queueRole('instructor');
     const res = await POST(postRequest(validBody({ gradingKind: 'essay' })));
     expect(res.status).toBe(400);
+  });
+
+  // GitHub #520: composing an llm-graded quiz without a configured provider would promise grading
+  // that can never actually happen — checked before the course/catalog lookups even run.
+  it('returns 400 for an llm-graded quiz when the instructor has no LLM config, without touching course or catalogs', async () => {
+    queueRole('instructor');
+    queue('instructor_llm_config', { data: null, error: null });
+
+    const res = await POST(
+      postRequest(validBody({ gradingKind: 'llm-graded', catalogActivityTypes: ['WRITE_ACCEPTANCE_CRITERIA'] })),
+    );
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/configure an llm provider/i);
+    expect(h.state.tables).not.toContain('course');
+    expect(h.state.tables).not.toContain('assembled_quiz');
+  });
+
+  it('returns 500 when the LLM config existence check fails', async () => {
+    queueRole('instructor');
+    queue('instructor_llm_config', { data: null, error: { message: 'DB down' } });
+
+    const res = await POST(
+      postRequest(validBody({ gradingKind: 'llm-graded', catalogActivityTypes: ['WRITE_ACCEPTANCE_CRITERIA'] })),
+    );
+
+    expect(res.status).toBe(500);
+  });
+
+  it('does not check for an LLM config when creating an mcq quiz', async () => {
+    queueRole('instructor');
+    queueOwnedCourse();
+    queueValidCatalogs(['IDENTIFY_WEAK_USER_STORIES']);
+    queue('assembled_quiz', { data: null, error: null });
+    queue('assembled_quiz_catalog', { data: null, error: null });
+
+    const res = await POST(postRequest(validBody({ catalogActivityTypes: ['IDENTIFY_WEAK_USER_STORIES'] })));
+
+    expect(res.status).toBe(201);
+    expect(h.state.tables).not.toContain('instructor_llm_config');
+  });
+
+  it('creates an llm-graded quiz once the instructor has a configured provider', async () => {
+    queueRole('instructor');
+    queue('instructor_llm_config', { data: { instructor_llm_config_id: 'config-1' }, error: null });
+    queueOwnedCourse();
+    queueValidCatalogs(['WRITE_ACCEPTANCE_CRITERIA'], 'llm-graded');
+    queue('assembled_quiz', { data: null, error: null });
+    queue('assembled_quiz_catalog', { data: null, error: null });
+
+    const res = await POST(
+      postRequest(validBody({ gradingKind: 'llm-graded', catalogActivityTypes: ['WRITE_ACCEPTANCE_CRITERIA'] })),
+    );
+
+    expect(res.status).toBe(201);
   });
 
   // GitHub #416

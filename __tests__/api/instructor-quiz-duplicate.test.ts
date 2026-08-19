@@ -31,6 +31,7 @@ const h = vi.hoisted(() => {
         if (isDelete) state.deletes.push({ table, column, value });
         return builder;
       },
+      limit: () => builder,
       maybeSingle: async () => result,
       then: (onOk: (r: Result) => unknown, onErr?: (e: unknown) => unknown) =>
         Promise.resolve(result).then(onOk, onErr),
@@ -237,6 +238,7 @@ describe('POST /api/instructor/quizzes/[activityType]/duplicate', () => {
   it('duplicates a built-in llm-graded catalog: new activity_type row plus every user_story, owned by the caller', async () => {
     queueRole('instructor');
     queue('activity_type', { data: quizRow({ activity_type: 'WRITE_ACCEPTANCE_CRITERIA', grading_kind: 'llm-graded' }), error: null });
+    queue('instructor_llm_config', { data: { instructor_llm_config_id: 'config-1' }, error: null });
     queue('activity_type', { data: sourceDetailRow({ grading_kind: 'llm-graded' }), error: null });
     queue('activity_type', { data: null, error: null }); // insert
     queue('user_story', {
@@ -262,6 +264,43 @@ describe('POST /api/instructor/quizzes/[activityType]/duplicate', () => {
     ]);
 
     expect(h.state.tables).not.toContain('question');
+  });
+
+  // GitHub #520: duplicating an llm-graded catalog (most commonly the built-in
+  // WRITE_ACCEPTANCE_CRITERIA example) hands the caller a brand-new catalog they own — its prompts
+  // would be just as permanently ungradeable as a freshly created llm-graded catalog with no
+  // provider configured.
+  it('returns 400 when duplicating an llm-graded catalog and the instructor has no LLM config, without creating anything', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ activity_type: 'WRITE_ACCEPTANCE_CRITERIA', grading_kind: 'llm-graded' }), error: null });
+    queue('instructor_llm_config', { data: null, error: null });
+
+    const res = await postRequest({ name: 'My AC Copy' }, 'WRITE_ACCEPTANCE_CRITERIA');
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/configure an llm provider/i);
+    expect(h.state.inserts).toEqual([]);
+  });
+
+  it('returns 500 when the LLM config existence check fails during duplication', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow({ activity_type: 'WRITE_ACCEPTANCE_CRITERIA', grading_kind: 'llm-graded' }), error: null });
+    queue('instructor_llm_config', { data: null, error: { message: 'DB down' } });
+
+    const res = await postRequest({ name: 'My AC Copy' }, 'WRITE_ACCEPTANCE_CRITERIA');
+    expect(res.status).toBe(500);
+  });
+
+  it('does not check for an LLM config when duplicating an mcq catalog', async () => {
+    queueRole('instructor');
+    queue('activity_type', { data: quizRow(), error: null });
+    queue('activity_type', { data: sourceDetailRow(), error: null });
+    queue('activity_type', { data: null, error: null });
+    queue('question', { data: [], error: null });
+
+    const res = await postRequest({ name: 'My Copy' });
+    expect(res.status).toBe(201);
+    expect(h.state.tables).not.toContain('instructor_llm_config');
   });
 
   it('lets an instructor duplicate their own (non-built-in) catalog too', async () => {

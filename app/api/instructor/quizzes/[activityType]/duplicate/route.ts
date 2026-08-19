@@ -2,6 +2,7 @@ import { getSupabaseClient } from '../../../../../../lib/supabase';
 import { requireInstructor } from '../../../../../../lib/instructorAuth';
 import { deriveActivityTypeKey } from '../../../../../../lib/activityTypes';
 import { duplicateCatalog, getQuizByActivityType } from '../../../../../../lib/activityTypeQueries';
+import { hasLlmConfig } from '../../../../../../lib/instructorLlmConfigQueries';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -23,11 +24,18 @@ function getToken(request: Request): string | null {
  * caller's own 403s here too, so this route can't be used to read a colleague's catalog contents
  * out by guessing its activityType and duplicating it.
  *
+ * GitHub #520: duplicating an 'llm-graded' catalog (most commonly the built-in
+ * WRITE_ACCEPTANCE_CRITERIA example, via its "Duplicate" action) hands the caller a brand-new
+ * catalog they own — same hasLlmConfig gate as POST /api/activities/types, since the copy's
+ * prompts would otherwise be just as permanently ungradeable as a freshly created llm-graded
+ * catalog with no provider configured. Not checked for 'mcq' sources.
+ *
  * - 401 missing/invalid bearer token
  * - 403 caller isn't an instructor, or the source catalog belongs to a different instructor (no
  *   body either way)
  * - 404 source activityType matches no catalog
- * - 400 invalid JSON, missing/blank name, or a name whose derived key is empty/too long
+ * - 400 invalid JSON, missing/blank name, a name whose derived key is empty/too long, or the
+ *   source is 'llm-graded' and the caller has no LLM provider configured
  * - 409 the derived key collides with an existing catalog — pick a different name
  * - 201 { quiz: { activityType, name, description, gradingKind, ratingPrompt, questionCount } }
  * - 500 Supabase not configured, or a query fails
@@ -52,6 +60,17 @@ export async function POST(request: Request, { params }: { params: { activityTyp
   if (sourceError) return Response.json({ error: sourceError.message }, { status: 500 });
   if (!source) return Response.json({ error: 'Catalog not found.' }, { status: 404 });
   if (creatorId !== null && creatorId !== guard.user_id) return new Response(null, { status: 403 });
+
+  if (source.gradingKind === 'llm-graded') {
+    const { hasConfig, error: configError } = await hasLlmConfig(supabase, guard.user_id);
+    if (configError) return Response.json({ error: configError.message }, { status: 500 });
+    if (!hasConfig) {
+      return Response.json(
+        { error: 'Configure an LLM provider in Settings before duplicating an LLM-graded catalog.' },
+        { status: 400 },
+      );
+    }
+  }
 
   let body: unknown;
   try {

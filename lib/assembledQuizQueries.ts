@@ -532,12 +532,19 @@ export type QuizCatalogComposition = {
    *  rows for 'llm-graded'. A catalog only ever fills one pool, same as QuizSummary's own field. */
   gradingKind: GradingKind;
   /** The catalog's own grading rubric (activity_type.rating_prompt) — null for 'mcq', or for an
-   *  'llm-graded' catalog that hasn't set one yet. Read-only here; edited from the catalog's own
-   *  detail page (PATCH /api/instructor/quizzes/{activityType}), not this quiz-composition view. */
+   *  'llm-graded' catalog that hasn't set one yet. Editable from here (PATCH
+   *  /api/instructor/quizzes/{activityType}) when the catalog isn't built-in, and also from the
+   *  catalog's own detail page. */
   ratingPrompt: string | null;
   totalQuestions: number;
   excludedCount: number;
   activeCount: number;
+  /** GitHub #518/#519: true for one of the three seeded example catalogs (creator_id IS NULL) —
+   *  PATCH /api/instructor/quizzes/{activityType} and its /titles sibling both 403 unconditionally
+   *  for a built-in catalog (creatorId !== guard.user_id is always true when creatorId is null), so
+   *  this page must not render "Edit titles"/"Set rubric" for one — same isBuiltIn convention
+   *  app/instructor/quizzes/[activityType]/page.tsx already uses to hide the identical actions. */
+  isBuiltIn: boolean;
 };
 
 export type QuizLevelCoverage = { level: 1 | 2 | 3; available: number; required: number; sufficient: boolean };
@@ -557,7 +564,7 @@ function buildLevelCoverage(
 
 type LinkedCatalogRow = {
   activity_type: string;
-  catalog: { quiz_name: string; description: string | null; grading_kind: string; rating_prompt: string | null } | null;
+  catalog: { quiz_name: string; description: string | null; grading_kind: string; rating_prompt: string | null; creator_id: string | null } | null;
 };
 type PoolQuestionRow = { question_id: string; activity_type: string; difficulty_level: number };
 type PoolUserStoryRow = { user_story_id: string; activity_type: string; difficulty_level: number };
@@ -652,7 +659,7 @@ export async function getQuizComposition(
 ): Promise<GetQuizCompositionResult> {
   const { data: linkRows, error: linkError } = await supabase
     .from('assembled_quiz_catalog')
-    .select('activity_type, catalog:activity_type(quiz_name, description, grading_kind, rating_prompt)')
+    .select('activity_type, catalog:activity_type(quiz_name, description, grading_kind, rating_prompt, creator_id)')
     .eq('assembled_quiz_id', quizId);
 
   if (linkError) return compositionFailure(linkError);
@@ -700,6 +707,7 @@ export async function getQuizComposition(
 
     catalogs = links.map((link) => {
       const gradingKind: GradingKind = link.catalog?.grading_kind === 'llm-graded' ? 'llm-graded' : 'mcq';
+      const isBuiltIn = link.catalog?.creator_id === null;
 
       if (gradingKind === 'llm-graded') {
         const catalogStories = userStories.filter((s) => s.activity_type === link.activity_type);
@@ -714,6 +722,7 @@ export async function getQuizComposition(
           totalQuestions: catalogStories.length,
           excludedCount,
           activeCount: catalogStories.length - excludedCount,
+          isBuiltIn,
         };
       }
 
@@ -729,6 +738,7 @@ export async function getQuizComposition(
         totalQuestions: catalogQuestions.length,
         excludedCount,
         activeCount: catalogQuestions.length - excludedCount,
+        isBuiltIn,
       };
     });
   }

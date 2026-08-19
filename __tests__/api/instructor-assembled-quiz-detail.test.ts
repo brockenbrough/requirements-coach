@@ -136,7 +136,7 @@ describe('GET /api/instructor/assembled-quizzes/[quizId]', () => {
     queue('assembled_quiz', { data: quizRow(), error: null });
     queue('course', { data: { course_name: 'Software Requirements' }, error: null });
     queue('assembled_quiz_catalog', {
-      data: [{ activity_type: 'CATALOG_A', catalog: { quiz_name: 'Catalog A', description: 'About A', rating_prompt: null } }],
+      data: [{ activity_type: 'CATALOG_A', catalog: { quiz_name: 'Catalog A', description: 'About A', rating_prompt: null, creator_id: 'instructor-1' } }],
       error: null,
     });
     queue('question', {
@@ -175,6 +175,7 @@ describe('GET /api/instructor/assembled-quizzes/[quizId]', () => {
         totalQuestions: 5,
         excludedCount: 1,
         activeCount: 4,
+        isBuiltIn: false,
       },
     ]);
 
@@ -182,6 +183,26 @@ describe('GET /api/instructor/assembled-quizzes/[quizId]', () => {
     expect(body.levelCoverage).toContainEqual({ level: 1, available: 3, required: 4, sufficient: false });
     expect(body.levelCoverage).toContainEqual({ level: 2, available: 1, required: 4, sufficient: false });
     expect(body.levelCoverage).toContainEqual({ level: 3, available: 0, required: 4, sufficient: false });
+  });
+
+  // GitHub #518/#519: a catalog whose creator_id is null (one of the three seeded example
+  // catalogs) must be reported as built-in, so the page can hide its "Edit titles"/"Set rubric"
+  // buttons instead of letting the instructor click them and hit an always-403 route.
+  it('marks a catalog with no creator as built-in', async () => {
+    queueRole('instructor');
+    queue('assembled_quiz', { data: quizRow(), error: null });
+    queue('course', { data: { course_name: 'Software Requirements' }, error: null });
+    queue('assembled_quiz_catalog', {
+      data: [{ activity_type: 'WRITE_ACCEPTANCE_CRITERIA', catalog: { quiz_name: 'Write Acceptance Criteria', description: null, rating_prompt: null, creator_id: null } }],
+      error: null,
+    });
+    queue('question', { data: [], error: null });
+    queue('quiz_excluded_question', { data: [], error: null });
+
+    const res = await req();
+    const body = await res.json();
+
+    expect(body.catalogs[0]).toMatchObject({ activityType: 'WRITE_ACCEPTANCE_CRITERIA', isBuiltIn: true });
   });
 
   // GitHub #416: the coverage banner warns against this quiz's own questionsPerLevel, not the
@@ -222,7 +243,13 @@ describe('GET /api/instructor/assembled-quizzes/[quizId]', () => {
       data: [
         {
           activity_type: 'CATALOG_LLM',
-          catalog: { quiz_name: 'Catalog LLM', description: 'About LLM', grading_kind: 'llm-graded', rating_prompt: 'Score strictness: high.' },
+          catalog: {
+            quiz_name: 'Catalog LLM',
+            description: 'About LLM',
+            grading_kind: 'llm-graded',
+            rating_prompt: 'Score strictness: high.',
+            creator_id: 'instructor-1',
+          },
         },
       ],
       error: null,
@@ -251,6 +278,7 @@ describe('GET /api/instructor/assembled-quizzes/[quizId]', () => {
         totalQuestions: 2,
         excludedCount: 0,
         activeCount: 2,
+        isBuiltIn: false,
       },
     ]);
 

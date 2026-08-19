@@ -46,12 +46,16 @@ export type QuizCatalogComposition = {
    *  'llm-graded' (user_story rows). Both kinds support per-quiz exclusion. */
   gradingKind: GradingKind;
   /** The catalog's own grading rubric (activity_type.rating_prompt) — null for 'mcq', or for an
-   *  'llm-graded' catalog that hasn't set one yet. Read-only here; edited from the catalog's own
-   *  detail page (lib/quizClient.ts's updateRatingPrompt), not this quiz-composition view. */
+   *  'llm-graded' catalog that hasn't set one yet. Editable here (lib/quizClient.ts's
+   *  updateRatingPrompt) when the catalog isn't built-in, and also from the catalog's own detail
+   *  page. */
   ratingPrompt: string | null;
   totalQuestions: number;
   excludedCount: number;
   activeCount: number;
+  /** GitHub #518/#519: true for one of the three seeded example catalogs — read-only, since PATCH
+   *  /api/instructor/quizzes/{activityType} and its /titles sibling both reject any write for one. */
+  isBuiltIn: boolean;
 };
 
 export type QuizLevelCoverage = { level: 1 | 2 | 3; available: number; required: number; sufficient: boolean };
