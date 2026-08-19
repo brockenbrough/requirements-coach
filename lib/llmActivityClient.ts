@@ -139,6 +139,12 @@ export function loadCurrentLlmSession(
 
 export type InstructorACSubmission = {
   submissionId: string;
+  /** submission.session_id — which attempt this submission belongs to; a session draws several
+   *  prompts at once, so more than one submission can share the same sessionId. Used to count
+   *  attempts (not submissions) in lib/activityLogTypes.ts's summarizeStudents. Nullable because
+   *  the column itself is (submission.session_id's own schema comment: rows submitted before it
+   *  was wired up have none) — every submission POST .../llm/submissions writes today sets it. */
+  sessionId: string | null;
   studentId: string;
   studentName: string;
   userStoryDescription: string;
