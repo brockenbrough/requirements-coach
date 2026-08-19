@@ -11,9 +11,13 @@ npm run build      # production build
 npm test           # run all tests (vitest)
 npx vitest run __tests__/api/sessions.test.ts              # run a single test file
 npx vitest run __tests__/api/sessions.test.ts -t "resume"  # run tests matching a name
+npm run seed:load-test      # provision 3 courses x 150 students of realistic activity (GitHub #275)
+npm run cleanup:load-test -- --confirm  # undo the above (dry-run without --confirm)
 ```
 
 There is no lint or typecheck script; `npm run build` is the type check.
+
+`scripts/seed-load-test.js`/`cleanup-load-test.js` (+ shared `scripts/loadTestConfig.js`) exist to reproduce class-scale data (REQ-PL-3.4.4: 3 courses, 150 students each) for load-testing the instructor dashboard, leaderboard, and activity log against realistic volume rather than a handful of dev-seeded rows. Both are idempotent, find their own targets deterministically (an `@test.local` email suffix, fixed course codes, derived catalog `activity_type` keys — never a stored "is test data" flag), and are safe to rerun.
 
 ## Environment setup
 
@@ -193,6 +197,8 @@ The invalidation rule differs: score and completed-sessions only change when a s
 `supabase/schema.sql` is the single migration (plain DDL, no `IF NOT EXISTS` — its footer documents the drop/rename paths for re-running). Notable: the profile table is `"user"` (a reserved word — quoted in SQL, plain `.from('user')` in supabase-js) and FKs to `auth.users`; the question-bank tables have **RLS enabled with no policies at all**, so they are unreachable except through a service-role route. Adding a table the client must not read directly should follow the same pattern. `session_log`/`answered_question_log`/`submission`/`"user"` do have own-row policies, but every data route uses the service-role client and bypasses them — the route, not the database, is what enforces scoping. `title_definition` still has no RLS (known gap, noted in the RLS block).
 
 Indexes worth knowing before adding a query: `ix_session_log_user_id` and `ix_session_log_ended_at` (the latter matching `loadAllStudentActivity`'s two-column `ORDER BY` exactly) back the class-wide instructor reads, and `ix_user_role` backs their `role = 'student'` inner join. The partial `uq_session_log_one_active` only covers in-progress rows and can't serve a general scan.
+
+**PostgREST silently truncates unpaged reads at 1000 rows (GitHub #275).** A `.select()`/`.in()` query without `.range()` returns only a prefix once the result set clears PostgREST's default row cap — no `error`, just a short result, so class averages, pass rates, and `needsAttention` go quietly wrong rather than failing loudly. One 150-student course already clears that cap on `session_to_question` alone. `lib/supabasePaging.ts`'s `fetchAllRows` (page with widening `.range()` until a short page returns) and `fetchAllRowsByIds`/`MAX_IN_LIST` (chunk an `.in(...)` id list to ~200 per request, since PostgREST receives it as a GET query string and ~1000 UUIDs risks an HTTP 414) are the fix — `lib/sessionQueries.ts` and `lib/courseScope.ts` route their class-scale reads through these rather than a bare `.in()`. Route any new query expected to scan more than 1000 rows, or filter by more than ~200 ids at once, through the same helpers.
 
 **Timestamps are zone-less.** `started_at`, `ended_at`, `submitted_at`, `graded_at` and `updated_at` are all `timestamp` (not `timestamptz`), so PostgREST returns them without an offset and `new Date()` misreads them as local time. `lib/dateTime.ts`'s `toInstant()` pins them to UTC at the three client boundaries (`toActivityLogEntry`, `loadCompletedAttempts`, `loadInstructorACSubmissions`). Any new query handing a timestamp to the UI must route it through `toInstant` too — the real fix would be changing the column types.
 
