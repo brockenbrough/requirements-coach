@@ -148,6 +148,22 @@ describe('GET /api/daily-challenge', () => {
     expect(body).toEqual({ attempt: null, available: true, question: null });
   });
 
+  // GitHub #525: a soft-deleted catalog's questions must not be eligible for a new draw, even
+  // though deleteCatalog never removes the question row itself.
+  it('reports unavailable when the only eligible question belongs to a soft-deleted catalog', async () => {
+    queue('daily_challenge_attempt', { data: null, error: null });
+    queue('student_course', { data: [{ course_id: 'c-1' }], error: null });
+    queue('course', { data: [{ creator_id: 'instr-1' }], error: null });
+    queue('question', {
+      data: [{ question_id: 'q-1', max_score: 25, catalog: { deleted_at: '2026-08-19T00:00:00.000Z' } }],
+      error: null,
+    });
+
+    const body = await (await GET(req('GET'))).json();
+
+    expect(body).toEqual({ attempt: null, available: false, question: null });
+  });
+
   it('returns the drawn question, undisclosed, for an in-progress attempt', async () => {
     queue('daily_challenge_attempt', { data: baseAttempt, error: null });
     queue('question', { data: questionWithOptions, error: null });

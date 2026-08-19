@@ -14,6 +14,7 @@ import { loadProgressForSessions, type ActivityLogRow } from './sessionQueries';
 import { SESSION_COLUMNS } from './sessionRules';
 import { getEnrolledCourseIds, listOwnedCourseIds, loadEnrolledStudentIdsForCourses } from './courseQueries';
 import { listActivityTypesForCourses, listCoursesForActivityTypes, type ActivityCourseRef } from './activityCourseQueries';
+import { listOwnedActivityTypeSummaries } from './activityTypeQueries';
 import { fetchAllRowsByIds } from './supabasePaging';
 
 export type StudentDetailAttempt = ActivityLogRow & {
@@ -160,10 +161,27 @@ export async function loadStudentDetailForInstructor(
   const { activities: sharedActivities, error: activitiesError } = await listActivityTypesForCourses(supabase, sharedCourseIds);
   if (activitiesError || !sharedActivities) return { status: 'error', error: activitiesError! };
 
-  const sharedActivityTypes = [...new Set(sharedActivities.map((activity) => activity.activityType))];
-  const activityNames = Object.fromEntries(sharedActivities.map((activity) => [activity.activityType, activity.name]));
+  // GitHub #525: listActivityTypesForCourses only ever reflects *current* course linkage, and a
+  // catalog must be unlinked from every quiz before it can be deleted — so relying on it alone
+  // would silently drop a catalog's attempts from this view the moment it's deleted (or simply
+  // unlinked). Unioning in every catalog this instructor owns (listOwnedActivityTypeSummaries,
+  // deliberately never filtered by deleted_at) keeps that history visible, the same "my catalogs'
+  // history never disappears" guarantee GET /api/instructor/activities already gives on the
+  // dashboard. The sharedCourseIds authorization gate above is untouched — this only widens which
+  // activity types' history is shown once that gate is already passed.
+  const { activityTypeSummaries: ownedActivities, error: ownedActivitiesError } = await listOwnedActivityTypeSummaries(supabase, instructorId);
+  if (ownedActivitiesError || !ownedActivities) return { status: 'error', error: ownedActivitiesError! };
 
-  if (sharedActivityTypes.length === 0) {
+  const activityNameMap = new Map<string, string>();
+  for (const activity of ownedActivities) activityNameMap.set(activity.activityType, activity.name);
+  for (const activity of sharedActivities) activityNameMap.set(activity.activityType, activity.name); // currently-linked name wins
+
+  const visibleActivityTypes = [
+    ...new Set([...ownedActivities.map((activity) => activity.activityType), ...sharedActivities.map((activity) => activity.activityType)]),
+  ];
+  const activityNames = Object.fromEntries(activityNameMap);
+
+  if (visibleActivityTypes.length === 0) {
     return { status: 'ok', detail: { studentName, activityNames, attempts: [], classAveragePercent: null } };
   }
 
@@ -171,7 +189,7 @@ export async function loadStudentDetailForInstructor(
     .from('session_log')
     .select(SESSION_COLUMNS)
     .eq('user_id', studentId)
-    .in('activity_type', sharedActivityTypes)
+    .in('activity_type', visibleActivityTypes)
     .order('ended_at', { ascending: false })
     .order('started_at', { ascending: false });
   if (sessionError) return { status: 'error', error: sessionError };
@@ -188,7 +206,7 @@ export async function loadStudentDetailForInstructor(
   ] = await Promise.all([
     loadProgressForSessions(supabase, sessionIds),
     loadQuestionCorrectnessBySession(supabase, sessionIds),
-    listCoursesForActivityTypes(supabase, sharedActivityTypes),
+    listCoursesForActivityTypes(supabase, visibleActivityTypes),
     loadEnrolledStudentIdsForCourses(supabase, sharedCourseIds),
   ]);
   if (progressError) return { status: 'error', error: progressError };
@@ -216,7 +234,7 @@ export async function loadStudentDetailForInstructor(
     .from('session_log')
     .select('cumulative_score, max_score')
     .in('user_id', rosterIds)
-    .in('activity_type', sharedActivityTypes)
+    .in('activity_type', visibleActivityTypes)
     .eq('status', 'completed');
   if (classSessionError) return { status: 'error', error: classSessionError };
 

@@ -184,6 +184,73 @@ describe('GET /api/instructor/students/:studentId/detail', () => {
     expect(body.attempts[0].courses).toEqual([{ courseId: 'course-a', courseName: 'Course A' }]);
   });
 
+  // GitHub #525: a catalog must be unlinked from every course before it can be deleted, so
+  // listActivityTypesForCourses alone would never see it again — this proves the instructor-owned
+  // union (listOwnedActivityTypeSummaries) keeps the student's attempt visible anyway.
+  it('still shows an attempt on a catalog this instructor owns but has since deleted/unlinked from every course', async () => {
+    queueCallerRole('instructor');
+    queueStudent();
+    queue('course', { data: [{ course_id: 'course-a' }], error: null }); // listOwnedCourseIds
+    queue('student_course', { data: [{ course_id: 'course-a' }], error: null }); // getEnrolledCourseIds
+
+    // listActivityTypesForCourses(['course-a']) — nothing currently composed for this course.
+    queue('assembled_quiz_catalog', { data: [], error: null });
+
+    // listOwnedActivityTypeSummaries('instructor-1') — the instructor still owns this catalog
+    // even though it's no longer linked to (or has been soft-deleted from) any course.
+    queue('activity_type', {
+      data: [{ activity_type: 'DELETED_CATALOG', quiz_name: 'Deleted Catalog', grading_kind: 'mcq' }],
+      error: null,
+    });
+
+    queue('session_log', {
+      data: [
+        {
+          session_id: 'session-1',
+          user_id: STUDENT_ID,
+          activity_type: 'DELETED_CATALOG',
+          difficulty_level: 1,
+          started_at: '2026-08-01T10:00:00',
+          ended_at: '2026-08-01T10:10:00',
+          status: 'completed',
+          cumulative_score: 40,
+          max_score: 40,
+          passed: true,
+        },
+      ],
+      error: null,
+    });
+
+    // loadProgressForSessions
+    queue('session_to_question', { data: [], error: null });
+    queue('answered_question_log', { data: [], error: null });
+    queue('session_to_user_story', { data: [], error: null });
+    queue('submission', { data: [], error: null });
+
+    // loadQuestionCorrectnessBySession
+    queue('session_to_question', { data: [], error: null });
+    queue('answered_question_log', { data: [], error: null });
+
+    // listCoursesForActivityTypes(visibleActivityTypes) — the catalog has no course links at all.
+    queue('assembled_quiz_catalog', { data: [], error: null });
+
+    // loadEnrolledStudentIdsForCourses(['course-a'])
+    queue('student_course', { data: [{ user_id: STUDENT_ID }], error: null });
+
+    // class average query
+    queue('session_log', { data: [{ cumulative_score: 40, max_score: 40 }], error: null });
+
+    const response = await GET(req(), PARAMS);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.attempts).toHaveLength(1);
+    expect(body.attempts[0].activity_type).toBe('DELETED_CATALOG');
+    expect(body.activityNames.DELETED_CATALOG).toBe('Deleted Catalog');
+    // No current course link, but the attempt itself still shows.
+    expect(body.attempts[0].courses).toEqual([]);
+  });
+
   it('computes the class average from every completed session in the shared courses, scoped to the shared activity types', async () => {
     queueCallerRole('instructor');
     queueStudent();
