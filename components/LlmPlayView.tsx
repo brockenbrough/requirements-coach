@@ -62,10 +62,14 @@ export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
    * answers for an in-progress one), so re-syncing at that point would find session: null and
    * navigate away, discarding the summary before the student has dismissed it.
    */
+  // GitHub #583: appended to every internal navigation back to the detail page, so the quiz
+  // context this session was resolved through survives the round trip.
+  const quizQuery = activity.assembledQuizId ? `?quiz=${encodeURIComponent(activity.assembledQuizId)}` : '';
+
   const syncFromServer = useCallback(async () => {
     if (!token || showSummary) return;
 
-    const result = await loadCurrentLlmSession(token, activity.activityType);
+    const result = await loadCurrentLlmSession(token, activity.activityType, activity.assembledQuizId ?? undefined);
 
     if (!result.ok) {
       if (result.status === 401) {
@@ -78,7 +82,7 @@ export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
 
     // Nothing running: the student got here without starting, or already finished.
     if (!result.data.session) {
-      router.replace(`/activities/${activity.slug}`);
+      router.replace(`/activities/${activity.slug}${quizQuery}`);
       return;
     }
 
@@ -92,7 +96,7 @@ export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
     if (result.data.nextPosition === null) {
       setShowSummary(true);
     }
-  }, [token, router, showSummary, activity.activityType]);
+  }, [token, router, showSummary, activity.activityType, activity.assembledQuizId, activity.slug, quizQuery]);
 
   useEffect(() => {
     void syncFromServer();
@@ -235,7 +239,10 @@ export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
       // correctly; this brings the LLM-graded flow in line with the same call.
       await Promise.all([
         refreshScore(),
-        loadCompletedAttempts(token, profile.user_id, activity.activityType, { forceRefresh: true }),
+        loadCompletedAttempts(token, profile.user_id, activity.activityType, {
+          forceRefresh: true,
+          assembledQuizId: activity.assembledQuizId ?? undefined,
+        }),
         loadActivityLog(token, profile.user_id, { forceRefresh: true }),
       ]);
     }
@@ -244,7 +251,7 @@ export function LlmPlayView({ activity }: { activity: ActivityDefinition }) {
     // PlayActivityPage's own handleFinishSummary, which already clears this cache. Missing here
     // until now, so the leaderboard kept showing the pre-session rank after an LLM-graded pass.
     clearCachedLeaderboard();
-    router.push(`/activities/${activity.slug}`);
+    router.push(`/activities/${activity.slug}${quizQuery}`);
   }
 
   // Once the session is complete, currentStory legitimately becomes undefined (nextPosition is
