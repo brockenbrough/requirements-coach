@@ -687,16 +687,50 @@ export async function loadEnrolledStudentIdsForCourses(supabase: SupabaseClient,
 }
 
 /**
- * Deletes a course (GitHub #327). One statement, not two: student_course is the only table in
- * the schema with a foreign key to course, and fk_student_course_course carries ON DELETE
- * CASCADE, so every enrollment goes with it inside the same transaction — there is no way to
- * leave an orphaned student_course row behind.
+ * Every (student -> Set<courseId>) currently-enrolled pairing, restricted to the given courses —
+ * the per-student sibling of loadEnrolledStudentIdsForCourses above (which only returns distinct
+ * student ids, with no way to tell *which* of the given courses each one is in). Lets a caller
+ * check whether a specific student is enrolled in a specific one of an instructor's courses, the
+ * same "shared course" pairing lib/studentDetailQueries.ts's loadStudentDetailForInstructor checks
+ * one student at a time, computed here for many students in one round trip — see
+ * lib/sessionQueries.ts's loadAllStudentActivity, the bulk counterpart to that per-student check.
+ * courseIds: [] short-circuits to an empty Map without a query, same convention as
+ * loadEnrolledStudentIdsForCourses.
+ */
+export async function loadEnrolledCourseIdsByStudentForCourses(supabase: SupabaseClient, courseIds: string[]) {
+  if (courseIds.length === 0) return { enrollmentsByStudent: new Map<string, Set<string>>(), error: null };
+
+  const { data, error } = await supabase.from('student_course').select('user_id, course_id').in('course_id', courseIds);
+
+  if (error) return { enrollmentsByStudent: null, error };
+
+  const enrollmentsByStudent = new Map<string, Set<string>>();
+  for (const row of (data ?? []) as { user_id: string; course_id: string }[]) {
+    const set = enrollmentsByStudent.get(row.user_id) ?? new Set<string>();
+    set.add(row.course_id);
+    enrollmentsByStudent.set(row.user_id, set);
+  }
+
+  return { enrollmentsByStudent, error: null };
+}
+
+/**
+ * Deletes a course (GitHub #327). One statement, not two: two tables carry a foreign key to
+ * course, both ON DELETE CASCADE — fk_student_course_course (every enrollment) and
+ * fk_assembled_quiz_course (every assembled quiz composed for this course, which in turn cascades
+ * assembled_quiz_catalog via fk_assembled_quiz_catalog_quiz) — so enrollments and this course's
+ * quiz-composition links both go with it inside the same transaction; there is no way to leave an
+ * orphaned student_course or assembled_quiz row behind.
  *
- * Nothing else is touched, because nothing else *can* be: session_log has no course_id at all
- * (a session belongs to a (user_id, activity_type) pair), and neither does question, whose
- * user_id names its author rather than a course. A student's attempt history, score, title and
+ * The underlying catalogs (activity_type) and session_log are untouched, because neither *can* be
+ * cascaded to: activity_type has no course_id at all (a catalog is reusable across courses via
+ * assembled_quiz_catalog, not owned by one), and session_log has no course_id either (a session
+ * belongs to a (user_id, activity_type) pair). A student's attempt history, score, title and
  * streak therefore survive the deletion of a course they were in — which is what #327's own
- * "keep session rows, only remove enrollment and visibility" recommendation asks for.
+ * "keep session rows, only remove enrollment and visibility" recommendation asks for. This is also
+ * why an old session on a catalog whose only linking course gets deleted here becomes orphaned
+ * (no live assembled_quiz_catalog row reaches it any more, but the session_log row itself
+ * persists forever) — see loadAllStudentActivity's own comment for the read-side consequence.
  *
  * Not idempotent the way unenrollStudent is: callers run findOwnedCourse first, so a second
  * delete of the same course is a 404 there rather than a silent no-op here.
