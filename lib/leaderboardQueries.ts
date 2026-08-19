@@ -51,16 +51,18 @@ type CombinedSessionRow = SessionRow & StreakSessionRow & { user_id: string; pas
 /**
  * Shared tail of both computeCourseLeaderboard and computeGlobalLeaderboard below: given a roster
  * and every completed session for it, reduce each student's points (via pointsFilter, the one
- * thing that differs between the two callers) and streak (always the student's full, unfiltered
- * session set — see computeCourseLeaderboard's own comment on why streak never gets course-
- * scoped), then apply the one ranking rule both leaderboards share: standard competition ranking
- * on points (ties share a rank, the next rank skips: 1, 2, 2, 4), username ascending as the
- * deterministic tiebreaker.
+ * thing that differs between the two callers, plus extraPointsByStudent — points that don't come
+ * from session_log at all, see computeGlobalLeaderboard's Daily Challenge note) and streak (always
+ * the student's full, unfiltered session set — see computeCourseLeaderboard's own comment on why
+ * streak never gets course-scoped), then apply the one ranking rule both leaderboards share:
+ * standard competition ranking on points (ties share a rank, the next rank skips: 1, 2, 2, 4),
+ * username ascending as the deterministic tiebreaker.
  */
 function rankRoster(
   roster: RosterRow[],
   sessionsByStudent: Map<string, CombinedSessionRow[]>,
   pointsFilter: (sessions: CombinedSessionRow[]) => CombinedSessionRow[],
+  extraPointsByStudent: Map<string, number> = new Map(),
 ): LeaderboardRow[] {
   const unranked = roster
     .map((row) => {
@@ -70,7 +72,7 @@ function rankRoster(
         username: row.student.username,
         avatarUrl: row.student.avatar_url,
         title: row.student.selected_title?.title_name ?? null,
-        points: sumBestScores(pointsFilter(sessions)),
+        points: sumBestScores(pointsFilter(sessions)) + (extraPointsByStudent.get(row.user_id) ?? 0),
         streak: computeStreakFromSessions(sessions.filter((session) => session.passed)),
       };
     })
@@ -212,6 +214,14 @@ type GlobalUserRow = {
  * Same roster-then-sessions shape as computeCourseLeaderboard, and the same rankRoster tail — the
  * two can't disagree about what "rank" or "tie" means, only about which points count and who's
  * ranked at all.
+ *
+ * Unlike computeCourseLeaderboard, this also folds in every daily_challenge_attempt.score for the
+ * roster (summed flat, same reasoning as computeStudentScore in lib/scoreQueries.ts — no
+ * (activity_type, difficulty_level) key to dedupe on, and a null score contributes 0) via
+ * rankRoster's extraPointsByStudent param, so "All" agrees with the sidebar score pill about a
+ * student's total. The course leaderboard deliberately does not: Daily Challenge isn't scoped to
+ * any course, so folding it into a course-specific ranking would attribute points to a course the
+ * student didn't earn them in.
  */
 export async function computeGlobalLeaderboard(
   supabase: SupabaseClient,
@@ -252,7 +262,20 @@ export async function computeGlobalLeaderboard(
     sessionsByStudent.set(row.user_id, list);
   }
 
-  const data = rankRoster(roster, sessionsByStudent, (sessions) => sessions);
+  const { data: dailyChallengeData, error: dailyChallengeError } = await supabase
+    .from('daily_challenge_attempt')
+    .select('user_id, score')
+    .in('user_id', studentIds);
+
+  if (dailyChallengeError) return { data: null, error: dailyChallengeError };
+
+  const dailyChallengePointsByStudent = new Map<string, number>();
+  for (const row of (dailyChallengeData ?? []) as { user_id: string; score: number | null }[]) {
+    const current = dailyChallengePointsByStudent.get(row.user_id) ?? 0;
+    dailyChallengePointsByStudent.set(row.user_id, current + (row.score ?? 0));
+  }
+
+  const data = rankRoster(roster, sessionsByStudent, (sessions) => sessions, dailyChallengePointsByStudent);
 
   return { data, error: null };
 }
