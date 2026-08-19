@@ -111,7 +111,7 @@ export function PromptFormModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="prompt-form-title"
-        className="max-h-full w-full max-w-lg overflow-y-auto rounded-brand-lg border border-brand-navy-border bg-brand-navy p-7"
+        className="max-h-full w-full max-w-2xl overflow-y-auto rounded-brand-lg border border-brand-navy-border bg-brand-navy p-7"
       >
         <div className="mb-5 flex items-start justify-between gap-3">
           <div>
