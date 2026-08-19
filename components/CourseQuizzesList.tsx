@@ -9,6 +9,14 @@ import type { AssembledQuizSummary } from '../lib/assembledQuizClient';
  * point is now the "+" button next to the Quizzes heading, which opens the Create Quiz popup
  * (components/CreateQuizModal.tsx) pre-scoped to this course, regardless of whether any catalog
  * is linked yet — the modal itself says "No catalogs of this type exist yet." when none are.
+ *
+ * GitHub #500: this used to also render a standalone "Question Catalogs" list above the Quizzes
+ * section (every distinct catalog across quizzes.flatMap((q) => q.catalogs), deduped by
+ * activityType) — removed as redundant: a catalog a quiz draws from is already named right on
+ * that quiz's own card via quiz.catalogNames below, and catalog management belongs on the
+ * Question Catalogs page (the sidebar nav item), not duplicated here. No separate fetch backed
+ * that list — it was derived from the same `quizzes` prop this component already gets via
+ * loadCourseQuizzes — so removing it drops no API call, just the derived list and its markup.
  */
 export function CourseQuizzesList({
   quizzes,
@@ -17,35 +25,8 @@ export function CourseQuizzesList({
   quizzes: AssembledQuizSummary[];
   onAddQuiz: () => void;
 }) {
-  const uniqueCatalogs = [
-    ...new Map(
-      quizzes.flatMap((q) => q.catalogs).map((c) => [c.activityType, c]),
-    ).values(),
-  ];
-
-  const hasCatalogs = uniqueCatalogs.length > 0;
-
   return (
     <>
-      {hasCatalogs ? (
-        <div className="mb-8">
-          <p className="mb-3 text-xs font-extrabold uppercase tracking-wide text-gray-400">
-            Question Catalogs ({uniqueCatalogs.length})
-          </p>
-          <div className="flex flex-col gap-2.5">
-            {uniqueCatalogs.map((catalog) => (
-              <Link
-                key={catalog.activityType}
-                href={`/instructor/quizzes/${encodeURIComponent(catalog.activityType)}`}
-                className="block rounded-brand-lg border border-gray-100 bg-gray-50 p-4 transition hover:border-brand-purple/40"
-              >
-                <span className="font-extrabold text-brand-navy">{catalog.name}</span>
-              </Link>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
       <div className="mb-3 flex items-center justify-between gap-2">
         <p className="text-xs font-extrabold uppercase tracking-wide text-gray-400">
           Quizzes {quizzes.length > 0 ? `(${quizzes.length})` : ''}
