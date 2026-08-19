@@ -642,8 +642,9 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
             <>
               <span className="block font-bold text-brand-ink">{quiz?.name ?? 'This catalog'}</span>
               <span className="mt-2 block">
-                This permanently deletes every question in this catalog and removes it
-                from any quiz it&apos;s linked to. This can&apos;t be undone.
+                This removes the catalog from Question Catalogs — it can&apos;t be added to a quiz
+                or answered by a student again. Students who already attempted it keep their scores
+                and history. This can&apos;t be undone.
               </span>
             </>
           }
