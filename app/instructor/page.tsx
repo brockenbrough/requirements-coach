@@ -77,7 +77,9 @@ function InstructorDashboardContent() {
 
   const [studentId, setStudentId] = useState<StudentFilterValue>('all');
   const [level, setLevel] = useState<LevelFilterValue>('all');
-  const [courseFilterId, setCourseFilterId] = useState<CourseFilterValue>('all');
+  // Empty until courses load, then auto-set to the first owned course below — there is no "all
+  // courses" state any more (see ownedEntries' own comment for why).
+  const [courseFilterId, setCourseFilterId] = useState<CourseFilterValue>('');
   const [sort, setSort] = useState<InstructorSortOrder>('newest');
   const [page, setPage] = useState(1);
 
@@ -186,6 +188,20 @@ function InstructorDashboardContent() {
     return () => { cancelled = true; };
   }, [token, profile?.user_id]);
 
+  // GET /api/instructor/activities is scoped by which catalogs this instructor created
+  // (creator_id), not which courses they own — a catalog reused by a colleague's assembled quiz
+  // still counts as "mine" there, so every student who took it through the colleague's course
+  // leaked into this dashboard too. courses (loadCourses) is genuinely course-ownership-scoped, so
+  // filtering entries down to only the ones tied to one of *those* course ids closes the gap: an
+  // instructor now only ever sees activity that happened in a course they actually created.
+  // Gated on both being loaded (not just entries) so this doesn't render a false "nothing here" a
+  // moment before courses arrives.
+  const ownedEntries = useMemo(() => {
+    if (entries === null || courses === null) return null;
+    const ownedCourseIds = new Set(courses.map((c) => c.id));
+    return entries.filter((entry) => entry.courses.some((course) => ownedCourseIds.has(course.courseId)));
+  }, [entries, courses]);
+
   // Merges in allStudents so an enrolled student with zero attempts still gets a card here,
   // the same fix app/instructor/students/page.tsx already applies — without this, the dashboard
   // roster silently drops every student who hasn't started an activity yet (GitHub #415).
@@ -198,12 +214,12 @@ function InstructorDashboardContent() {
     [allStudents],
   );
 
-  const roster = useMemo(() => summarizeStudents(entries ?? [], rosterEntries), [entries, rosterEntries]);
+  const roster = useMemo(() => summarizeStudents(ownedEntries ?? [], rosterEntries), [ownedEntries, rosterEntries]);
 
   // Used by ActivityLogTable to resolve a student name for each attempt row.
   const studentNameById = useMemo(
-    () => new Map((entries ?? []).map((entry) => [entry.studentId, entry.studentName])),
-    [entries],
+    () => new Map((ownedEntries ?? []).map((entry) => [entry.studentId, entry.studentName])),
+    [ownedEntries],
   );
 
   const students = useMemo(
@@ -221,13 +237,21 @@ function InstructorDashboardContent() {
     if (studentParam) setStudentId(studentParam);
   }, [searchParams]);
 
+  // No "all courses" state any more (see ownedEntries above) — default the Course filter to the
+  // instructor's own first course once it's loaded, rather than leaving it unset.
+  useEffect(() => {
+    if (courses && courses.length > 0 && !courseFilterId) {
+      setCourseFilterId(courses[0].id);
+    }
+  }, [courses, courseFilterId]);
+
   const filteredSorted = useMemo(() => {
-    const rows = (entries ?? []).filter((entry) => {
+    const rows = (ownedEntries ?? []).filter((entry) => {
       if (studentId !== 'all' && entry.studentId !== studentId) return false;
       if (level !== 'all' && entry.level !== level) return false;
       // A catalog can be linked to more than one course at once (GitHub #474), so "filter to
       // course X" means "X is among this attempt's courses", not "X is its only course".
-      if (courseFilterId !== 'all' && !entry.courses.some((course) => course.courseId === courseFilterId)) return false;
+      if (courseFilterId && !entry.courses.some((course) => course.courseId === courseFilterId)) return false;
       return true;
     });
 
@@ -237,7 +261,7 @@ function InstructorDashboardContent() {
       if (sort === 'highest') return b.score - a.score;
       return new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime();
     });
-  }, [entries, studentId, level, courseFilterId, sort]);
+  }, [ownedEntries, studentId, level, courseFilterId, sort]);
 
   const totalPages = Math.max(1, Math.ceil(filteredSorted.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -267,7 +291,7 @@ function InstructorDashboardContent() {
           <h1 className="text-2xl font-extrabold text-brand-navy">Instructor Dashboard</h1>
           <button
             onClick={handleRefresh}
-            disabled={refreshing || entries === null}
+            disabled={refreshing || ownedEntries === null}
             className="rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-brand-purple hover:text-brand-purple disabled:opacity-40"
           >
             {refreshing ? 'Refreshing…' : 'Refresh'}
@@ -308,9 +332,9 @@ function InstructorDashboardContent() {
           <p className="mb-6 rounded-brand-lg border border-brand-danger/40 bg-brand-danger/10 p-4 text-sm font-semibold text-brand-danger-light">
             {error}
           </p>
-        ) : entries === null ? (
+        ) : ownedEntries === null ? (
           <InstructorDashboardSkeleton />
-        ) : entries.length === 0 && ownedActivityTypes.length === 0 ? (
+        ) : ownedEntries.length === 0 && ownedActivityTypes.length === 0 ? (
           // Both zero attempts AND zero owned catalogs — genuinely nothing to show. An instructor
           // who owns a catalog but has no attempts yet does NOT hit this branch: they still get a
           // real stat card (with '—' placeholders, GitHub #171 follow-up) rather than being told
