@@ -59,24 +59,37 @@ type GrantingQuizRow = {
  * Two queries (enrolled course ids, then the quiz-catalog join filtered to them) rather than one
  * three-way join, matching the shape getCourseForActivityType + isEnrolledInAnyCourse used to
  * have as two separate calls — no round-trip regression, just a different second query.
+ *
+ * GitHub #583: options.assembledQuizId, when given, disambiguates which of possibly several
+ * granting quizzes was meant — two different assembled_quiz rows can compose the same catalog
+ * within the same course, in which case the plain `.limit(1)` below would otherwise pick an
+ * arbitrary one. Omitting it reproduces the exact old "first match" behavior, so every existing
+ * caller (checkActivityAccess, and any call site that doesn't yet know about a specific quiz) is
+ * unaffected.
  */
 export async function getAccessibleCourseForActivity(
   supabase: SupabaseClient,
   activityType: string,
   userId: string,
+  options: { assembledQuizId?: string } = {},
 ): Promise<{ link: ActivityCourseLink | null; error: { message: string } | null }> {
   const { courseIds, error: courseIdsError } = await getEnrolledCourseIds(supabase, userId);
   if (courseIdsError || !courseIds) return { link: null, error: courseIdsError };
   if (courseIds.length === 0) return { link: null, error: null };
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('assembled_quiz_catalog')
     .select(
       'assembled_quiz:assembled_quiz_id!inner(assembled_quiz_id, course_id, quiz_name, description, questions_per_level, course:course_id(course_name)), catalog:activity_type(quiz_name, description)',
     )
     .eq('activity_type', activityType)
-    .in('assembled_quiz.course_id', courseIds)
-    .limit(1);
+    .in('assembled_quiz.course_id', courseIds);
+
+  if (options.assembledQuizId) {
+    query = query.eq('assembled_quiz.assembled_quiz_id', options.assembledQuizId);
+  }
+
+  const { data, error } = await query.limit(1);
 
   if (error) return { link: null, error };
 
@@ -130,12 +143,16 @@ export type CourseActivitySummary = {
   gradingKind: GradingKind;
   courseId: string;
   courseName: string;
+  /** GitHub #583: which assembled_quiz this entry came from — lets a caller that opts into
+   *  dedupeByQuiz (below) tell two quizzes composed from the same catalog apart. */
+  assembledQuizId: string;
 };
 
 type DiscoveryRow = {
   activity_type: string;
   catalog: { quiz_name: string; description: string | null; grading_kind: string } | null;
   assembled_quiz: {
+    assembled_quiz_id: string;
     course_id: string;
     quiz_name: string;
     description: string | null;
@@ -149,11 +166,16 @@ type DiscoveryRow = {
  * short-circuits to an empty list without a query, matching isEnrolledInAnyCourse's own
  * empty-input handling.
  *
- * A catalog composed into more than one quiz across the given courses appears only once here,
- * keyed by activityType — the caller's discovery list shows one card per catalog, not one per
- * quiz that happens to include it, so the first quiz/course found for a given catalog is what's
- * used to fill in every display field (courseId/courseName/name/description; access itself
- * doesn't depend on which one is picked, only that at least one exists).
+ * By default, a catalog composed into more than one quiz across the given courses appears only
+ * once here, keyed by activityType — one card per catalog, not one per quiz that happens to
+ * include it, so the first quiz/course found for a given catalog is what's used to fill in every
+ * display field. GitHub #583's options.dedupeByQuiz opts into keying by (activityType,
+ * assembledQuizId) instead, so two quizzes composed from the same catalog surface as two distinct
+ * entries — but this must stay opt-in, not the default: lib/titleQueries.ts's
+ * loadAvailableTitleLadders is also a caller, and mastery titles are catalog-scoped by design
+ * (confirmed decision) — it needs exactly one entry per catalog even when that catalog reaches a
+ * course through more than one quiz, or the mastery grid would show duplicate title-ladder rows
+ * for an already-working, unrelated scenario.
  *
  * name/description prefer the assembled quiz's own quiz_name/description — what the instructor
  * actually called it for this course — over the underlying catalog's, falling back to the
@@ -164,13 +186,14 @@ type DiscoveryRow = {
 export async function listActivityTypesForCourses(
   supabase: SupabaseClient,
   courseIds: string[],
+  options: { dedupeByQuiz?: boolean } = {},
 ): Promise<{ activities: CourseActivitySummary[] | null; error: { message: string } | null }> {
   if (courseIds.length === 0) return { activities: [], error: null };
 
   const { data, error } = await supabase
     .from('assembled_quiz_catalog')
     .select(
-      'activity_type, catalog:activity_type(quiz_name, description, grading_kind), assembled_quiz:assembled_quiz_id!inner(course_id, quiz_name, description, course:course_id(course_name))',
+      'activity_type, catalog:activity_type(quiz_name, description, grading_kind), assembled_quiz:assembled_quiz_id!inner(assembled_quiz_id, course_id, quiz_name, description, course:course_id(course_name))',
     )
     .in('assembled_quiz.course_id', courseIds);
 
@@ -180,8 +203,10 @@ export async function listActivityTypesForCourses(
   const activities: CourseActivitySummary[] = [];
 
   for (const row of (data ?? []) as unknown as DiscoveryRow[]) {
-    if (!row.assembled_quiz || seen.has(row.activity_type)) continue;
-    seen.add(row.activity_type);
+    if (!row.assembled_quiz) continue;
+    const dedupeKey = options.dedupeByQuiz ? `${row.activity_type}:${row.assembled_quiz.assembled_quiz_id}` : row.activity_type;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
 
     activities.push({
       activityType: row.activity_type,
@@ -192,6 +217,7 @@ export async function listActivityTypesForCourses(
       gradingKind: isGradingKind(row.catalog?.grading_kind) ? row.catalog.grading_kind : 'mcq',
       courseId: row.assembled_quiz.course_id,
       courseName: row.assembled_quiz.course?.course_name ?? 'Unknown course',
+      assembledQuizId: row.assembled_quiz.assembled_quiz_id,
     });
   }
 
@@ -202,7 +228,7 @@ export type ActivityCourseRef = { courseId: string; courseName: string };
 
 type ActivityCourseLinkRow = {
   activity_type: string;
-  assembled_quiz: { course_id: string; course: { course_name: string } | null } | null;
+  assembled_quiz: { course_id: string; quiz_name: string; course: { course_name: string } | null } | null;
 };
 
 /**
@@ -223,21 +249,38 @@ type ActivityCourseLinkRow = {
  *
  * activityTypes: [] short-circuits to an empty map without a query, same convention as
  * listActivityTypesForCourses's courseIds: [] handling.
+ *
+ * quizNameByActivityType (GitHub #500 follow-up) rides along on the same query and row set: an
+ * attempt's ACTIVITY/QUIZ column used to show the catalog's raw activity_type key (via
+ * toActivityLogEntry's getActivityByType-else-key fallback, which only knows the three built-in
+ * catalogs) instead of a real name — indistinguishable for two different quizzes composed from
+ * the same catalog. Same "first match wins" convention as listActivityTypesForCourses above for a
+ * catalog linked to more than one quiz — there is no assembled_quiz_id on session_log to say which
+ * one actually granted a given attempt access (see CLAUDE.md's GitHub #476 section for why that's
+ * a hard data-model limit, not a shortcut taken here) — but the common case (one quiz per catalog)
+ * resolves exactly right, and every case beats showing the raw key.
  */
 export async function listCoursesForActivityTypes(
   supabase: SupabaseClient,
   activityTypes: string[],
-): Promise<{ coursesByActivityType: Map<string, ActivityCourseRef[]> | null; error: { message: string } | null }> {
-  if (activityTypes.length === 0) return { coursesByActivityType: new Map(), error: null };
+): Promise<{
+  coursesByActivityType: Map<string, ActivityCourseRef[]> | null;
+  quizNameByActivityType: Map<string, string> | null;
+  error: { message: string } | null;
+}> {
+  if (activityTypes.length === 0) {
+    return { coursesByActivityType: new Map(), quizNameByActivityType: new Map(), error: null };
+  }
 
   const { data, error } = await supabase
     .from('assembled_quiz_catalog')
-    .select('activity_type, assembled_quiz:assembled_quiz_id!inner(course_id, course:course_id(course_name))')
+    .select('activity_type, assembled_quiz:assembled_quiz_id!inner(course_id, quiz_name, course:course_id(course_name))')
     .in('activity_type', activityTypes);
 
-  if (error) return { coursesByActivityType: null, error };
+  if (error) return { coursesByActivityType: null, quizNameByActivityType: null, error };
 
   const coursesByActivityType = new Map<string, ActivityCourseRef[]>();
+  const quizNameByActivityType = new Map<string, string>();
 
   for (const row of (data ?? []) as unknown as ActivityCourseLinkRow[]) {
     if (!row.assembled_quiz) continue;
@@ -248,7 +291,11 @@ export async function listCoursesForActivityTypes(
     const existing = coursesByActivityType.get(row.activity_type) ?? [];
     if (!existing.some((course) => course.courseId === courseId)) existing.push({ courseId, courseName });
     coursesByActivityType.set(row.activity_type, existing);
+
+    if (!quizNameByActivityType.has(row.activity_type)) {
+      quizNameByActivityType.set(row.activity_type, row.assembled_quiz.quiz_name);
+    }
   }
 
-  return { coursesByActivityType, error: null };
+  return { coursesByActivityType, quizNameByActivityType, error: null };
 }

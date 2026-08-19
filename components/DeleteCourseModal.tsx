@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { deleteCourse } from '../lib/courseClient';
+import { clearCachedInstructorStudents } from '../lib/instructorStudentsStore';
+import { clearCachedInstructorActivities } from '../lib/instructorActivityStore';
 
 const FOCUSABLE_SELECTOR = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
@@ -103,6 +105,14 @@ export function DeleteCourseModal({
       setError(result.error);
       return;
     }
+
+    // The instructor's roster/activity caches may now include a student whose only enrollment
+    // was through this course (cascade-deleted with it) or an attempt on a catalog this course
+    // was the only link for — neither cache has any other trigger to notice a course disappearing,
+    // so both are cleared here rather than left to a later, unrelated invalidation (logout,
+    // enroll/unenroll) to catch up.
+    clearCachedInstructorStudents();
+    clearCachedInstructorActivities();
 
     // No setSubmitting(false) on success: onDeleted navigates away, and re-enabling the button
     // first would flash a live "Delete course" on a course that is already gone.

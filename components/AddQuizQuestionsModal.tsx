@@ -230,7 +230,7 @@ export function AddQuizQuestionsModal({
           <div>
             <p className="text-xs font-extrabold uppercase tracking-wide text-brand-gold">Quizzes</p>
             <h2 id="add-quiz-questions-title" className="mt-1 text-xl font-extrabold text-white">
-              {gradingKind === 'llm-graded' ? 'Add Individual Prompts' : 'Add Individual Questions'}
+              Add Individual Questions
             </h2>
           </div>
           <button
@@ -254,7 +254,7 @@ export function AddQuizQuestionsModal({
               type="text"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder={gradingKind === 'llm-graded' ? 'Search prompt text…' : 'Search question text…'}
+              placeholder="Search question text…"
               className="mt-1.5 block w-full rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none transition focus:border-brand-purple"
             />
           </label>
@@ -297,7 +297,7 @@ export function AddQuizQuestionsModal({
             <p className="p-4 text-center text-sm font-semibold text-brand-ink-muted">Loading…</p>
           ) : nothingVisible ? (
             <p className="p-4 text-center text-sm font-semibold text-brand-ink-muted">
-              {gradingKind === 'llm-graded' ? 'No prompts match this filter.' : 'No questions match this filter.'}
+              No questions match this filter.
             </p>
           ) : (
             <>
@@ -327,7 +327,7 @@ export function AddQuizQuestionsModal({
               {visibleUserStories.length > 0 ? (
                 <div>
                   <p className="sticky top-0 border-b border-brand-navy-border bg-brand-navy-2 px-4 py-2 text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted">
-                    LLM-Graded Prompts ({visibleUserStories.length})
+                    LLM-Graded Questions ({visibleUserStories.length})
                   </p>
                   <ul className="divide-y divide-brand-navy-border">
                     {visibleUserStories.map((story) => (
@@ -360,7 +360,7 @@ export function AddQuizQuestionsModal({
               disabled={submitting}
               className="text-xs font-bold text-brand-purple underline-offset-2 transition hover:underline disabled:opacity-60"
             >
-              {gradingKind === 'llm-graded' ? "Can't find it? Create a new prompt" : "Can't find it? Create a new question"}
+              Can't find it? Create a new question
             </button>
           ) : (
             <span />

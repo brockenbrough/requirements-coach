@@ -82,6 +82,7 @@ function queueEnrolled(overrides: { quizName?: string | null; description?: stri
     data: [
       {
         assembled_quiz: {
+          assembled_quiz_id: 'quiz-1',
           course_id: 'course-1',
           quiz_name: 'quizName' in overrides ? overrides.quizName : 'Course-Specific Requirements Quiz',
           description: 'description' in overrides ? overrides.description : 'Assembled for this course',
@@ -153,7 +154,20 @@ describe('GET /api/activities/:activityType', () => {
       gradingKind: 'mcq',
       courseId: 'course-1',
       courseName: 'Software Requirements',
+      assembledQuizId: 'quiz-1',
     });
+  });
+
+  // GitHub #583: a caller that already knows which quiz it means (the ?quiz= a student followed
+  // from a course page card) can disambiguate between two quizzes composing the same catalog.
+  it('accepts an assembledQuizId query param without erroring', async () => {
+    queue('activity_type', { data: quizRow(), error: null });
+    queueEnrolled();
+
+    const res = await GET(req('MY_CUSTOM_QUIZ?assembledQuizId=quiz-1'), PARAMS('MY_CUSTOM_QUIZ'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.activity.assembledQuizId).toBe('quiz-1');
   });
 
   it('falls back to the catalog description when the assembled quiz has none', async () => {

@@ -156,7 +156,7 @@ export async function computeCourseLeaderboard(
 
   const { data: sessionData, error: sessionError } = await supabase
     .from('session_log')
-    .select('user_id, activity_type, difficulty_level, cumulative_score, ended_at, passed')
+    .select('user_id, activity_type, assembled_quiz_id, difficulty_level, cumulative_score, ended_at, passed')
     .in('user_id', studentIds)
     .eq('status', 'completed');
 
@@ -249,7 +249,7 @@ export async function computeGlobalLeaderboard(
 
   const { data: sessionData, error: sessionError } = await supabase
     .from('session_log')
-    .select('user_id, activity_type, difficulty_level, cumulative_score, ended_at, passed')
+    .select('user_id, activity_type, assembled_quiz_id, difficulty_level, cumulative_score, ended_at, passed')
     .in('user_id', studentIds)
     .eq('status', 'completed');
 

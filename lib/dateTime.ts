@@ -19,8 +19,9 @@ const HAS_OFFSET = /(?:Z|[+-]\d{2}:?\d{2})$/;
 /**
  * Marks a zone-less API timestamp as UTC, which is what it actually is.
  *
- * Values that already carry an offset pass through untouched — lib/mockStudentAttempts.ts
- * builds its dates with toISOString(), and appending a second marker would corrupt them.
+ * Values that already carry an offset pass through untouched — a value built with
+ * toISOString() (e.g. in a test fixture) already carries one, and appending a second marker
+ * would corrupt it.
  */
 export function toInstant(value: string): string {
   return HAS_OFFSET.test(value) ? value : `${value}Z`;

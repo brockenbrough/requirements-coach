@@ -3,15 +3,27 @@
 
 import type { SupabaseClient } from './sessionQueries';
 
-export type SessionRow = { activity_type: string; difficulty_level: number; cumulative_score: number };
+export type SessionRow = {
+  activity_type: string;
+  difficulty_level: number;
+  cumulative_score: number;
+  /** GitHub #583: which assembled_quiz this session was started through, if known. */
+  assembled_quiz_id?: string | null;
+};
 
 /**
- * Sum of the best cumulative_score at each (activity_type, difficulty_level) pair across a set
- * of completed sessions — REQ-GAM-DL-1's "for each difficulty level, find the highest score out
- * of the completed sessions, add this score to the accumulated total".
+ * Sum of the best cumulative_score at each (assembled_quiz_id, activity_type, difficulty_level)
+ * key across a set of completed sessions — REQ-GAM-DL-1's "for each difficulty level, find the
+ * highest score out of the completed sessions, add this score to the accumulated total".
  *
  * Only a level's best attempt counts, so retaking one raises the total only by scoring higher;
- * a weaker retake changes nothing, and a level is never counted twice.
+ * a weaker retake changes nothing, and a level is never counted twice — but two different quizzes
+ * built on the same catalog now each get their own key (GitHub #583, confirmed product decision:
+ * completing both is two distinct assignments, not one deduplicated best-of), rather than
+ * silently sharing one (activity_type, difficulty_level) slot and having a weaker attempt on one
+ * quiz get overwritten by a stronger one on the other. Rows with no assembled_quiz_id (legacy, or
+ * a bare/bookmarked link with no quiz context) fall into one shared 'none' bucket per
+ * (activity_type, difficulty_level), matching the exact pre-#583 behavior for that population.
  *
  * Pulled out of computeStudentScore so lib/leaderboardQueries.ts's computeCourseLeaderboard can
  * reduce every enrolled student's rows through this exact function — the sidebar score pill and
@@ -21,7 +33,7 @@ export type SessionRow = { activity_type: string; difficulty_level: number; cumu
 export function sumBestScores(sessions: SessionRow[]): number {
   const bestByKey = new Map<string, number>();
   for (const row of sessions) {
-    const key = `${row.activity_type}:${row.difficulty_level}`;
+    const key = `${row.assembled_quiz_id ?? 'none'}:${row.activity_type}:${row.difficulty_level}`;
     const current = bestByKey.get(key) ?? 0;
     if (row.cumulative_score > current) bestByKey.set(key, row.cumulative_score);
   }
@@ -57,7 +69,7 @@ export function sumBestScores(sessions: SessionRow[]): number {
 export async function computeStudentScore(supabase: SupabaseClient, userId: string) {
   const { data, error } = await supabase
     .from('session_log')
-    .select('activity_type, difficulty_level, cumulative_score')
+    .select('activity_type, difficulty_level, cumulative_score, assembled_quiz_id')
     .eq('user_id', userId)
     .eq('status', 'completed');
 

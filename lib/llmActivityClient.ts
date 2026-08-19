@@ -105,9 +105,12 @@ export type CurrentLlmSessionResult = {
 export function startOrResumeLlmSession(
   token: string,
   activityType: string,
-  options: { difficultyLevel?: number } = {},
+  options: { difficultyLevel?: number; assembledQuizId?: string } = {},
 ): Promise<ApiResult<StartLlmSessionResult>> {
-  const body = options.difficultyLevel === undefined ? {} : { difficultyLevel: options.difficultyLevel };
+  const body = {
+    ...(options.difficultyLevel === undefined ? {} : { difficultyLevel: options.difficultyLevel }),
+    ...(options.assembledQuizId === undefined ? {} : { assembledQuizId: options.assembledQuizId }),
+  };
 
   return request<StartLlmSessionResult>(
     `/api/activities/${encodeURIComponent(activityType)}/llm/sessions`,
@@ -124,9 +127,11 @@ export function startOrResumeLlmSession(
 export function loadCurrentLlmSession(
   token: string,
   activityType: string,
+  assembledQuizId?: string,
 ): Promise<ApiResult<CurrentLlmSessionResult>> {
+  const query = assembledQuizId ? `?assembledQuizId=${encodeURIComponent(assembledQuizId)}` : '';
   return request<CurrentLlmSessionResult>(
-    `/api/activities/${encodeURIComponent(activityType)}/llm/sessions/current`,
+    `/api/activities/${encodeURIComponent(activityType)}/llm/sessions/current${query}`,
     { method: "GET" },
     token,
   );
@@ -149,6 +154,9 @@ export type InstructorACSubmission = {
   gradedAt: string | null;
   /** GitHub #474: every course this submission's catalog is currently linked to; [] means none yet. */
   courses: { courseId: string; courseName: string }[];
+  /** GitHub #500 follow-up: the assembled quiz's own name, not the catalog's — see
+   *  InstructorActivityEntry.quizName's own comment for the same reasoning and its known limit. */
+  quizName: string | null;
 };
 
 /** GET /api/instructor/acceptance-criteria/submissions — all AC submissions, optionally scoped to one student. */

@@ -56,6 +56,39 @@ function queue(table: string, result: Result) {
   (h.state.queues[table] ??= []).push(result);
 }
 
+/** listOwnedCourseIds' query — one course round trip, feeding loadAllStudentActivity's new shared-course filter. */
+function queueOwnedCourseIds(courseIds: string[]) {
+  queue('course', { data: courseIds.map((courseId) => ({ course_id: courseId })), error: null });
+}
+
+/** loadEnrolledCourseIdsByStudentForCourses' query — who is enrolled in which owned course. */
+function queueEnrollments(rows: { userId: string; courseId: string }[]) {
+  queue('student_course', { data: rows.map((row) => ({ user_id: row.userId, course_id: row.courseId })), error: null });
+}
+
+/**
+ * The minimal "this session's catalog is still reachable via a course the instructor owns and
+ * the student is enrolled in" fixture — queues course, assembled_quiz_catalog and student_course
+ * together so a session survives loadAllStudentActivity's shared-course filter (GitHub bug fix:
+ * the list view used to count a session regardless of whether its catalog's linking course still
+ * existed or the student was still enrolled in it). Tests that already queue their own
+ * assembled_quiz_catalog data (to assert on the returned `courses` field) call
+ * queueOwnedCourseIds/queueEnrollments directly instead, matching their own course ids, rather
+ * than calling this and getting a second, conflicting assembled_quiz_catalog queue entry.
+ */
+function queueSharedCourseAccess(options: { courseId?: string; activityType?: string; userId?: string } = {}) {
+  const courseId = options.courseId ?? 'course-1';
+  const activityType = options.activityType ?? 'IDENTIFY_WEAK_USER_STORIES';
+  const userId = options.userId ?? 'student-1';
+
+  queueOwnedCourseIds([courseId]);
+  queue('assembled_quiz_catalog', {
+    data: [{ activity_type: activityType, assembled_quiz: { course_id: courseId, course: { course_name: 'Course' } } }],
+    error: null,
+  });
+  queueEnrollments([{ userId, courseId }]);
+}
+
 vi.mock('../../lib/supabase', () => ({
   getSupabaseClient: () => ({
     auth: {
@@ -158,6 +191,15 @@ describe('GET /api/instructor/activities', () => {
       ],
       error: null,
     });
+    queueOwnedCourseIds(['course-1']);
+    queue('assembled_quiz_catalog', {
+      data: [{ activity_type: 'IDENTIFY_WEAK_USER_STORIES', assembled_quiz: { course_id: 'course-1', course: { course_name: 'Course' } } }],
+      error: null,
+    });
+    queueEnrollments([
+      { userId: 'student-1', courseId: 'course-1' },
+      { userId: 'student-2', courseId: 'course-1' },
+    ]);
 
     const response = await GET(request('valid-token'));
     const body = await response.json();
@@ -207,6 +249,11 @@ describe('GET /api/instructor/activities', () => {
       ],
       error: null,
     });
+    queueOwnedCourseIds(['course-1', 'course-2']);
+    // Enrolled in only one of the two linked courses — enough to pass the shared-course filter;
+    // the returned `courses` list below stays every course currently linking the catalog, not
+    // just the one the student happens to share.
+    queueEnrollments([{ userId: 'student-1', courseId: 'course-1' }]);
 
     const response = await GET(request('valid-token'));
     const body = await response.json();
@@ -217,18 +264,95 @@ describe('GET /api/instructor/activities', () => {
     ]);
   });
 
-  it('reports an empty courses list for a catalog not linked to any course yet', async () => {
+  // GitHub bug fix: a catalog with no live course link at all — the same state a deleted course
+  // leaves behind (course deletion cascades away assembled_quiz/assembled_quiz_catalog, but never
+  // session_log) — used to still surface the orphaned session with an empty courses list. It must
+  // now be excluded from the list entirely, the same way the per-student detail page already
+  // excludes it (lib/studentDetailQueries.ts's loadStudentDetailForInstructor never included it
+  // either, since sharedActivityTypes never contains an activity type reachable through zero
+  // shared courses).
+  it('excludes a session whose catalog is not linked to any course (matches a deleted course)', async () => {
+    queueRole('instructor');
+    queueOwnedActivityTypeSummaries([{ activityType: 'IDENTIFY_WEAK_USER_STORIES', name: 'Identify Weak User Stories', gradingKind: 'mcq' }]);
+    queue('session_log', { data: [sessionRow()], error: null });
+    queue('assembled_quiz_catalog', { data: [], error: null });
+    queueOwnedCourseIds(['course-1']);
+    queueEnrollments([{ userId: 'student-1', courseId: 'course-1' }]);
+
+    const response = await GET(request('valid-token'));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.sessions).toEqual([]);
+    // loadProgressForSessions short-circuits on the now-empty id list, same as a class with no
+    // sessions at all.
+    expect(h.state.tables).not.toContain('session_to_question');
+  });
+
+  // The other half of the same bug: the catalog IS still linked to a course the instructor owns,
+  // but this particular student isn't (or is no longer) enrolled in it — the "Philipp Dorkel"
+  // scenario, where the student's only enrollment was through a since-deleted course and
+  // student_course has no row for them under any course this instructor currently owns.
+  it('excludes a session for a student not currently enrolled in the linking course', async () => {
+    queueRole('instructor');
+    queueOwnedActivityTypeSummaries([{ activityType: 'IDENTIFY_WEAK_USER_STORIES', name: 'Identify Weak User Stories', gradingKind: 'mcq' }]);
+    queue('session_log', { data: [sessionRow()], error: null }); // student-1
+    queue('assembled_quiz_catalog', {
+      data: [{ activity_type: 'IDENTIFY_WEAK_USER_STORIES', assembled_quiz: { course_id: 'course-1', course: { course_name: 'Course' } } }],
+      error: null,
+    });
+    queueOwnedCourseIds(['course-1']);
+    // Nobody enrolled in course-1 at all — student-1's session has a perfectly live course link,
+    // just not one they're actually in.
+    queueEnrollments([]);
+
+    const response = await GET(request('valid-token'));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.sessions).toEqual([]);
+  });
+
+  it('includes a session whose catalog is linked to a course the student is currently enrolled in', async () => {
     queueRole('instructor');
     queueOwnedActivityTypeSummaries([{ activityType: 'IDENTIFY_WEAK_USER_STORIES', name: 'Identify Weak User Stories', gradingKind: 'mcq' }]);
     queue('session_log', { data: [sessionRow()], error: null });
     queue('session_to_question', { data: [], error: null });
     queue('answered_question_log', { data: [], error: null });
-    queue('assembled_quiz_catalog', { data: [], error: null });
+    queueSharedCourseAccess();
 
     const response = await GET(request('valid-token'));
     const body = await response.json();
 
-    expect(body.sessions[0].courses).toEqual([]);
+    expect(response.status).toBe(200);
+    expect(body.sessions).toHaveLength(1);
+    expect(body.sessions[0].session_id).toBe('session-1');
+  });
+
+  // GitHub #500 follow-up: the combined instructor table's QUIZ column reads this instead of
+  // falling back to the raw activity_type key — the assembled quiz's own name, not the catalog's.
+  it("attaches the assembled quiz's own name, distinct from the catalog's quiz_name", async () => {
+    queueRole('instructor');
+    queueOwnedActivityTypeSummaries([{ activityType: 'IDENTIFY_WEAK_USER_STORIES', name: 'Identify Weak User Stories', gradingKind: 'mcq' }]);
+    queue('session_log', { data: [sessionRow()], error: null });
+    queue('session_to_question', { data: [], error: null });
+    queue('answered_question_log', { data: [], error: null });
+    queue('assembled_quiz_catalog', {
+      data: [
+        {
+          activity_type: 'IDENTIFY_WEAK_USER_STORIES',
+          assembled_quiz: { course_id: 'course-1', quiz_name: 'Week 3 Quiz', course: { course_name: 'Requirements 101' } },
+        },
+      ],
+      error: null,
+    });
+    queueOwnedCourseIds(['course-1']);
+    queueEnrollments([{ userId: 'student-1', courseId: 'course-1' }]);
+
+    const response = await GET(request('valid-token'));
+    const body = await response.json();
+
+    expect(body.sessions[0].quizName).toBe('Week 3 Quiz');
   });
 
   it('returns the instructor’s owned activity types alongside the sessions', async () => {
@@ -252,6 +376,7 @@ describe('GET /api/instructor/activities', () => {
     queue('session_log', { data: [sessionRow()], error: null });
     queue('session_to_question', { data: [], error: null });
     queue('answered_question_log', { data: [], error: null });
+    queueSharedCourseAccess();
 
     const response = await GET(request('valid-token'));
     const body = await response.json();
@@ -267,6 +392,7 @@ describe('GET /api/instructor/activities', () => {
     queue('session_log', { data: [sessionRow()], error: null });
     queue('session_to_question', { data: [], error: null });
     queue('answered_question_log', { data: [], error: null });
+    queueSharedCourseAccess();
 
     const response = await GET(request('valid-token'));
     const body = await response.json();
@@ -361,6 +487,7 @@ describe('GET /api/instructor/activities', () => {
     });
     queue('session_to_question', { data: [], error: null });
     queue('answered_question_log', { data: [], error: null });
+    queueSharedCourseAccess();
 
     const response = await GET(request('valid-token'));
     const body = await response.json();

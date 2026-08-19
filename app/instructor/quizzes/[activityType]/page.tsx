@@ -233,7 +233,7 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
     // Same rule as handleSaveQuestion above (GitHub #417).
     if (level !== 'all' && saved.level !== level) setLevel('all');
     setHighlight({ id: saved.id, label: isEdit ? '✓ Updated' : '✓ Just added' });
-    setToastMessage(isEdit ? 'Changes saved.' : 'Prompt added to this catalog.');
+    setToastMessage(isEdit ? 'Changes saved.' : 'Question added to this catalog.');
 
     window.setTimeout(() => setToastMessage(null), TOAST_MS);
     window.setTimeout(() => setHighlight(null), HIGHLIGHT_MS);
@@ -252,7 +252,7 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
     const deletedId = promptDeleteTarget.id;
     setPrompts((current) => (current ?? []).filter((prompt) => prompt.id !== deletedId));
     setPromptDeleteTarget(null);
-    setToastMessage('Prompt deleted.');
+    setToastMessage('Question deleted.');
     window.setTimeout(() => setToastMessage(null), TOAST_MS);
 
     return { ok: true };
@@ -332,7 +332,7 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
                 <h1 className="mb-1.5 text-2xl font-extrabold text-brand-navy">{quiz.name}</h1>
                 <p className="max-w-2xl text-sm font-semibold text-gray-500">
                   {quiz.description ? `${quiz.description} · ` : ''}
-                  {items.length} {llmGraded ? 'prompt' : 'question'}
+                  {items.length} question
                   {items.length === 1 ? '' : 's'} · by {quiz.authorName}
                 </p>
               </div>
@@ -356,7 +356,7 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
                         <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round">
                           <path d="M12 5v14M5 12h14" />
                         </svg>
-                        {llmGraded ? 'New Prompt' : 'New Question'}
+                        New Question
                       </button>
                     ) : null}
                     <button
@@ -411,10 +411,10 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
               <div className="mb-5 mt-5 rounded-brand-md border border-brand-gold/40 bg-brand-gold/10 px-4 py-3">
                 <p className="text-sm font-bold text-brand-navy">
                   {coverageGaps.length === 3 ? 'No level' : `Level ${coverageGaps.join(' and ')}`}{' '}
-                  {coverageGaps.length === 1 ? 'has' : 'have'} fewer than {STORIES_PER_SESSION} prompts.
+                  {coverageGaps.length === 1 ? 'has' : 'have'} fewer than {STORIES_PER_SESSION} questions.
                 </p>
                 <p className="mt-1 text-xs font-semibold text-gray-600">
-                  A round draws {STORIES_PER_SESSION} prompts from a single level, so students can&apos;t start this
+                  A round draws {STORIES_PER_SESSION} questions from a single level, so students can&apos;t start this
                   activity at {coverageGaps.length === 1 ? 'that level' : 'those levels'} until each has at least{' '}
                   {STORIES_PER_SESSION}.
                 </p>
@@ -464,7 +464,7 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
               {llmGraded ? (
                 visiblePrompts.length === 0 ? (
                   <p className="rounded-brand-lg border border-gray-100 bg-gray-50 p-6 text-center text-sm font-semibold text-gray-500">
-                    No prompts yet at this level.
+                    No questions yet at this level.
                   </p>
                 ) : (
                   visiblePrompts.map((prompt) => (
@@ -617,17 +617,17 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
       {promptDeleteTarget ? (
         <ConfirmModal
           kicker="LLM-Graded Task"
-          title="Delete this prompt?"
+          title="Delete this question?"
           message={
             <>
               <span className="block font-bold text-brand-ink">{promptDeleteTarget.storyText}</span>
               <span className="mt-2 block">
-                This removes the prompt from the catalog. Students who already answered it keep their
+                This removes the question from the catalog. Students who already answered it keep their
                 submissions and scores.
               </span>
             </>
           }
-          confirmLabel="Delete prompt"
+          confirmLabel="Delete question"
           confirmingLabel="Deleting…"
           onClose={() => setPromptDeleteTarget(null)}
           onConfirm={handleDeletePrompt}
@@ -642,7 +642,7 @@ export default function CatalogDetailPage({ params }: { params: { activityType: 
             <>
               <span className="block font-bold text-brand-ink">{quiz?.name ?? 'This catalog'}</span>
               <span className="mt-2 block">
-                This permanently deletes every {llmGraded ? 'prompt' : 'question'} in this catalog and removes it
+                This permanently deletes every question in this catalog and removes it
                 from any quiz it&apos;s linked to. This can&apos;t be undone.
               </span>
             </>

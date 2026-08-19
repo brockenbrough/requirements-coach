@@ -55,8 +55,8 @@ export function CatalogPromptCard({
             <button
               type="button"
               onClick={onEdit}
-              aria-label="Edit this prompt"
-              title="Edit this prompt"
+              aria-label="Edit this question"
+              title="Edit this question"
               className="flex h-8 w-8 flex-none items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 transition hover:border-brand-purple hover:text-brand-purple"
             >
               <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
@@ -67,8 +67,8 @@ export function CatalogPromptCard({
             <button
               type="button"
               onClick={onDelete}
-              aria-label="Delete this prompt"
-              title="Delete this prompt"
+              aria-label="Delete this question"
+              title="Delete this question"
               className="flex h-8 w-8 flex-none items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 transition hover:border-brand-danger hover:text-brand-danger"
             >
               <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">

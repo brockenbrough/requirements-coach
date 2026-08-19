@@ -82,9 +82,13 @@ function ActivityDetailContent({
   // Also redirects an instructor account away (GitHub #82) — starting/resuming/abandoning a
   // quiz is exactly the "quiz durchführen" capability instructors must not have.
   const { token, profile, loading, authorized } = useRequireRole('student');
-  const { activity, status: activityStatus } = useResolvedActivity(token, params.slug);
-
   const searchParams = useSearchParams();
+  // GitHub #583: the ?quiz= a student followed from a course page card, disambiguating which of
+  // possibly several assembled quizzes composing this catalog they mean — undefined for a bare/
+  // bookmarked link, which resolves the same first-match fallback as before this fix.
+  const quizParam = searchParams.get('quiz') ?? undefined;
+  const { activity, status: activityStatus } = useResolvedActivity(token, params.slug, quizParam);
+
   // The level ActivityCard was already showing for this activity on the activities list page
   // (components/ActivityCard.tsx's ?level= link) — used only to seed the first paint below so
   // it doesn't default to level 1 and then jump once this page's own data has loaded; the effect
@@ -96,7 +100,6 @@ function ActivityDetailContent({
   // falls back to that same "My Courses" behavior below.
   const courseId = searchParams.get('course');
   const backHref = courseId ? `/courses/${courseId}` : '/activities';
-  const courseQuery = courseId ? `?course=${encodeURIComponent(courseId)}` : '';
 
   // The server is the only source of "does this activity have a run in progress" (REQ-PL-6.3) —
   // there is no local/mock notion of progress anymore. null means "not checked yet or nothing
@@ -165,12 +168,12 @@ function ActivityDetailContent({
   // would read as a two-level unlock that never happened.
   useEffect(() => {
     if (attempts === null || !profile?.user_id || !activity) return;
-    const seen = getSeenUnlockedLevel(profile.user_id, activity.activityType);
+    const seen = getSeenUnlockedLevel(profile.user_id, activity.activityType, activity.assembledQuizId);
     const newly = newlyUnlockedLevel(seen, highestSelectableLevel);
     // Recorded unconditionally, which is what makes this idempotent: loadCompletedAttempts's
     // background onRevalidate below re-runs this effect with a new attempts identity, and the
     // second pass must find nothing new rather than restart an animation already in flight.
-    recordSeenUnlockedLevel(profile.user_id, activity.activityType, highestSelectableLevel);
+    recordSeenUnlockedLevel(profile.user_id, activity.activityType, highestSelectableLevel, activity.assembledQuizId);
     if (newly !== null) setUnlockingLevel(newly);
   }, [attempts, profile?.user_id, activity, highestSelectableLevel]);
 
@@ -202,9 +205,11 @@ function ActivityDetailContent({
     // off session_log rows that both flows write identically.
     const llmGraded = activity.gradingKind === 'llm-graded';
 
+    const assembledQuizId = activity.assembledQuizId ?? undefined;
+
     Promise.all([
       llmGraded
-        ? loadCurrentLlmSession(token, activity.activityType).then((result) =>
+        ? loadCurrentLlmSession(token, activity.activityType, assembledQuizId).then((result) =>
             result.ok
               ? {
                   ok: true as const,
@@ -216,7 +221,7 @@ function ActivityDetailContent({
                 }
               : result,
           )
-        : loadCurrentSession(token, activity.activityType).then((result) =>
+        : loadCurrentSession(token, activity.activityType, assembledQuizId).then((result) =>
             result.ok
               ? {
                   ok: true as const,
@@ -238,7 +243,7 @@ function ActivityDetailContent({
       // pop in. See loadCompletedAttempts's own docblock (lib/sessionClient.ts) for the general
       // cache-first/onRevalidate mechanism — still the right choice for callers like
       // app/activities/page.tsx's cards, just not for a control whose shape depends on this data.
-      loadCompletedAttempts(token, profile.user_id, activity.activityType, { forceRefresh: true }),
+      loadCompletedAttempts(token, profile.user_id, activity.activityType, { forceRefresh: true, assembledQuizId }),
     ]).then(([currentResult, completed]) => {
       if (cancelled) return;
       if (currentResult.ok) setCurrent(currentResult.data);
@@ -296,6 +301,17 @@ function ActivityDetailContent({
     );
   }
 
+  // GitHub #524/#583: appended to every internal navigation into/back from the play page, so both
+  // the course context and the specific assembled quiz a student arrived with survive the round
+  // trip instead of silently falling back to "My Courses" or the first-match quiz on return.
+  const playQuery = (() => {
+    const query = new URLSearchParams();
+    if (courseId) query.set('course', courseId);
+    if (activity.assembledQuizId) query.set('quiz', activity.assembledQuizId);
+    const value = query.toString();
+    return value ? `?${value}` : '';
+  })();
+
   // Starts at selectedLevel when one has been picked via LevelReplaySelector, otherwise the
   // server's auto-advance level (undefined difficultyLevel) — Start is the only thing that ever
   // triggers the actual POST; selecting a level just sets what Start will use.
@@ -305,17 +321,18 @@ function ActivityDetailContent({
     setStarting(true);
     setError(null);
 
+    const startOptions = { difficultyLevel: selectedLevel ?? undefined, assembledQuizId: activity!.assembledQuizId ?? undefined };
     const result =
       activity!.gradingKind === 'llm-graded'
-        ? await startOrResumeLlmSession(token, activity!.activityType, { difficultyLevel: selectedLevel ?? undefined })
-        : await startSession(token, activity!.activityType, { difficultyLevel: selectedLevel ?? undefined });
+        ? await startOrResumeLlmSession(token, activity!.activityType, startOptions)
+        : await startSession(token, activity!.activityType, startOptions);
 
     if (result.ok) {
       // A fresh (or resumed) session now shows up in the activity log too.
       if (profile?.user_id) {
         void loadActivityLog(token, profile.user_id, { forceRefresh: true });
       }
-      router.push(`/activities/${activity!.slug}/play${courseQuery}`);
+      router.push(`/activities/${activity!.slug}/play${playQuery}`);
       return;
     }
 
@@ -334,7 +351,7 @@ function ActivityDetailContent({
   function handleResume() {
     // The whole point of a running session is that it is already in hand server-side —
     // resuming is just navigating there, not another start/resume network round trip.
-    router.push(`/activities/${activity!.slug}/play${courseQuery}`);
+    router.push(`/activities/${activity!.slug}/play${playQuery}`);
   }
 
   async function handleAbandon() {

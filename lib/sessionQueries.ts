@@ -12,6 +12,7 @@ import {
 import type { InstructorActivityEntry, InstructorSessionEntry, SessionListEntry, SessionRecord } from './sessionTypes';
 import { shuffleArray } from './shuffleArray';
 import { listCoursesForActivityTypes } from './activityCourseQueries';
+import { loadEnrolledCourseIdsByStudentForCourses } from './courseQueries';
 import { fetchAllRowsByIds } from './supabasePaging';
 
 export type SupabaseClient = NonNullable<ReturnType<typeof getSupabaseClient>>;
@@ -70,19 +71,30 @@ export type QuestionOption = {
   is_correct: boolean;
 };
 
-/** The student's running session for one activity type, or null. */
+/**
+ * The student's running session for one activity type, or null.
+ *
+ * GitHub #583: assembledQuizId, when given, scopes this to a session started through that
+ * specific quiz — two different quizzes composed from the same catalog otherwise collide on
+ * (user_id, activity_type) alone. Omitted -> the exact old behavior (matches any in-progress
+ * session for the catalog, regardless of quiz), for callers that don't know a specific quiz yet.
+ */
 export async function findInProgressSession(
   supabase: SupabaseClient,
   userId: string,
   activityType: string,
+  assembledQuizId?: string,
 ) {
-  const { data, error } = await supabase
+  let query = supabase
     .from('session_log')
     .select(SESSION_COLUMNS)
     .eq('user_id', userId)
     .eq('activity_type', activityType)
-    .eq('status', 'in-progress')
-    .maybeSingle();
+    .eq('status', 'in-progress');
+
+  if (assembledQuizId) query = query.eq('assembled_quiz_id', assembledQuizId);
+
+  const { data, error } = await query.maybeSingle();
 
   return { session: error ? null : data, error };
 }
@@ -95,17 +107,26 @@ export async function findInProgressSession(
  * This is also the ceiling POST /api/sessions's difficultyLevel replay override validates
  * against: a student may start at any level up to and including this one (any already-passed
  * level, or the one they'd auto-advance to anyway), never beyond it.
+ *
+ * GitHub #583: assembledQuizId, when given, makes difficulty progression per-quiz — a student's
+ * level on one quiz no longer has to match their level on a different quiz sharing the same
+ * catalog. highestPassedLevelByType itself is untouched; only the query feeding it is pre-filtered.
  */
 export async function findStartDifficultyLevel(
   supabase: SupabaseClient,
   userId: string,
   activityType: string,
+  assembledQuizId?: string,
 ) {
-  const { data, error } = await supabase
+  let query = supabase
     .from('session_log')
     .select('activity_type, difficulty_level, passed')
     .eq('user_id', userId)
     .eq('activity_type', activityType);
+
+  if (assembledQuizId) query = query.eq('assembled_quiz_id', assembledQuizId);
+
+  const { data, error } = await query;
 
   if (error) return { startLevel: null, error };
 
@@ -313,18 +334,27 @@ type CompletedAttemptRow = {
  * Sorted by ended_at, with started_at as a tiebreaker. Postgres orders DESC as NULLS FIRST,
  * so a completed row without ended_at would otherwise jump to the top — completeSession always
  * sets it, but the secondary key makes the order stable without relying on that.
+ *
+ * GitHub #583: assembledQuizId, when given, scopes the history to attempts made through that
+ * specific quiz — otherwise two quizzes sharing a catalog would show each other's history.
+ * Omitted -> the exact old behavior (every attempt at the catalog, regardless of quiz).
  */
 export async function loadCompletedAttempts(
   supabase: SupabaseClient,
   userId: string,
   activityType: string,
+  assembledQuizId?: string,
 ) {
-  const { data, error } = await supabase
+  let query = supabase
     .from('session_log')
     .select(COMPLETED_ATTEMPT_COLUMNS)
     .eq('user_id', userId)
     .eq('activity_type', activityType)
-    .eq('status', 'completed')
+    .eq('status', 'completed');
+
+  if (assembledQuizId) query = query.eq('assembled_quiz_id', assembledQuizId);
+
+  const { data, error } = await query
     .order('ended_at', { ascending: false })
     .order('started_at', { ascending: false });
 
@@ -440,15 +470,15 @@ function studentDisplayName(student: EmbeddedStudent): string {
  * Every student's attempts on the given mcq-kind catalogs, newest first — the real data behind
  * the Instructor Dashboard.
  *
- * A pure fetch, not an ownership check: ownedMcqTypes is whatever the caller has already decided
- * this instructor owns. GET /api/instructor/activities derives it from one
- * listOwnedActivityTypeSummaries(supabase, instructorId) call (lib/activityTypeQueries.ts),
- * filtered to grading_kind 'mcq' — deliberately not looked up again in here, so a dashboard load
- * costs one activity_type round trip total instead of one per caller that needs ownership. An
- * empty list short-circuits before session_log is ever queried; a built-in catalog (creator_id IS
- * NULL) can never appear in ownedMcqTypes for any instructor, so a fresh instructor with no
- * catalog of their own gets an empty result here, which is the correct "nothing to show yet"
- * state, not a bug.
+ * A pure fetch, not an ownership check: ownedMcqTypes/ownedCourseIds are whatever the caller has
+ * already decided this instructor owns. GET /api/instructor/activities derives ownedMcqTypes from
+ * one listOwnedActivityTypeSummaries(supabase, instructorId) call (lib/activityTypeQueries.ts),
+ * filtered to grading_kind 'mcq', and ownedCourseIds from listOwnedCourseIds — deliberately not
+ * looked up again in here, so a dashboard load costs one round trip per concern total instead of
+ * one per caller that needs it. An empty ownedMcqTypes short-circuits before session_log is ever
+ * queried; a built-in catalog (creator_id IS NULL) can never appear in ownedMcqTypes for any
+ * instructor, so a fresh instructor with no catalog of their own gets an empty result here, which
+ * is the correct "nothing to show yet" state, not a bug.
  *
  * The class-wide counterpart to loadActivityLog: same merged timeline of in-progress,
  * completed and abandoned sessions, but scoped by ownedMcqTypes instead of that one's
@@ -456,6 +486,18 @@ function studentDisplayName(student: EmbeddedStudent): string {
  * service-role client, which bypasses the own_sessions_select policy — so the caller MUST run
  * requireInstructor first. Reading another student's rows is exactly what this query is for, and
  * exactly what the guard exists to gate.
+ *
+ * A session only counts if its catalog is *currently* reachable via a live
+ * assembled_quiz/assembled_quiz_catalog row for a course this instructor owns AND that session's
+ * own student is currently enrolled in — the same "shared course" pairing
+ * lib/studentDetailQueries.ts's loadStudentDetailForInstructor already computes per student
+ * (ownedCourseIds ∩ enrolledCourseIds(student)), applied here to every row at once instead of one
+ * detail query per student. Without this, an old session on a catalog whose only linking course
+ * was later deleted (course deletion cascades away student_course and
+ * assembled_quiz/assembled_quiz_catalog via lib/courseQueries.ts's deleteCourse, but never touches
+ * session_log) would keep counting here forever even though the detail page — and the roster this
+ * feeds via lib/activityLogTypes.ts's summarizeStudents — correctly stopped seeing it, which is
+ * exactly what used to make the list page disagree with the detail page for the same student.
  *
  * Ordered in the query rather than in JS the way loadActivityLog does it. started_at is the
  * secondary key for the same reason as in loadCompletedAttempts: Postgres orders DESC as NULLS
@@ -480,32 +522,57 @@ function studentDisplayName(student: EmbeddedStudent): string {
  * since ownedMcqTypes is already pre-filtered to mcq-kind keys the caller owns before it ever
  * reaches this function.)
  *
- * loadStudentActivityForIds has no such second source to double against — the course CSV export
+ * loadStudentActivityForIds has no such second source to double against — the course roster page
  * is the only thing that reads it, and there's no separate submissions merge there — so it
- * deliberately keeps including every activity type.
+ * deliberately keeps including every activity type, and deliberately keeps no course/enrollment
+ * scoping either: it already starts from one specific course's own live roster
+ * (loadEnrolledStudents), so it has no equivalent staleness to guard against, and its broader
+ * per-student scope (every activity type a roster member has ever attempted, not just this
+ * course's own catalogs) is intentional for CSV export purposes.
  *
  * courses (GitHub #474) costs one extra round trip — listCoursesForActivityTypes scoped to
  * ownedMcqTypes, the same list already bounding the session query — rather than one per session
- * row, since the same catalog is usually attempted by many students.
+ * row, since the same catalog is usually attempted by many students. It stays an unfiltered "every
+ * course currently linking this catalog" for display, independent of the shared-course inclusion
+ * filter above: a catalog reachable via more than one of the instructor's courses should still
+ * show all of them on an attempt that already passed the filter.
  */
-export async function loadAllStudentActivity(supabase: SupabaseClient, ownedMcqTypes: string[]) {
+export async function loadAllStudentActivity(supabase: SupabaseClient, ownedMcqTypes: string[], ownedCourseIds: string[]) {
   if (ownedMcqTypes.length === 0) return { activities: [], error: null };
 
-  const { data, error } = await supabase
-    .from('session_log')
-    .select(`${SESSION_COLUMNS}, ${STUDENT_EMBED}`)
-    .eq('student.role', 'student')
-    .in('activity_type', ownedMcqTypes)
-    .order('ended_at', { ascending: false })
-    .order('started_at', { ascending: false });
+  const [{ data, error }, coursesResult, enrollmentResult] = await Promise.all([
+    supabase
+      .from('session_log')
+      .select(`${SESSION_COLUMNS}, ${STUDENT_EMBED}`)
+      .eq('student.role', 'student')
+      .in('activity_type', ownedMcqTypes)
+      .order('ended_at', { ascending: false })
+      .order('started_at', { ascending: false }),
+    listCoursesForActivityTypes(supabase, ownedMcqTypes),
+    loadEnrolledCourseIdsByStudentForCourses(supabase, ownedCourseIds),
+  ]);
 
   if (error) return { activities: null, error };
+
+  const { coursesByActivityType, quizNameByActivityType, error: coursesError } = coursesResult;
+  if (coursesError) return { activities: null, error: coursesError };
+
+  const { enrollmentsByStudent, error: enrollmentError } = enrollmentResult;
+  if (enrollmentError) return { activities: null, error: enrollmentError };
 
   type SessionRow = Omit<ActivityLogRow, 'questionCount' | 'answeredCount' | 'nextPosition'> & {
     student: EmbeddedStudent;
   };
 
-  const rows = (data ?? []) as unknown as SessionRow[];
+  const allRows = (data ?? []) as unknown as SessionRow[];
+
+  // Only a session whose catalog is still linked to a course this instructor owns AND that
+  // student is still enrolled in counts — see this function's own doc comment above.
+  const rows = allRows.filter((row) => {
+    const linkedCourses = coursesByActivityType!.get(row.activity_type) ?? [];
+    const enrolledCourseIds = enrollmentsByStudent!.get(row.user_id);
+    return !!enrolledCourseIds && linkedCourses.some((course) => enrolledCourseIds.has(course.courseId));
+  });
 
   const { progress, error: progressError } = await loadProgressForSessions(
     supabase,
@@ -513,9 +580,6 @@ export async function loadAllStudentActivity(supabase: SupabaseClient, ownedMcqT
   );
 
   if (progressError) return { activities: null, error: progressError };
-
-  const { coursesByActivityType, error: coursesError } = await listCoursesForActivityTypes(supabase, ownedMcqTypes);
-  if (coursesError) return { activities: null, error: coursesError };
 
   // The embed is destructured off rather than spread along: it carries role and username, which
   // are inputs to this query, not part of what the endpoint discloses.
@@ -530,6 +594,7 @@ export async function loadAllStudentActivity(supabase: SupabaseClient, ownedMcqT
       studentId: session.user_id,
       studentName: studentDisplayName(student),
       courses: coursesByActivityType!.get(session.activity_type) ?? [],
+      quizName: quizNameByActivityType!.get(session.activity_type) ?? null,
     };
   });
 
@@ -577,7 +642,7 @@ export async function loadStudentActivityForIds(supabase: SupabaseClient, studen
   // Unlike loadAllStudentActivity, this has no pre-known activity_type list to scope the course
   // lookup by — a roster can have attempted anything, not just catalogs linked to the course
   // being exported — so the distinct set is derived from the rows themselves after the fetch.
-  const { coursesByActivityType, error: coursesError } = await listCoursesForActivityTypes(supabase, [
+  const { coursesByActivityType, quizNameByActivityType, error: coursesError } = await listCoursesForActivityTypes(supabase, [
     ...new Set(rows.map((row) => row.activity_type)),
   ]);
   if (coursesError) return { activities: null, error: coursesError };
@@ -593,10 +658,220 @@ export async function loadStudentActivityForIds(supabase: SupabaseClient, studen
       studentId: session.user_id,
       studentName: studentDisplayName(student),
       courses: coursesByActivityType!.get(session.activity_type) ?? [],
+      quizName: quizNameByActivityType!.get(session.activity_type) ?? null,
     };
   });
 
   return { activities, error: null };
+}
+
+/**
+ * One drawn question/prompt from one session, carrying that session's own fields (REQ-PL-3.4.5
+ * on top of loadStudentActivityForIds's session-level shape) plus the question's own text and
+ * the student's answer to it.
+ */
+export type StudentQuestionActivityRow = {
+  userId: string;
+  activityType: string;
+  difficultyLevel: number;
+  status: string;
+  startedAt: string;
+  endedAt: string | null;
+  cumulativeScore: number;
+  maxScore: number;
+  passed: boolean;
+  questionCount: number;
+  answeredCount: number;
+  /** 1-based position within its own session's draw (session_to_question/session_to_user_story's position + 1). */
+  questionNumber: number;
+  questionText: string;
+  /** null when the question/prompt was drawn but never answered/submitted — still a row, not omitted. */
+  answerText: string | null;
+};
+
+/**
+ * The per-question counterpart to loadStudentActivityForIds (REQ-PL-3.4.5): every session-level
+ * field that function already returns, repeated onto one row per question or prompt drawn into
+ * that session, rather than collapsed into a single row per session. Backs the course CSV
+ * export's per-question breakdown — each row carries the question/prompt's own text and the
+ * student's submitted answer (blank/null if the question was drawn but never answered) alongside
+ * the session it belongs to.
+ *
+ * A session's draw lives in session_to_question (MCQ) or session_to_user_story (LLM-graded), never
+ * both, so both are read for every session and only the one that has rows contributes output. A
+ * session with nothing drawn yet contributes no rows — unlike the session-granularity function,
+ * there is no "row per question" to stand in for it.
+ *
+ * Chunked by session id the same way loadProgressForSessions is (GitHub #275) — a course-wide
+ * caller can pass several hundred session ids — and the question/answer/user_story text lookups
+ * are themselves chunked by the ids actually referenced, for the same reason.
+ */
+export async function loadStudentQuestionActivityForIds(
+  supabase: SupabaseClient,
+  studentIds: string[],
+): Promise<{ rows: StudentQuestionActivityRow[] | null; error: unknown }> {
+  if (studentIds.length === 0) return { rows: [], error: null };
+
+  const { data: sessionData, error: sessionError } = await supabase
+    .from('session_log')
+    .select(SESSION_COLUMNS)
+    .in('user_id', studentIds)
+    .order('ended_at', { ascending: false })
+    .order('started_at', { ascending: false });
+
+  if (sessionError) return { rows: null, error: sessionError };
+
+  const sessions = (sessionData ?? []) as SessionRecord[];
+  const sessionIds = sessions.map((s) => s.session_id);
+
+  if (sessionIds.length === 0) return { rows: [], error: null };
+
+  const [
+    { data: questionPositions, error: qpError },
+    { data: answeredLogs, error: alError },
+    { data: storyPositions, error: spError },
+    { data: submissions, error: subError },
+  ] = await Promise.all([
+    fetchAllRowsByIds(sessionIds, (chunk, from, to) =>
+      supabase.from('session_to_question').select('session_id, position, question_id').in('session_id', chunk).range(from, to),
+    ),
+    fetchAllRowsByIds(sessionIds, (chunk, from, to) =>
+      supabase
+        .from('answered_question_log')
+        .select('session_id, question_id, submitted_option')
+        .in('session_id', chunk)
+        .range(from, to),
+    ),
+    fetchAllRowsByIds(sessionIds, (chunk, from, to) =>
+      supabase.from('session_to_user_story').select('session_id, position, user_story_id').in('session_id', chunk).range(from, to),
+    ),
+    fetchAllRowsByIds(sessionIds, (chunk, from, to) =>
+      supabase.from('submission').select('session_id, user_story_id, submitted_text').in('session_id', chunk).range(from, to),
+    ),
+  ]);
+
+  const positionError = qpError ?? alError ?? spError ?? subError ?? null;
+  if (positionError) return { rows: null, error: positionError };
+
+  type QuestionPosition = { session_id: string; position: number; question_id: string };
+  type AnsweredLog = { session_id: string; question_id: string; submitted_option: string };
+  type StoryPosition = { session_id: string; position: number; user_story_id: string };
+  type Submission = { session_id: string; user_story_id: string; submitted_text: string };
+
+  const questionRows = (questionPositions ?? []) as QuestionPosition[];
+  const answeredRows = (answeredLogs ?? []) as AnsweredLog[];
+  const storyRows = (storyPositions ?? []) as StoryPosition[];
+  const submissionRows = (submissions ?? []) as Submission[];
+
+  const questionIds = [...new Set(questionRows.map((r) => r.question_id))];
+  const answerIds = [...new Set(answeredRows.map((r) => r.submitted_option))];
+  const userStoryIds = [...new Set(storyRows.map((r) => r.user_story_id))];
+
+  const [
+    { data: questionTextRows, error: qError },
+    { data: answerTextRows, error: aError },
+    { data: storyTextRows, error: usError },
+  ] = await Promise.all([
+    fetchAllRowsByIds(questionIds, (chunk, from, to) =>
+      supabase.from('question').select('question_id, question_prompt').in('question_id', chunk).range(from, to),
+    ),
+    fetchAllRowsByIds(answerIds, (chunk, from, to) =>
+      supabase.from('answer').select('answer_id, option_text').in('answer_id', chunk).range(from, to),
+    ),
+    fetchAllRowsByIds(userStoryIds, (chunk, from, to) =>
+      supabase.from('user_story').select('user_story_id, story_text').in('user_story_id', chunk).range(from, to),
+    ),
+  ]);
+
+  const textError = qError ?? aError ?? usError ?? null;
+  if (textError) return { rows: null, error: textError };
+
+  const questionTextById = new Map(
+    ((questionTextRows ?? []) as { question_id: string; question_prompt: string }[]).map((r) => [
+      r.question_id,
+      r.question_prompt,
+    ]),
+  );
+  const answerTextById = new Map(
+    ((answerTextRows ?? []) as { answer_id: string; option_text: string }[]).map((r) => [r.answer_id, r.option_text]),
+  );
+  const storyTextById = new Map(
+    ((storyTextRows ?? []) as { user_story_id: string; story_text: string }[]).map((r) => [r.user_story_id, r.story_text]),
+  );
+
+  const submittedOptionByKey = new Map(answeredRows.map((r) => [`${r.session_id}:${r.question_id}`, r.submitted_option]));
+  const submittedTextByKey = new Map(submissionRows.map((r) => [`${r.session_id}:${r.user_story_id}`, r.submitted_text]));
+
+  const questionRowsBySession = new Map<string, QuestionPosition[]>();
+  for (const row of questionRows) {
+    (questionRowsBySession.get(row.session_id) ?? questionRowsBySession.set(row.session_id, []).get(row.session_id)!).push(row);
+  }
+
+  const storyRowsBySession = new Map<string, StoryPosition[]>();
+  for (const row of storyRows) {
+    (storyRowsBySession.get(row.session_id) ?? storyRowsBySession.set(row.session_id, []).get(row.session_id)!).push(row);
+  }
+
+  const answeredCountBySession = new Map<string, number>();
+  for (const [sessionId, list] of questionRowsBySession) {
+    answeredCountBySession.set(
+      sessionId,
+      list.filter((row) => submittedOptionByKey.has(`${sessionId}:${row.question_id}`)).length,
+    );
+  }
+  for (const [sessionId, list] of storyRowsBySession) {
+    answeredCountBySession.set(
+      sessionId,
+      list.filter((row) => submittedTextByKey.has(`${sessionId}:${row.user_story_id}`)).length,
+    );
+  }
+
+  const rows: StudentQuestionActivityRow[] = [];
+
+  for (const session of sessions) {
+    const sessionFields = {
+      userId: session.user_id,
+      activityType: session.activity_type,
+      difficultyLevel: session.difficulty_level,
+      status: session.status,
+      startedAt: session.started_at,
+      endedAt: session.ended_at,
+      cumulativeScore: session.cumulative_score,
+      maxScore: session.max_score,
+      passed: session.passed,
+    };
+
+    const mcqRows = (questionRowsBySession.get(session.session_id) ?? []).slice().sort((a, b) => a.position - b.position);
+    const storyRowsForSession = (storyRowsBySession.get(session.session_id) ?? []).slice().sort((a, b) => a.position - b.position);
+    const questionCount = mcqRows.length + storyRowsForSession.length;
+    const answeredCount = answeredCountBySession.get(session.session_id) ?? 0;
+
+    for (const row of mcqRows) {
+      const submittedOption = submittedOptionByKey.get(`${row.session_id}:${row.question_id}`);
+
+      rows.push({
+        ...sessionFields,
+        questionCount,
+        answeredCount,
+        questionNumber: row.position + 1,
+        questionText: questionTextById.get(row.question_id) ?? '',
+        answerText: submittedOption !== undefined ? answerTextById.get(submittedOption) ?? '' : null,
+      });
+    }
+
+    for (const row of storyRowsForSession) {
+      rows.push({
+        ...sessionFields,
+        questionCount,
+        answeredCount,
+        questionNumber: row.position + 1,
+        questionText: storyTextById.get(row.user_story_id) ?? '',
+        answerText: submittedTextByKey.get(`${row.session_id}:${row.user_story_id}`) ?? null,
+      });
+    }
+  }
+
+  return { rows, error: null };
 }
 
 /**

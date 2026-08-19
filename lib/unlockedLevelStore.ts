@@ -19,20 +19,31 @@
 
 import { clearJsonStore, readJsonStore, writeJsonStore } from './clientStorage';
 
-const STORAGE_KEY = 'rc_seen_unlocked_level_v1';
+// Bumped to v2 (GitHub #583): the per-activity key grew a third segment (assembledQuizId), so a
+// v1 key (bare activityType) would never match a v2 lookup for the identical activity — rather
+// than leave v1 entries silently unreadable forever under the same key, the whole store starts
+// fresh, same as lib/completedAttemptsStore.ts's v2 -> v3 migration.
+const STORAGE_KEY = 'rc_seen_unlocked_level_v2';
 
-/** activityType -> the highest selectable level as of this student's last visit. */
+/** "activityType:assembledQuizId" -> the highest selectable level as of this student's last visit. */
 type SeenLevelMap = Partial<Record<string, number>>;
 
 type SeenUnlockedLevelStore = Partial<Record<string, SeenLevelMap>>; // studentId -> SeenLevelMap
+
+// GitHub #583: assembledQuizId disambiguates two quizzes sharing a catalog, so their unlock
+// animations don't share one baseline. Omitted -> the exact pre-#583 key, for a caller that
+// doesn't know a specific quiz (a bare/bookmarked link).
+function levelKey(activityType: string, assembledQuizId?: string | null): string {
+  return `${activityType}:${assembledQuizId ?? 'none'}`;
+}
 
 /**
  * The highest selectable level this device last recorded for the student on one activity, or null
  * if it has never recorded one — a first visit, or the store was cleared on logout.
  */
-export function getSeenUnlockedLevel(studentId: string, activityType: string): number | null {
+export function getSeenUnlockedLevel(studentId: string, activityType: string, assembledQuizId?: string | null): number | null {
   const store = readJsonStore<SeenUnlockedLevelStore>(STORAGE_KEY);
-  return store[studentId]?.[activityType] ?? null;
+  return store[studentId]?.[levelKey(activityType, assembledQuizId)] ?? null;
 }
 
 /**
@@ -40,9 +51,9 @@ export function getSeenUnlockedLevel(studentId: string, activityType: string): n
  * animate: recording unconditionally is what makes the diff idempotent, so a background
  * revalidation of the same data cannot re-trigger an animation that is already playing.
  */
-export function recordSeenUnlockedLevel(studentId: string, activityType: string, level: number): void {
+export function recordSeenUnlockedLevel(studentId: string, activityType: string, level: number, assembledQuizId?: string | null): void {
   const store = readJsonStore<SeenUnlockedLevelStore>(STORAGE_KEY);
-  store[studentId] = { ...store[studentId], [activityType]: level };
+  store[studentId] = { ...store[studentId], [levelKey(activityType, assembledQuizId)]: level };
   writeJsonStore(STORAGE_KEY, store);
 }
 

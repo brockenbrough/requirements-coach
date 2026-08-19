@@ -185,6 +185,9 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
         totalQuestions: added?.questionCount ?? 0,
         excludedCount: 0,
         activeCount: added?.questionCount ?? 0,
+        // allCatalogs (GET /api/instructor/quizzes) only ever lists catalogs the caller created —
+        // a built-in catalog (creator_id IS NULL) never appears there to be added from here.
+        isBuiltIn: false,
       },
     ]);
     setSelectedCatalogToAdd('');
@@ -236,7 +239,7 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
     }
 
     setExtraUserStories((current) => (current ?? []).filter((s) => s.userStoryId !== story.userStoryId));
-    showToast('Prompt removed from this quiz.');
+    showToast('Question removed from this quiz.');
     setRetryCount((count) => count + 1); // re-fetch level coverage now that a hand-picked prompt is gone from the pool
   }
 
@@ -390,7 +393,7 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
                       <p className="font-extrabold text-brand-navy hover:text-brand-purple hover:underline">{catalog.name}</p>
                       {catalog.description ? <p className="mt-0.5 text-xs font-semibold text-gray-500">{catalog.description}</p> : null}
                       <p className="mt-1 text-xs font-bold text-gray-600">
-                        {catalog.activeCount} of {catalog.totalQuestions} {catalog.gradingKind === 'llm-graded' ? 'prompts' : 'questions'} active
+                        {catalog.activeCount} of {catalog.totalQuestions} questions active
                         {catalog.excludedCount > 0 ? ` · ${catalog.excludedCount} excluded for this quiz` : ''}
                       </p>
                     </Link>
@@ -420,13 +423,17 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
                       className="flex flex-wrap items-center justify-between gap-3 rounded-brand-lg border border-gray-100 bg-gray-50 p-4"
                     >
                       <p className="min-w-0 flex-1 font-semibold text-brand-navy">{catalog.name}</p>
-                      <button
-                        type="button"
-                        onClick={() => setTitleLadderTarget(catalog)}
-                        className="flex-none rounded-full border border-gray-300 bg-white px-4 py-1.5 text-xs font-extrabold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple"
-                      >
-                        Edit titles
-                      </button>
+                      {catalog.isBuiltIn ? (
+                        <span className="flex-none text-xs font-bold text-gray-400">Built-in — read-only</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setTitleLadderTarget(catalog)}
+                          className="flex-none rounded-full border border-gray-300 bg-white px-4 py-1.5 text-xs font-extrabold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple"
+                        >
+                          Edit titles
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -437,7 +444,7 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
               <>
                 <p className="mb-3 text-xs font-extrabold uppercase tracking-wide text-gray-400">Grading Rubrics</p>
                 <p className="mb-4 text-xs font-semibold text-gray-500">
-                  Each catalog's own grading rubric — a submission is scored against whichever catalog its prompt
+                  Each catalog's own grading rubric — a submission is scored against whichever catalog its question
                   came from. Changing one only affects submissions graded afterward.
                 </p>
                 <div className="mb-6 space-y-3">
@@ -454,13 +461,17 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
                           <p className="text-sm font-medium text-gray-400">Using the built-in default rubric.</p>
                         )}
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setRatingPromptTarget(catalog)}
-                        className="flex-none rounded-full border border-gray-300 bg-white px-4 py-1.5 text-xs font-extrabold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple"
-                      >
-                        {catalog.ratingPrompt ? 'Edit rubric' : 'Set rubric'}
-                      </button>
+                      {catalog.isBuiltIn ? (
+                        <span className="flex-none text-xs font-bold text-gray-400">Built-in — read-only</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setRatingPromptTarget(catalog)}
+                          className="flex-none rounded-full border border-gray-300 bg-white px-4 py-1.5 text-xs font-extrabold text-gray-600 transition hover:border-brand-purple hover:text-brand-purple"
+                        >
+                          {catalog.ratingPrompt ? 'Edit rubric' : 'Set rubric'}
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -503,12 +514,12 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
                   disabled={catalogOptionsForNewItem.length === 0}
                   title={
                     catalogOptionsForNewItem.length === 0
-                      ? `No catalogs exist yet to file a new ${quiz.gradingKind === 'llm-graded' ? 'prompt' : 'question'} under.`
+                      ? 'No catalogs exist yet to file a new question under.'
                       : undefined
                   }
                   className="flex-none rounded-full border border-brand-purple/40 px-4 py-1.5 text-xs font-extrabold text-brand-purple transition hover:bg-brand-purple/10 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {quiz.gradingKind === 'llm-graded' ? 'Add prompt' : 'Create new question'}
+                  {quiz.gradingKind === 'llm-graded' ? 'Add question' : 'Create new question'}
                 </button>
                 <button
                   type="button"
@@ -520,7 +531,7 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
               </div>
             </div>
             <p className="mb-4 text-xs font-semibold text-gray-500">
-              Questions and prompts picked here count toward this quiz&apos;s pool regardless of whether their own
+              Questions picked here count toward this quiz&apos;s pool regardless of whether their own
               catalog is linked above. Removing one only drops it from this quiz — the original item, its catalog,
               and every other quiz are unaffected.
             </p>

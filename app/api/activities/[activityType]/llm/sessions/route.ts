@@ -54,11 +54,17 @@ export async function POST(request: Request, { params }: { params: { activityTyp
     body = null;
   }
 
-  const { difficultyLevel } = (body ?? {}) as { difficultyLevel?: unknown };
+  const { difficultyLevel, assembledQuizId } = (body ?? {}) as { difficultyLevel?: unknown; assembledQuizId?: unknown };
   const hasReplayLevel = difficultyLevel !== undefined && difficultyLevel !== null;
 
   if (hasReplayLevel && (typeof difficultyLevel !== 'number' || !Number.isInteger(difficultyLevel) || difficultyLevel < 1)) {
     return Response.json({ error: 'difficultyLevel must be a positive integer.' }, { status: 400 });
+  }
+
+  // GitHub #583: optional, same as POST /api/sessions — disambiguates which of possibly several
+  // assembled quizzes composing this catalog granted access.
+  if (assembledQuizId !== undefined && assembledQuizId !== null && typeof assembledQuizId !== 'string') {
+    return Response.json({ error: 'assembledQuizId must be a string.' }, { status: 400 });
   }
 
   const supabase = getSupabaseClient();
@@ -79,17 +85,24 @@ export async function POST(request: Request, { params }: { params: { activityTyp
   const { data: { user }, error: authError } = await supabase.auth.getUser(token);
   if (authError || !user) return Response.json({ error: 'Invalid or expired token.' }, { status: 401 });
 
-  const { link: accessLink, error: accessError } = await getAccessibleCourseForActivity(supabase, activityType, user.id);
+  const { link: accessLink, error: accessError } = await getAccessibleCourseForActivity(supabase, activityType, user.id, {
+    assembledQuizId: assembledQuizId as string | undefined,
+  });
   if (accessError) return Response.json({ error: accessError.message }, { status: 500 });
   if (!accessLink) {
     return Response.json({ error: 'You are not enrolled in a course that offers this activity.' }, { status: 403 });
   }
 
-  const existing = await findInProgressSession(supabase, user.id, activityType);
+  const existing = await findInProgressSession(supabase, user.id, activityType, accessLink.assembledQuizId);
   if (existing.error) return Response.json({ error: existing.error.message }, { status: 500 });
   if (existing.session) return respondWithSession(supabase, existing.session, { created: false });
 
-  const { startLevel: allowedLevel, error: levelError } = await findStartDifficultyLevel(supabase, user.id, activityType);
+  const { startLevel: allowedLevel, error: levelError } = await findStartDifficultyLevel(
+    supabase,
+    user.id,
+    activityType,
+    accessLink.assembledQuizId,
+  );
   if (levelError) return Response.json({ error: levelError.message }, { status: 500 });
 
   let startLevel: number;
@@ -138,6 +151,7 @@ export async function POST(request: Request, { params }: { params: { activityTyp
       session_id: sessionId,
       user_id: user.id,
       activity_type: activityType,
+      assembled_quiz_id: accessLink.assembledQuizId,
       difficulty_level: startLevel,
       status: 'in-progress',
       cumulative_score: 0,
@@ -150,7 +164,7 @@ export async function POST(request: Request, { params }: { params: { activityTyp
   if (insertError || !session) {
     // A parallel request won uq_session_log_one_active — return that session instead of failing.
     if (insertError?.code === UNIQUE_VIOLATION) {
-      const raced = await findInProgressSession(supabase, user.id, activityType);
+      const raced = await findInProgressSession(supabase, user.id, activityType, accessLink.assembledQuizId);
       if (raced.session) return respondWithSession(supabase, raced.session, { created: false });
     }
     // session_log.user_id references "user"(user_id): authenticated but no profile row yet.

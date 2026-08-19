@@ -43,20 +43,22 @@ type AnswerOutcome = {
 function QuizPlayView({
   params,
   courseId,
+  assembledQuizId,
 }: {
   params: { slug: string };
   /** GitHub #524: the course this quiz was reached from, for the "back to course" link below. */
   courseId: string | null;
+  /** GitHub #583: the ?quiz= the wrapper below already parsed — passed down rather than a second
+   *  useSearchParams() call, since this component's own useResolvedActivity call is otherwise the
+   *  only reason it needs to know about the URL at all (see this function's own header comment). */
+  assembledQuizId?: string;
 }) {
   const router = useRouter();
   // Also redirects an instructor account away (GitHub #82) — this page is the "quiz
   // durchführen" flow itself, exactly what an instructor must not be able to reach.
   const { token, profile, loading, authorized } = useRequireRole("student");
   const { refreshScore } = useUser();
-  const { activity, status: activityStatus } = useResolvedActivity(token, params.slug);
-  // GitHub #524: appended to every internal navigation back to the detail page, so the course
-  // context this session was reached through survives the round trip.
-  const courseQuery = courseId ? `?course=${encodeURIComponent(courseId)}` : '';
+  const { activity, status: activityStatus } = useResolvedActivity(token, params.slug, assembledQuizId);
   const backHref = courseId ? `/courses/${courseId}` : `/activities/${params.slug}`;
 
   const [session, setSession] = useState<CurrentSessionResult | null>(null);
@@ -86,10 +88,21 @@ function QuizPlayView({
    * without any explicit reload: syncFromServer's identity changes whenever token does, and
    * UserProvider refreshes the token on its own 45-minute timer.
    */
+  // GitHub #524/#583: appended to every internal navigation back to the detail page, so both the
+  // course context this session was reached through and the specific assembled quiz it was
+  // resolved via survive the round trip.
+  const backQuery = (() => {
+    const searchParams = new URLSearchParams();
+    if (courseId) searchParams.set('course', courseId);
+    if (activity?.assembledQuizId) searchParams.set('quiz', activity.assembledQuizId);
+    const query = searchParams.toString();
+    return query ? `?${query}` : '';
+  })();
+
   const syncFromServer = useCallback(async () => {
     if (!token || !activity || showSummary) return;
 
-    const result = await loadCurrentSession(token, activity.activityType);
+    const result = await loadCurrentSession(token, activity.activityType, activity.assembledQuizId ?? undefined);
 
     if (!result.ok) {
       // The session expired mid-play: back to login, not a dead-end error screen.
@@ -103,7 +116,7 @@ function QuizPlayView({
 
     // Nothing running: the student got here without starting, or already finished.
     if (!result.data.session) {
-      router.replace(`/activities/${activity.slug}${courseQuery}`);
+      router.replace(`/activities/${activity.slug}${backQuery}`);
       return;
     }
 
@@ -112,7 +125,7 @@ function QuizPlayView({
     setCumulativeScore(result.data.session.cumulative_score);
     setAnsweredCount(result.data.answers.length);
     setOutcome(null);
-  }, [token, activity, router, showSummary, courseQuery]);
+  }, [token, activity, router, showSummary, backQuery]);
 
   useEffect(() => {
     void syncFromServer();
@@ -159,7 +172,7 @@ function QuizPlayView({
         <div className="mx-auto max-w-xl rounded-brand-lg border border-brand-danger/40 bg-brand-danger/10 p-6 text-sm font-semibold text-brand-danger-light">
           {error}
           <Link
-            href={`/activities/${activity.slug}${courseQuery}`}
+            href={`/activities/${activity.slug}${backQuery}`}
             className="ml-1 underline hover:text-white"
           >
             Back to the activity
@@ -316,6 +329,7 @@ function QuizPlayView({
         }),
         loadCompletedAttempts(token, profile.user_id, activity!.activityType, {
           forceRefresh: true,
+          assembledQuizId: activity!.assembledQuizId ?? undefined,
         }),
       ]);
     }
@@ -325,7 +339,7 @@ function QuizPlayView({
     // caches above, not awaited: nothing on this page reads it, only the leaderboard page and
     // preview do, on their own next mount) rather than a targeted, per-course forceRefresh.
     clearCachedLeaderboard();
-    router.push(`/activities/${activity!.slug}${courseQuery}`);
+    router.push(`/activities/${activity!.slug}${backQuery}`);
   }
 
   // Once the session is complete, currentQuestion legitimately becomes undefined (nextPosition
@@ -459,9 +473,10 @@ function QuizPlayView({
  * cost, and paying one extra fetch in the custom-catalog case is cheaper than threading the
  * resolved activity through a body this issue is otherwise not touching at all.
  *
- * Split out because useSearchParams() (GitHub #524's ?course=) forces the nearest Suspense
- * boundary to render client-side — without one, `npm run build` fails prerendering this route,
- * the same reason app/activities/[slug]/page.tsx is split into a Content component this way.
+ * Split out because useSearchParams() (GitHub #524's ?course= and #583's ?quiz=) forces the
+ * nearest Suspense boundary to render client-side — without one, `npm run build` fails
+ * prerendering this route, the same reason app/activities/[slug]/page.tsx is split into a
+ * Content component this way.
  */
 function PlayActivityContent({
   params,
@@ -469,10 +484,14 @@ function PlayActivityContent({
   params: { slug: string };
 }) {
   const { token, loading, authorized } = useRequireRole("student");
-  const { activity, status: activityStatus } = useResolvedActivity(token, params.slug);
+  const searchParams = useSearchParams();
   // GitHub #524: the course the student followed from a course page card, or carried over from
-  // the detail page's own navigation into here (see QuizPlayView/LlmPlayView's courseQuery).
-  const courseId = useSearchParams().get('course');
+  // the detail page's own navigation into here (see QuizPlayView/LlmPlayView's backQuery).
+  const courseId = searchParams.get('course');
+  // GitHub #583: the ?quiz= a student followed from a course page card, or carried over from the
+  // detail page's own navigation into here (see QuizPlayView/LlmPlayView's backQuery).
+  const quizParam = searchParams.get('quiz') ?? undefined;
+  const { activity, status: activityStatus } = useResolvedActivity(token, params.slug, quizParam);
 
   if (loading || !authorized) return null;
   if (activityStatus === 'loading') return null;
@@ -495,7 +514,7 @@ function PlayActivityContent({
   return activity.gradingKind === 'llm-graded' ? (
     <LlmPlayView activity={activity} courseId={courseId} />
   ) : (
-    <QuizPlayView params={params} courseId={courseId} />
+    <QuizPlayView params={params} courseId={courseId} assembledQuizId={quizParam} />
   );
 }
 

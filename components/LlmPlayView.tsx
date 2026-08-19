@@ -48,9 +48,6 @@ export function LlmPlayView({
   // durchführen" flow itself, exactly what an instructor must not be able to reach.
   const { token, profile, loading, authorized } = useRequireRole('student');
   const { refreshScore } = useUser();
-  // GitHub #524: appended to every internal navigation back to the detail page, so the course
-  // context this session was reached through survives the round trip.
-  const courseQuery = courseId ? `?course=${encodeURIComponent(courseId)}` : '';
   const backHref = courseId ? `/courses/${courseId}` : `/activities/${activity.slug}`;
 
   const [session, setSession] = useState<CurrentLlmSessionResult | null>(null);
@@ -73,10 +70,21 @@ export function LlmPlayView({
    * answers for an in-progress one), so re-syncing at that point would find session: null and
    * navigate away, discarding the summary before the student has dismissed it.
    */
+  // GitHub #524/#583: appended to every internal navigation back to the detail page, so both the
+  // course context this session was reached through and the specific assembled quiz it was
+  // resolved via survive the round trip.
+  const backQuery = (() => {
+    const params = new URLSearchParams();
+    if (courseId) params.set('course', courseId);
+    if (activity.assembledQuizId) params.set('quiz', activity.assembledQuizId);
+    const query = params.toString();
+    return query ? `?${query}` : '';
+  })();
+
   const syncFromServer = useCallback(async () => {
     if (!token || showSummary) return;
 
-    const result = await loadCurrentLlmSession(token, activity.activityType);
+    const result = await loadCurrentLlmSession(token, activity.activityType, activity.assembledQuizId ?? undefined);
 
     if (!result.ok) {
       if (result.status === 401) {
@@ -89,7 +97,7 @@ export function LlmPlayView({
 
     // Nothing running: the student got here without starting, or already finished.
     if (!result.data.session) {
-      router.replace(`/activities/${activity.slug}${courseQuery}`);
+      router.replace(`/activities/${activity.slug}${backQuery}`);
       return;
     }
 
@@ -103,7 +111,7 @@ export function LlmPlayView({
     if (result.data.nextPosition === null) {
       setShowSummary(true);
     }
-  }, [token, router, showSummary, activity.activityType, courseQuery]);
+  }, [token, router, showSummary, activity.activityType, activity.assembledQuizId, activity.slug, backQuery]);
 
   useEffect(() => {
     void syncFromServer();
@@ -116,7 +124,7 @@ export function LlmPlayView({
       <AppShell active="activities">
         <div className="mx-auto max-w-xl rounded-brand-lg border border-brand-danger/40 bg-brand-danger/10 p-6 text-sm font-semibold text-brand-danger-light">
           {error}
-          <Link href={`/activities/${activity.slug}${courseQuery}`} className="ml-1 underline hover:text-white">
+          <Link href={`/activities/${activity.slug}${backQuery}`} className="ml-1 underline hover:text-white">
             Back to the activity
           </Link>
         </div>
@@ -246,7 +254,10 @@ export function LlmPlayView({
       // correctly; this brings the LLM-graded flow in line with the same call.
       await Promise.all([
         refreshScore(),
-        loadCompletedAttempts(token, profile.user_id, activity.activityType, { forceRefresh: true }),
+        loadCompletedAttempts(token, profile.user_id, activity.activityType, {
+          forceRefresh: true,
+          assembledQuizId: activity.assembledQuizId ?? undefined,
+        }),
         loadActivityLog(token, profile.user_id, { forceRefresh: true }),
       ]);
     }
@@ -255,7 +266,7 @@ export function LlmPlayView({
     // PlayActivityPage's own handleFinishSummary, which already clears this cache. Missing here
     // until now, so the leaderboard kept showing the pre-session rank after an LLM-graded pass.
     clearCachedLeaderboard();
-    router.push(`/activities/${activity.slug}${courseQuery}`);
+    router.push(`/activities/${activity.slug}${backQuery}`);
   }
 
   // Once the session is complete, currentStory legitimately becomes undefined (nextPosition is
@@ -288,12 +299,12 @@ export function LlmPlayView({
   const storyCount = session.submissions.length;
   const summaryMessage =
     storyCount === 0
-      ? 'No prompts were graded in this session.'
+      ? 'No questions were graded in this session.'
       : passedCount === storyCount
-        ? `Great job — all ${storyCount} prompts passed!`
+        ? `Great job — all ${storyCount} questions passed!`
         : passedCount === 0
-          ? `Keep practicing — none of the ${storyCount} prompts passed this time.`
-          : `Nice progress — ${passedCount} of ${storyCount} prompts passed.`;
+          ? `Keep practicing — none of the ${storyCount} questions passed this time.`
+          : `Nice progress — ${passedCount} of ${storyCount} questions passed.`;
   const summaryItems: SessionSummaryItem[] = orderedStories.map((story) => {
     const submission = session.submissions.find((s) => s.userStoryId === story.userStoryId);
     return {

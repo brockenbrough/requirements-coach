@@ -29,10 +29,15 @@ export async function GET(request: Request) {
   const token = getToken(request);
   if (!token) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const activityType = new URL(request.url).searchParams.get('activityType');
+  const searchParams = new URL(request.url).searchParams;
+  const activityType = searchParams.get('activityType');
   // Narrows activityType to string for the rest of the function — isActivityType's async check
   // below can no longer double as a type predicate the way the old synchronous version did.
   if (activityType === null) return Response.json({ error: 'Unknown activity type.' }, { status: 400 });
+
+  // GitHub #583: optional — scopes history to one specific quiz when the caller knows it, so two
+  // quizzes sharing a catalog don't show each other's attempts.
+  const assembledQuizId = searchParams.get('assembledQuizId') ?? undefined;
 
   const supabase = getSupabaseClient();
   if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
@@ -48,7 +53,7 @@ export async function GET(request: Request) {
   const { data: { user }, error: authError } = await supabase.auth.getUser(token);
   if (authError || !user) return Response.json({ error: 'Invalid or expired token.' }, { status: 401 });
 
-  const { attempts, error } = await loadCompletedAttempts(supabase, user.id, activityType);
+  const { attempts, error } = await loadCompletedAttempts(supabase, user.id, activityType, assembledQuizId);
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
   return Response.json({ attempts }, { status: 200 });

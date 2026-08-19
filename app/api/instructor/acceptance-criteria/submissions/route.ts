@@ -2,6 +2,7 @@ import { getSupabaseClient } from '../../../../../lib/supabase';
 import { requireInstructor } from '../../../../../lib/instructorAuth';
 import { listOwnedActivityTypes } from '../../../../../lib/activityTypeQueries';
 import { listCoursesForActivityTypes } from '../../../../../lib/activityCourseQueries';
+import { listOwnedCourseIds, loadEnrolledCourseIdsByStudentForCourses } from '../../../../../lib/courseQueries';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -44,7 +45,22 @@ function studentDisplayName(student: SubmissionRow['student']): string {
  * does for quiz attempts via session_log.difficulty_level.
  *
  * courses (GitHub #474) is the same per-catalog course lookup GET /api/instructor/activities
- * attaches to quiz attempts — [] means the catalog isn't linked to any course yet.
+ * attaches to quiz attempts — [] means the catalog isn't linked to any course yet. quizName
+ * (GitHub #500 follow-up) rides the same listCoursesForActivityTypes call — the assembled quiz's
+ * own name, not the catalog's, so the combined instructor table's QUIZ column doesn't fall back
+ * to the raw activity_type key the way it used to.
+ *
+ * A submission only counts if its catalog is currently reachable via a live
+ * assembled_quiz/assembled_quiz_catalog row for a course this instructor owns AND the submitting
+ * student is currently enrolled in — the exact same "shared course" filter
+ * lib/sessionQueries.ts's loadAllStudentActivity applies to quiz attempts, and for the identical
+ * reason: without it, a submission on a catalog whose only linking course was later deleted (or
+ * whose submitter has since left that course) would keep counting here forever, since course
+ * deletion cascades away student_course and assembled_quiz/assembled_quiz_catalog but never
+ * touches submission. Before this, the combined Instructor Dashboard only avoided the symptom via
+ * its own client-side ownedEntries filter (course ownership only, not enrollment) — this closes
+ * the gap at the source so every reader (the dashboard, and the All Students page, which has no
+ * such client-side filter of its own) sees the same correctly-scoped submissions.
  *
  * An empty list is a 200.
  */
@@ -62,13 +78,15 @@ export async function GET(request: Request) {
         );
   }
 
-  const { activityTypes: ownedTypes, error: ownedError } = await listOwnedActivityTypes(
-    supabase,
-    guard.user_id,
-    'llm-graded',
-  );
+  const [{ activityTypes: ownedTypes, error: ownedError }, { courseIds: ownedCourseIds, error: courseIdsError }] = await Promise.all([
+    listOwnedActivityTypes(supabase, guard.user_id, 'llm-graded'),
+    listOwnedCourseIds(supabase, guard.user_id),
+  ]);
   if (ownedError || !ownedTypes) {
     return Response.json({ error: ownedError?.message ?? 'Could not load your catalogs.' }, { status: 500 });
+  }
+  if (courseIdsError || !ownedCourseIds) {
+    return Response.json({ error: courseIdsError?.message ?? 'Could not load your courses.' }, { status: 500 });
   }
   if (ownedTypes.length === 0) return Response.json({ submissions: [] }, { status: 200 });
 
@@ -85,18 +103,32 @@ export async function GET(request: Request) {
 
   if (studentId) query = query.eq('user_id', studentId);
 
-  const { data, error } = await query;
+  const [{ data, error }, coursesResult, enrollmentResult] = await Promise.all([
+    query,
+    // GitHub #474: same "which course(s) is this catalog linked to" resolution
+    // GET /api/instructor/activities uses for quiz attempts, scoped to ownedTypes so this stays
+    // one extra round trip regardless of how many submissions there are.
+    listCoursesForActivityTypes(supabase, ownedTypes),
+    loadEnrolledCourseIdsByStudentForCourses(supabase, ownedCourseIds),
+  ]);
 
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
-  // GitHub #474: same "which course(s) is this catalog linked to" resolution
-  // GET /api/instructor/activities uses for quiz attempts, scoped to ownedTypes so this stays one
-  // extra round trip regardless of how many submissions there are.
-  const { coursesByActivityType, error: coursesError } = await listCoursesForActivityTypes(supabase, ownedTypes);
+  const { coursesByActivityType, quizNameByActivityType, error: coursesError } = coursesResult;
   if (coursesError) return Response.json({ error: coursesError.message }, { status: 500 });
 
-  const submissions = (data ?? []).map((row) => {
-    const r = row as unknown as SubmissionRow;
+  const { enrollmentsByStudent, error: enrollmentError } = enrollmentResult;
+  if (enrollmentError) return Response.json({ error: enrollmentError.message }, { status: 500 });
+
+  // Only a submission whose catalog is still linked to a course this instructor owns AND the
+  // submitting student is still enrolled in counts — see this route's own doc comment above.
+  const rows = ((data ?? []) as unknown as SubmissionRow[]).filter((row) => {
+    const linkedCourses = coursesByActivityType!.get(row.story.activity_type) ?? [];
+    const enrolledCourseIds = enrollmentsByStudent!.get(row.student.user_id);
+    return !!enrolledCourseIds && linkedCourses.some((course) => enrolledCourseIds.has(course.courseId));
+  });
+
+  const submissions = rows.map((r) => {
     return {
       submissionId: r.submission_id,
       studentId: r.student.user_id,
@@ -110,6 +142,7 @@ export async function GET(request: Request) {
       submittedAt: r.submitted_at,
       gradedAt: r.graded_at,
       courses: coursesByActivityType!.get(r.story.activity_type) ?? [],
+      quizName: quizNameByActivityType!.get(r.story.activity_type) ?? null,
     };
   });
 

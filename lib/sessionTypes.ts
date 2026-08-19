@@ -14,6 +14,9 @@ export type SessionRecord = {
   session_id: string;
   user_id: string;
   activity_type: string;
+  /** Which assembled_quiz this session was started through — GitHub #583. Null for a bare/
+   *  bookmarked link with no quiz context, or a legacy row from before this column existed. */
+  assembled_quiz_id: string | null;
   difficulty_level: number;
   started_at: string;
   ended_at: string | null;
@@ -47,6 +50,13 @@ export type InstructorActivityEntry = SessionListEntry & {
    * more than one course at once, so this is a list, not a single name.
    */
   courses: ActivityCourseRef[];
+  /**
+   * The assembled quiz's own name (GitHub #500 follow-up) — not the catalog's, so two different
+   * quizzes composed from the same catalog show up distinguishably. Null means the catalog isn't
+   * linked to any assembled quiz yet, the same case courses: [] represents; toActivityLogEntry
+   * falls back to the catalog lookup and then the raw key when this is null.
+   */
+  quizName: string | null;
 };
 
 /**

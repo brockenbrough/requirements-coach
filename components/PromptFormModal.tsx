@@ -117,7 +117,7 @@ export function PromptFormModal({
           <div>
             <p className="text-xs font-extrabold uppercase tracking-wide text-brand-gold">LLM-Graded Task</p>
             <h2 id="prompt-form-title" className="mt-1 text-xl font-extrabold text-white">
-              {mode === 'edit' ? 'Edit Prompt' : 'New Question'}
+              {mode === 'edit' ? 'Edit Question' : 'New Question'}
             </h2>
           </div>
           <button
@@ -174,7 +174,7 @@ export function PromptFormModal({
             {/* Unlike the MCQ catalogs, this level is the whole pool selector for a round: a
                 student on level N only ever sees prompts stored at level N. */}
             <p className="mt-1.5 text-xs font-semibold text-brand-ink-muted/70">
-              Students see this prompt only in a round at this level.
+              Students see this question only in a round at this level.
             </p>
           </div>
 
@@ -189,7 +189,7 @@ export function PromptFormModal({
                     <path d="M20 6 9 17l-5-5" />
                   </svg>
                 </span>
-                {addedPrompts.length} prompt{addedPrompts.length === 1 ? '' : 's'} added this session — keep going, or press Done below.
+                {addedPrompts.length} question{addedPrompts.length === 1 ? '' : 's'} added this session — keep going, or press Done below.
               </p>
               <ul className="mt-2 max-h-24 space-y-1 overflow-y-auto text-xs font-semibold text-brand-ink-muted">
                 {addedPrompts.map((added) => (
@@ -202,7 +202,7 @@ export function PromptFormModal({
           ) : null}
 
           <label className="mb-1.5 block text-xs font-extrabold uppercase tracking-wide text-brand-ink-muted">
-            Prompt
+            Question
             <textarea
               ref={firstFieldRef}
               value={storyText}
@@ -243,7 +243,7 @@ export function PromptFormModal({
               disabled={!canSubmit}
               className="rounded-brand-md bg-brand-purple px-5 py-2 text-sm font-extrabold text-white transition hover:bg-brand-purple-dark disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {submitting ? 'Saving…' : mode === 'edit' ? 'Save Changes' : 'Add Prompt'}
+              {submitting ? 'Saving…' : mode === 'edit' ? 'Save Changes' : 'Add Question'}
             </button>
           </div>
         </form>

@@ -173,10 +173,18 @@ export function summarizeStudents(
  * The instructor-side counterpart (GitHub #171): the same adaptation, plus the two fields that
  * say whose attempt it was. Built on toActivityLogEntry rather than beside it, so the student
  * log and the class-wide table cannot drift apart in how they read a session.
+ *
+ * GitHub #500 follow-up: session.quizName (the assembled quiz's own name, resolved server-side by
+ * loadAllStudentActivity/loadStudentActivityForIds) is threaded through as a single-entry
+ * nameByType map — toActivityLogEntry's existing GitHub #476 mechanism, not a second one — so the
+ * combined instructor table's QUIZ column shows the quiz an attempt actually belongs to instead
+ * of falling all the way back to the raw activity_type key.
  */
 export function toStudentActivitySummary(session: InstructorActivityEntry): StudentActivitySummary {
+  const nameByType = session.quizName ? new Map([[session.activity_type, session.quizName]]) : undefined;
+
   return {
-    ...toActivityLogEntry(session),
+    ...toActivityLogEntry(session, nameByType),
     studentId: session.studentId,
     studentName: session.studentName,
     courses: session.courses,
@@ -210,6 +218,19 @@ export function toActivityLogEntry(session: SessionListEntry, nameByType?: Map<s
  * consumes that shape (ActivityLogTable's columns, InstructorActivityStats' per-activity
  * averages, resultStateOf) keeps working unchanged on either kind of row.
  */
+/**
+ * One attempt as the Instructor Dashboard's per-student detail page needs it (GitHub #127,
+ * later connected to real data) — every field of ActivityLogEntry plus the per-question
+ * correctness lib/studentAttemptMetrics.ts's streak calculation reduces over. Was declared in the
+ * now-deleted lib/mockStudentAttempts.ts; moved here once GET /api/instructor/students/{id}/detail
+ * (lib/studentDetailQueries.ts) started producing the real thing in the same shape.
+ */
+export type StudentAttemptDetail = ActivityLogEntry & {
+  questionResults: boolean[];
+  /** GitHub #474 shape reused here: every course this attempt's catalog is linked to. */
+  courses: { courseId: string; courseName: string }[];
+};
+
 export type QuizAttemptRow = StudentActivitySummary & { kind: 'quiz' };
 
 export type AcSubmissionRow = ActivityLogEntry & {
@@ -249,10 +270,13 @@ export function toAcSubmissionRow(submission: InstructorACSubmission): AcSubmiss
     studentId: submission.studentId,
     studentName: submission.studentName,
     // GitHub #379: read off the submission rather than hardcoded — more than one activity can be
-    // llm-graded now, so a fixed key would mislabel every instructor-created one. Same
-    // getActivityByType-else-key fallback toActivityLogEntry already uses for a custom catalog.
+    // llm-graded now, so a fixed key would mislabel every instructor-created one. GitHub #500
+    // follow-up: prefer the assembled quiz's own name (submission.quizName) over the
+    // getActivityByType-else-key fallback toActivityLogEntry uses for a custom catalog — the same
+    // fix toStudentActivitySummary applies to quiz attempts, so the combined table's QUIZ column
+    // can't show the raw key for one row kind and a real name for the other.
     activityType: submission.activityType,
-    activityName: getActivityByType(submission.activityType)?.name ?? submission.activityType,
+    activityName: submission.quizName ?? getActivityByType(submission.activityType)?.name ?? submission.activityType,
     level: submission.difficultyLevel,
     dateTime: submission.submittedAt,
     status: graded ? 'completed' : 'in-progress',

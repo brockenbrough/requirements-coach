@@ -62,6 +62,15 @@ export type ActivityDefinition = {
   gradingKind: GradingKind;
   /** MCQ activities populate this; LLM-graded activities (e.g. WRITE_ACCEPTANCE_CRITERIA) omit it. */
   questionBank?: Question[];
+  /**
+   * GitHub #583: which assembled_quiz this definition was resolved through, when known — lets a
+   * caller disambiguate two quizzes composed from the same catalog (session start/resume,
+   * progress, completed-attempts). null for the three static entries above (there is no DB row to
+   * read synchronously for a built-in slug reached without a ?quiz= param) and for a custom
+   * catalog resolved without one; app/courses/[id]/page.tsx and useResolvedActivity are the two
+   * places that fill this in from a real assembled_quiz_id once one is known.
+   */
+  assembledQuizId: string | null;
 };
 
 function opt(id: string, text: string, score: number, correct: boolean, explanation: string): AnswerOption {
@@ -350,6 +359,7 @@ export const ACTIVITIES: ActivityDefinition[] = [
     titles: { 1: 'Story Apprentice', 2: 'Story Analyst', 3: 'Story Master' },
     gradingKind: 'mcq',
     questionBank: weakUserStories,
+    assembledQuizId: null,
   },
   {
     slug: 'weak-acceptance-criteria',
@@ -362,6 +372,7 @@ export const ACTIVITIES: ActivityDefinition[] = [
     titles: { 1: 'Criteria Novice', 2: 'Criteria Analyst', 3: 'Criteria Expert' },
     gradingKind: 'mcq',
     questionBank: weakAcceptanceCriteria,
+    assembledQuizId: null,
   },
   {
     slug: 'write-acceptance-criteria',
@@ -373,6 +384,7 @@ export const ACTIVITIES: ActivityDefinition[] = [
     category: 'Acceptance Criteria',
     titles: { 1: 'AC Beginner', 2: 'AC Practitioner', 3: 'AC Expert' },
     gradingKind: 'llm-graded',
+    assembledQuizId: null,
   },
 ];
 
@@ -404,6 +416,8 @@ export function buildCustomActivityDefinition(entry: {
   name: string;
   description: string | null;
   gradingKind: GradingKind;
+  /** GitHub #583: rides straight onto the built definition — see ActivityDefinition.assembledQuizId. */
+  assembledQuizId?: string | null;
 }): ActivityDefinition {
   const llmGraded = entry.gradingKind === 'llm-graded';
 
@@ -424,6 +438,7 @@ export function buildCustomActivityDefinition(entry: {
     category: 'Custom',
     titles: { 1: 'Level 1', 2: 'Level 2', 3: 'Level 3' },
     gradingKind: entry.gradingKind,
+    assembledQuizId: entry.assembledQuizId ?? null,
   };
 }
 

@@ -26,6 +26,15 @@ type CardData = {
   best: { score: number; maxScore: number } | null;
 };
 
+/**
+ * GitHub #583: two quizzes composed from the same catalog share an activityType, so a lookup keyed
+ * on activityType alone would collide — the id used everywhere a running/completed session needs
+ * to be matched back to one specific card.
+ */
+function runningKey(activityType: string, assembledQuizId: string | null | undefined): string {
+  return `${activityType}:${assembledQuizId ?? 'none'}`;
+}
+
 /** Same lookup as app/activities/page.tsx used to have — see that file's git history. */
 function titleEntryFor(titles: StudentTitle[] | null, activityType: string | null): StudentTitle | null {
   if (!titles || !activityType) return null;
@@ -106,12 +115,21 @@ export default function CourseQuizzesPage({ params }: { params: { id: string } }
         return;
       }
 
-      const resolvedActivities: ActivityDefinition[] = discoveryResult.data.activities.map(
-        (entry) => getActivityByType(entry.activityType) ?? buildCustomActivityDefinition(entry),
-      );
+      // GitHub #583: attach each entry's own assembledQuizId regardless of which path produced
+      // the base definition — getActivityByType's built-in result carries none of its own (there
+      // is no DB row behind a static entry), and two quizzes sharing a catalog must not collapse
+      // into indistinguishable cards.
+      const resolvedActivities: ActivityDefinition[] = discoveryResult.data.activities.map((entry) => {
+        const base = getActivityByType(entry.activityType) ?? buildCustomActivityDefinition(entry);
+        return { ...base, assembledQuizId: entry.assembledQuizId };
+      });
 
       const attemptsPromises = profile
-        ? resolvedActivities.map((activity) => loadCompletedAttempts(token, profile.user_id, activity.activityType))
+        ? resolvedActivities.map((activity) =>
+            loadCompletedAttempts(token, profile.user_id, activity.activityType, {
+              assembledQuizId: activity.assembledQuizId ?? undefined,
+            }),
+          )
         : resolvedActivities.map(() => Promise.resolve({ ok: true as const, data: { attempts: [] } }));
 
       Promise.all([loadSessions(token, 'in-progress'), ...attemptsPromises]).then(([sessionsResult, ...attemptResults]) => {
@@ -123,13 +141,15 @@ export default function CourseQuizzesPage({ params }: { params: { id: string } }
           return;
         }
 
-        const runningByType = new Map(sessionsResult.data.sessions.map((session) => [session.activity_type, session]));
+        const runningByType = new Map(
+          sessionsResult.data.sessions.map((session) => [runningKey(session.activity_type, session.assembled_quiz_id), session]),
+        );
 
         const nextCards: CardData[] = resolvedActivities.map((activity, i) => {
           const attemptsResult = attemptResults[i];
           const attempts = attemptsResult.ok ? attemptsResult.data.attempts : [];
           const best = attempts.length === 0 ? null : attempts.reduce((b, a) => (a.score > b.score ? a : b), attempts[0]);
-          const running = runningByType.get(activity.activityType) ?? null;
+          const running = runningByType.get(runningKey(activity.activityType, activity.assembledQuizId)) ?? null;
           return {
             activity,
             activityType: activity.activityType,
@@ -241,7 +261,7 @@ export default function CourseQuizzesPage({ params }: { params: { id: string } }
 
                   return (
                     <ActivityCard
-                      key={card.activity.slug}
+                      key={runningKey(card.activity.slug, card.activity.assembledQuizId)}
                       activity={card.activity}
                       level={level}
                       title={earnedTitle(titleEntry)}

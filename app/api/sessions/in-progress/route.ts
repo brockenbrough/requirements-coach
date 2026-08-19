@@ -35,7 +35,11 @@ export async function GET(request: Request) {
   const token = getToken(request);
   if (!token) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const activityType = new URL(request.url).searchParams.get('activityType');
+  const searchParams = new URL(request.url).searchParams;
+  const activityType = searchParams.get('activityType');
+  // GitHub #583: only meaningful alongside activityType — same "narrowed" semantics as that
+  // param — scopes the check to one specific quiz instead of any quiz on the catalog.
+  const assembledQuizId = searchParams.get('assembledQuizId');
 
   const supabase = getSupabaseClient();
   if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
@@ -68,6 +72,7 @@ export async function GET(request: Request) {
     .eq('status', 'in-progress');
 
   if (activityType !== null) query = query.eq('activity.activity_type', activityType);
+  if (assembledQuizId !== null) query = query.eq('assembled_quiz_id', assembledQuizId);
 
   const { data: rows, error } = await query.order('started_at', { ascending: false });
 

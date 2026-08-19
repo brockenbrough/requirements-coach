@@ -232,6 +232,21 @@ describe('GET /api/sessions/in-progress', () => {
     expect((await GET(req(`?activityType=${ACTIVITY_TYPE}`))).status).toBe(500);
   });
 
+  // GitHub #583: assembledQuizId narrows further than activityType alone, to one specific quiz
+  // — accepted here as a smoke check; the underlying .eq('assembled_quiz_id', …) filter itself
+  // is verified at the source in __tests__/lib/sessionQueries.test.ts, since this harness's
+  // .eq() is a no-op and can't record it.
+  it('accepts an assembledQuizId query param without erroring', async () => {
+    queueValidActivityType();
+    queue('session_log', { data: [sessionRow()], error: null });
+    queue('session_to_question', { data: drawnQuestions, error: null });
+    queue('answered_question_log', { data: [], error: null });
+
+    const response = await GET(req(`?activityType=${ACTIVITY_TYPE}&assembledQuizId=quiz-1`));
+
+    expect(response.status).toBe(200);
+  });
+
   it('never writes', async () => {
     queueValidActivityType();
     queue('session_log', { data: [sessionRow()], error: null });

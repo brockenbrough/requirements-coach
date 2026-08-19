@@ -1,6 +1,7 @@
 export type StudentFilterValue = 'all' | string;
 export type LevelFilterValue = 'all' | 1 | 2 | 3;
-export type CourseFilterValue = 'all' | string;
+/** Always a real course id — there is no "all courses" choice here, see the Course field below. */
+export type CourseFilterValue = string;
 export type InstructorSortOrder = 'newest' | 'oldest' | 'lowest' | 'highest';
 
 const LEVELS: LevelFilterValue[] = ['all', 1, 2, 3];
@@ -10,6 +11,13 @@ const LEVELS: LevelFilterValue[] = ['all', 1, 2, 3];
  * Dashboard (GitHub #82) table. courses/courseId/onCourseChange are optional the same way
  * getStudentName/getCourses are on ActivityLogTable — a caller with no courses to offer just
  * omits them and gets the original course-less filter row back.
+ *
+ * Deliberately no "All courses" choice: `courses` here is already scoped to the ones the caller
+ * created (findOwnedCourse-style ownership, not catalog ownership), and the underlying activity
+ * list is filtered the same way — an "All" option would silently re-open the exact leak that
+ * scoping closes (an instructor whose catalog is linked into a colleague's course seeing that
+ * colleague's students). The caller is responsible for defaulting courseId to one of its own
+ * courses once they've loaded.
  */
 export function InstructorFilters({
   students,
@@ -73,15 +81,14 @@ export function InstructorFilters({
           </div>
         </div>
 
-        {courses && onCourseChange ? (
+        {courses && courses.length > 0 && onCourseChange ? (
           <label className="block text-xs font-extrabold uppercase tracking-wide text-gray-400">
             Course
             <select
-              value={courseId ?? 'all'}
+              value={courseId ?? courses[0].id}
               onChange={(event) => onCourseChange(event.target.value)}
               className="mt-1 block rounded-brand-md border border-gray-300 bg-white px-3.5 py-2 text-sm font-bold text-gray-600 outline-none transition focus:border-brand-purple"
             >
-              <option value="all">All courses</option>
               {courses.map((course) => (
                 <option key={course.id} value={course.id}>
                   {course.name}

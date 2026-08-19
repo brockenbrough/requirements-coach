@@ -1,7 +1,6 @@
 'use client';
 
-import { resultStateOf } from '../lib/activityLogTypes';
-import type { StudentAttemptDetail } from '../lib/mockStudentAttempts';
+import { resultStateOf, type StudentAttemptDetail } from '../lib/activityLogTypes';
 
 const VIEW_WIDTH = 560;
 const PLOT_LEFT = 4;

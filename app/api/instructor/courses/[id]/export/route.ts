@@ -1,7 +1,7 @@
 import { getSupabaseClient } from '../../../../../../lib/supabase';
 import { requireInstructor } from '../../../../../../lib/instructorAuth';
 import { findOwnedCourse, loadEnrolledStudents } from '../../../../../../lib/courseQueries';
-import { loadStudentActivityForIds } from '../../../../../../lib/sessionQueries';
+import { loadStudentQuestionActivityForIds } from '../../../../../../lib/sessionQueries';
 import { toInstant } from '../../../../../../lib/dateTime';
 import { toCsv } from '../../../../../../lib/csv';
 
@@ -10,9 +10,15 @@ function getToken(request: Request): string | null {
   return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
 }
 
-// No studentId or studentName column — this is the depersonalization REQ-PL-3.4.3 asks for.
+// userId identifies the student by their account id (REQ-PL-3.4.3: "This ID could possibly be
+// the user record ID") rather than by name — no studentName column. As of REQ-PL-3.4.5, one row
+// is one question/prompt drawn in a session (not one row per session): activityType is renamed
+// Catalog for the reader, the session-level columns are repeated on every one of its question
+// rows, and Question/Question Text/Answer describe that specific question and the student's
+// submitted answer to it.
 const EXPORT_COLUMNS = [
-  'activityType',
+  'userId',
+  'Catalog',
   'difficultyLevel',
   'status',
   'startedAt',
@@ -22,25 +28,29 @@ const EXPORT_COLUMNS = [
   'passed',
   'questionCount',
   'answeredCount',
+  'Question',
+  'Question Text',
+  'Answer',
 ];
 
 /**
- * GET /api/instructor/courses/{id}/export — a depersonalized CSV of every attempt made by
- * students enrolled in a course the calling instructor owns (REQ-PL-3.4.3). The "class code" in
- * the requirement is this app's course_code (REQ-DL-5) — the only implemented grouping of
- * students under an instructor-issued code; REQ-DL-3.4.1's separate class_code table (entered
- * at student registration) doesn't exist in this schema.
+ * GET /api/instructor/courses/{id}/export — a CSV, identified by student account id rather than
+ * name, of every question/prompt drawn for students enrolled in a course the calling instructor
+ * owns (REQ-PL-3.4.3, REQ-PL-3.4.5). The "class code" in the requirement is this app's
+ * course_code (REQ-DL-5) — the only implemented grouping of students under an instructor-issued
+ * code; REQ-DL-3.4.1's separate class_code table (entered at student registration) doesn't exist
+ * in this schema.
  *
- * Reuses loadStudentActivityForIds (already built for the course roster page) rather than a new
- * query — same session-level rows the roster's per-student summary is computed from, just
- * un-aggregated and with studentName and studentId stripped before it ever reaches the response.
- * There is no per-student identifier in the file at all, so rows cannot be grouped by student.
+ * Reuses loadStudentQuestionActivityForIds (already built for this export) rather than a new
+ * query — same session-level fields loadStudentActivityForIds (the course roster page's query)
+ * returns, just repeated onto one row per question/prompt drawn in that session instead of
+ * collapsed into a single row per session.
  *
  * - 401 missing/invalid bearer token
  * - 403 caller isn't an instructor (no body)
  * - 404 course doesn't exist
  * - 403 course exists but isn't owned by the caller (no body)
- * - 200 text/csv, one row per session_log attempt, Content-Disposition: attachment
+ * - 200 text/csv, one row per question/prompt drawn in a session, Content-Disposition: attachment
  * - 500 Supabase not configured, or any query failure
  */
 export async function GET(request: Request, { params }: { params: { id: string } }) {
@@ -67,25 +77,29 @@ export async function GET(request: Request, { params }: { params: { id: string }
     return Response.json({ error: rosterError?.message ?? 'Could not load roster.' }, { status: 500 });
   }
 
-  const { activities, error: activityError } = await loadStudentActivityForIds(
+  const { rows: activities, error: activityError } = await loadStudentQuestionActivityForIds(
     supabase,
     enrolled.map((s) => s.id),
   );
   if (activityError || !activities) {
-    return Response.json({ error: activityError?.message ?? 'Could not load student activity.' }, { status: 500 });
+    return Response.json({ error: (activityError as { message?: string })?.message ?? 'Could not load student activity.' }, { status: 500 });
   }
 
   const rows = activities.map((a) => [
-    a.activity_type,
-    a.difficulty_level,
+    a.userId,
+    a.activityType,
+    a.difficultyLevel,
     a.status,
-    toInstant(a.started_at),
-    a.ended_at ? toInstant(a.ended_at) : null,
-    a.cumulative_score,
-    a.max_score,
+    toInstant(a.startedAt),
+    a.endedAt ? toInstant(a.endedAt) : null,
+    a.cumulativeScore,
+    a.maxScore,
     a.passed,
     a.questionCount,
     a.answeredCount,
+    `Question ${a.questionNumber}`,
+    a.questionText,
+    a.answerText,
   ]);
 
   const csv = toCsv(EXPORT_COLUMNS, rows);
