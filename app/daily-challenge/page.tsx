@@ -6,9 +6,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { FeedbackCard } from '../../components/FeedbackCard';
 import { QuestionCard } from '../../components/QuestionCard';
+import { useUser } from '../../components/UserProvider';
 import { loadDailyChallenge, startDailyChallenge, submitDailyChallengeAnswer } from '../../lib/dailyChallengeClient';
 import type { DailyChallengeState } from '../../lib/dailyChallengeTypes';
 import { toInstant } from '../../lib/dateTime';
+import { clearCachedLeaderboard } from '../../lib/leaderboardStore';
 import { useRequireRole } from '../../lib/useRequireRole';
 
 function formatRemaining(ms: number): string {
@@ -52,6 +54,7 @@ function BackToDashboardLink() {
 export default function DailyChallengePage() {
   const router = useRouter();
   const { token, loading, authorized } = useRequireRole('student');
+  const { refreshScore } = useUser();
 
   const [state, setState] = useState<DailyChallengeState | null>(null);
   const [starting, setStarting] = useState(false);
@@ -162,6 +165,16 @@ export default function DailyChallengePage() {
           }
         : current,
     );
+
+    // GitHub #392-style fix: a submitted attempt finalizes daily_challenge_attempt.score (0 on a
+    // wrong answer, doubled on a correct one — lib/dailyChallengeRules.ts), which
+    // computeStudentScore now folds into the cumulative total. Nothing else on this page
+    // invalidates the sidebar's cached score or the leaderboard cache, so both must be kicked
+    // here, the same pair the other two play flows' finish handlers already call. Not awaited —
+    // unlike those flows, this page doesn't navigate away afterward, so the UI above doesn't
+    // depend on either finishing first.
+    void refreshScore();
+    clearCachedLeaderboard();
   }
 
   if (error) {
