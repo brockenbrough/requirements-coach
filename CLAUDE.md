@@ -21,6 +21,8 @@ Copy `.env.example` to `.env.local` and fill in your Supabase credentials. Then,
 
 `INSTRUCTOR_SIGNUP_CODE` (the invite code that grants the instructor role at registration, see "Auth flow" below) must be set to a real, random, per-deployment value — generate one yourself (e.g. `openssl rand -base64 24`) and set it only in each deployment's own environment (`.env.local` locally, Vercel Environment Variables in production, etc.). It must never be committed to the repo, in `.env.example` or anywhere else.
 
+`LLM_CONFIG_ENCRYPTION_KEY` must also be set per-deployment (`openssl rand -base64 32`, must decode to exactly 32 bytes) — `lib/secretEncryption.ts` uses it to encrypt `instructor_llm_config.api_key` before it's ever written to the database, so an instructor's LLM provider key is never stored in plaintext. Unset, placeholder (`CHANGE-ME`-prefixed), or wrong-length values make saving/reading an LLM config fail closed (500) rather than fall back to plaintext. Rotating it makes every previously-saved config unreadable — affected instructors must re-save their LLM provider settings.
+
 `lib/supabase.ts` accepts either `SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_URL` and exposes three factories, each returning `null` when its key is missing so routes can answer 500 instead of a confusing Supabase error:
 
 - `getSupabaseClient()` — service-role key preferred, anon fallback. Used by every data route; it bypasses RLS, which is why those routes must derive `user_id` from the token themselves.

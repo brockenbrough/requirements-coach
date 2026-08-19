@@ -80,7 +80,7 @@ export function RatingPromptModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="rating-prompt-modal-title"
-        className="w-full max-w-md rounded-brand-lg border border-brand-navy-border bg-brand-navy p-7"
+        className="w-full max-w-2xl rounded-brand-lg border border-brand-navy-border bg-brand-navy p-7"
       >
         <div className="mb-5 flex items-start justify-between gap-3">
           <div>
@@ -110,7 +110,7 @@ export function RatingPromptModal({
             onChange={(event) => setRatingPrompt(event.target.value)}
             disabled={submitting}
             placeholder="How should the AI score a student's answer? Replaces the built-in generic rubric for this catalog."
-            rows={6}
+            rows={14}
             className="mt-1.5 block w-full resize-y rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none transition focus:border-brand-purple disabled:cursor-not-allowed disabled:opacity-60"
           />
         </label>

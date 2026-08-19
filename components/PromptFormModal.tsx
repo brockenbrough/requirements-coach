@@ -111,13 +111,13 @@ export function PromptFormModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="prompt-form-title"
-        className="max-h-full w-full max-w-lg overflow-y-auto rounded-brand-lg border border-brand-navy-border bg-brand-navy p-7"
+        className="max-h-full w-full max-w-2xl overflow-y-auto rounded-brand-lg border border-brand-navy-border bg-brand-navy p-7"
       >
         <div className="mb-5 flex items-start justify-between gap-3">
           <div>
             <p className="text-xs font-extrabold uppercase tracking-wide text-brand-gold">LLM-Graded Task</p>
             <h2 id="prompt-form-title" className="mt-1 text-xl font-extrabold text-white">
-              {mode === 'edit' ? 'Edit Prompt' : 'New Prompt'}
+              {mode === 'edit' ? 'Edit Prompt' : 'New Question'}
             </h2>
           </div>
           <button
@@ -207,7 +207,7 @@ export function PromptFormModal({
               ref={firstFieldRef}
               value={storyText}
               onChange={(event) => setStoryText(event.target.value)}
-              rows={5}
+              rows={10}
               placeholder="e.g. As a shopper, I want to save items to a wishlist, so that I can buy them later."
               className="mt-1.5 block w-full resize-y rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none transition focus:border-brand-purple"
             />
