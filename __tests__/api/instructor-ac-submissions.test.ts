@@ -68,6 +68,34 @@ function queueOwnedActivityTypes(types: string[]) {
   queue('activity_type', { data: types.map((activity_type) => ({ activity_type })), error: null });
 }
 
+/** listOwnedCourseIds' query — feeds the new shared-course filter. */
+function queueOwnedCourseIds(courseIds: string[]) {
+  queue('course', { data: courseIds.map((courseId) => ({ course_id: courseId })), error: null });
+}
+
+/** loadEnrolledCourseIdsByStudentForCourses' query — who is enrolled in which owned course. */
+function queueEnrollments(rows: { userId: string; courseId: string }[]) {
+  queue('student_course', { data: rows.map((row) => ({ user_id: row.userId, course_id: row.courseId })), error: null });
+}
+
+/**
+ * The minimal "this submission's catalog is still reachable via a course the instructor owns and
+ * the student is enrolled in" fixture — mirrors __tests__/api/instructor-activities.test.ts's
+ * queueSharedCourseAccess for the AC-submission twin of the same shared-course filter.
+ */
+function queueSharedCourseAccess(options: { courseId?: string; activityType?: string; userId?: string } = {}) {
+  const courseId = options.courseId ?? 'course-1';
+  const activityType = options.activityType ?? 'MY_LLM_CATALOG';
+  const userId = options.userId ?? 'student-1';
+
+  queueOwnedCourseIds([courseId]);
+  queue('assembled_quiz_catalog', {
+    data: [{ activity_type: activityType, assembled_quiz: { course_id: courseId, course: { course_name: 'Course' } } }],
+    error: null,
+  });
+  queueEnrollments([{ userId, courseId }]);
+}
+
 function submissionRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     submission_id: 'submission-1',
@@ -131,6 +159,15 @@ describe('GET /api/instructor/acceptance-criteria/submissions', () => {
       ],
       error: null,
     });
+    queueOwnedCourseIds(['course-1']);
+    queue('assembled_quiz_catalog', {
+      data: [{ activity_type: 'MY_LLM_CATALOG', assembled_quiz: { course_id: 'course-1', course: { course_name: 'Course' } } }],
+      error: null,
+    });
+    queueEnrollments([
+      { userId: 'student-1', courseId: 'course-1' },
+      { userId: 'student-2', courseId: 'course-1' },
+    ]);
 
     const response = await GET(request(undefined, 'valid-token'));
     const body = await response.json();
@@ -149,7 +186,7 @@ describe('GET /api/instructor/acceptance-criteria/submissions', () => {
         llmFeedback: 'Good coverage of the happy path.',
         submittedAt: '2026-08-01T10:00:00.000Z',
         gradedAt: '2026-08-01T10:05:00.000Z',
-        courses: [],
+        courses: [{ courseId: 'course-1', courseName: 'Course' }],
         quizName: null,
       },
       {
@@ -164,7 +201,7 @@ describe('GET /api/instructor/acceptance-criteria/submissions', () => {
         llmFeedback: null,
         submittedAt: '2026-08-01T10:00:00.000Z',
         gradedAt: null,
-        courses: [],
+        courses: [{ courseId: 'course-1', courseName: 'Course' }],
         quizName: null,
       },
     ]);
@@ -185,6 +222,8 @@ describe('GET /api/instructor/acceptance-criteria/submissions', () => {
       ],
       error: null,
     });
+    queueOwnedCourseIds(['course-1']);
+    queueEnrollments([{ userId: 'student-1', courseId: 'course-1' }]);
 
     const response = await GET(request(undefined, 'valid-token'));
     const body = await response.json();
@@ -208,12 +247,68 @@ describe('GET /api/instructor/acceptance-criteria/submissions', () => {
       ],
       error: null,
     });
+    queueOwnedCourseIds(['course-1']);
+    queueEnrollments([{ userId: 'student-1', courseId: 'course-1' }]);
 
     const response = await GET(request(undefined, 'valid-token'));
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body.submissions[0].quizName).toBe('Sprint 3 Acceptance Criteria');
+  });
+
+  // GitHub bug fix: the AC-submission twin of __tests__/api/instructor-activities.test.ts's
+  // matching case — a catalog with no live course link at all, the same state a deleted course
+  // leaves behind (course deletion cascades away assembled_quiz/assembled_quiz_catalog, but never
+  // submission). Used to still surface the orphaned submission with an empty courses list; must
+  // now be excluded entirely.
+  it('excludes a submission whose catalog is not linked to any course (matches a deleted course)', async () => {
+    queueRole('instructor');
+    queueOwnedActivityTypes(['MY_LLM_CATALOG']);
+    queue('submission', { data: [submissionRow()], error: null });
+    queue('assembled_quiz_catalog', { data: [], error: null });
+    queueOwnedCourseIds(['course-1']);
+    queueEnrollments([{ userId: 'student-1', courseId: 'course-1' }]);
+
+    const response = await GET(request(undefined, 'valid-token'));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.submissions).toEqual([]);
+  });
+
+  // The other half: the catalog IS still linked to a course the instructor owns, but this
+  // particular student isn't (or is no longer) enrolled in it.
+  it('excludes a submission for a student not currently enrolled in the linking course', async () => {
+    queueRole('instructor');
+    queueOwnedActivityTypes(['MY_LLM_CATALOG']);
+    queue('submission', { data: [submissionRow()], error: null }); // student-1
+    queue('assembled_quiz_catalog', {
+      data: [{ activity_type: 'MY_LLM_CATALOG', assembled_quiz: { course_id: 'course-1', course: { course_name: 'Course' } } }],
+      error: null,
+    });
+    queueOwnedCourseIds(['course-1']);
+    queueEnrollments([]); // nobody enrolled in course-1
+
+    const response = await GET(request(undefined, 'valid-token'));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.submissions).toEqual([]);
+  });
+
+  it('includes a submission whose catalog is linked to a course the student is currently enrolled in', async () => {
+    queueRole('instructor');
+    queueOwnedActivityTypes(['MY_LLM_CATALOG']);
+    queue('submission', { data: [submissionRow()], error: null });
+    queueSharedCourseAccess();
+
+    const response = await GET(request(undefined, 'valid-token'));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.submissions).toHaveLength(1);
+    expect(body.submissions[0].submissionId).toBe('submission-1');
   });
 
   it('filters to role student, so an instructor’s own submissions stay out of their report', async () => {

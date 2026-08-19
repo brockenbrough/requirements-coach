@@ -2,6 +2,7 @@ import { getSupabaseClient } from '../../../../lib/supabase';
 import { requireInstructor } from '../../../../lib/instructorAuth';
 import { loadAllStudentActivity } from '../../../../lib/sessionQueries';
 import { listOwnedActivityTypeSummaries, type OwnedActivityTypeSummary } from '../../../../lib/activityTypeQueries';
+import { listOwnedCourseIds } from '../../../../lib/courseQueries';
 import type { InstructorActivityEntry } from '../../../../lib/sessionTypes';
 
 function getToken(request: Request): string | null {
@@ -23,7 +24,12 @@ function getToken(request: Request): string | null {
  * One activity_type round trip (listOwnedActivityTypeSummaries) answers both concerns: it backs
  * `ownedActivityTypes` directly, and its mcq-kind subset is what's passed into
  * loadAllStudentActivity (lib/sessionQueries.ts) to scope `sessions` — see that function's
- * docstring for exactly what "mcq-kind only" excludes and why.
+ * docstring for exactly what "mcq-kind only" excludes and why. A second, independent round trip
+ * (listOwnedCourseIds) also feeds loadAllStudentActivity, so it can further scope `sessions` to
+ * only attempts still reachable via a course this instructor currently owns and the attempting
+ * student is currently enrolled in — see that function's own doc comment for why that scoping
+ * exists (it's what keeps this route agreeing with the per-student detail route once a course
+ * gets deleted or a student unenrolled).
  *
  * Unlike every other route here, the caller is deliberately allowed to read rows that are not
  * theirs — which is why requireInstructor runs before any data is touched. getSupabaseClient()
@@ -50,12 +56,16 @@ export async function GET(request: Request) {
         );
   }
 
-  const { activityTypeSummaries, error: ownedError } = await listOwnedActivityTypeSummaries(supabase, guard.user_id);
+  const [{ activityTypeSummaries, error: ownedError }, { courseIds: ownedCourseIds, error: courseIdsError }] = await Promise.all([
+    listOwnedActivityTypeSummaries(supabase, guard.user_id),
+    listOwnedCourseIds(supabase, guard.user_id),
+  ]);
   if (ownedError) return Response.json({ error: ownedError.message }, { status: 500 });
+  if (courseIdsError || !ownedCourseIds) return Response.json({ error: courseIdsError!.message }, { status: 500 });
 
   const mcqTypes = activityTypeSummaries.filter((summary) => summary.gradingKind === 'mcq').map((summary) => summary.activityType);
 
-  const { activities, error } = await loadAllStudentActivity(supabase, mcqTypes);
+  const { activities, error } = await loadAllStudentActivity(supabase, mcqTypes, ownedCourseIds);
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
   // Annotated with the shared row types (GitHub #173) rather than left to inference, so this

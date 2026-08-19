@@ -7,6 +7,7 @@ import { InstructorStudentCard } from '../../../components/InstructorStudentCard
 import { Pagination } from '../../../components/Pagination';
 import {
   summarizeStudents,
+  toAcSubmissionRow,
   toStudentActivitySummary,
   type StudentActivitySummary,
   type StudentAggregate,
@@ -17,6 +18,7 @@ import {
   type InstructorActivityEntry,
   type StudentSummary,
 } from '../../../lib/sessionClient';
+import { loadInstructorACSubmissions } from '../../../lib/llmActivityClient';
 import { useRequireRole } from '../../../lib/useRequireRole';
 
 const PAGE_SIZE = 9;
@@ -52,19 +54,36 @@ export default function AllStudentsPage() {
   const [sort, setSort] = useState<SortOrder>('needs-attention');
   const [page, setPage] = useState(1);
 
-  // Cache-first: shares the rc_instructor_activity_v1 cache with the dashboard (GitHub #176).
+  // Quiz attempts (GET /api/instructor/activities) and AC (LLM-graded) submissions
+  // (GET /api/instructor/acceptance-criteria/submissions) are two separate routes merged
+  // client-side, the same split app/instructor/page.tsx's dashboard already makes — see that
+  // page's own comment for why there's no combined backend endpoint. Both kinds of attempt have
+  // to be counted here, or a student whose real activity is mostly/only LLM-graded submissions
+  // would show as having near-zero attempts on this page while the dashboard (which already
+  // merges both) counts them correctly — this page used to only fetch quiz attempts at all.
+  // Quiz attempts are cache-first, sharing the rc_instructor_activity cache with the dashboard
+  // (GitHub #176); AC submissions are never cached, same as the dashboard.
   useEffect(() => {
     if (!token || !profile?.user_id) return;
     let cancelled = false;
 
-    loadInstructorActivities(token, profile.user_id).then((result) => {
-      if (cancelled) return;
-      if (result.ok) {
-        setEntries(result.data.sessions.map((session: InstructorActivityEntry) => toStudentActivitySummary(session)));
-      } else {
-        setError(result.error);
-      }
-    });
+    Promise.all([loadInstructorActivities(token, profile.user_id), loadInstructorACSubmissions(token)]).then(
+      ([activitiesResult, submissionsResult]) => {
+        if (cancelled) return;
+        if (!activitiesResult.ok) {
+          setError(activitiesResult.error);
+          return;
+        }
+        if (!submissionsResult.ok) {
+          setError(submissionsResult.error);
+          return;
+        }
+        setEntries([
+          ...activitiesResult.data.sessions.map((session: InstructorActivityEntry) => toStudentActivitySummary(session)),
+          ...submissionsResult.data.submissions.map(toAcSubmissionRow),
+        ]);
+      },
+    );
 
     return () => {
       cancelled = true;

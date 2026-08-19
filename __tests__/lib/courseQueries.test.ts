@@ -4,6 +4,7 @@ import {
   computeAllOwnedCoursesClassStats,
   computeStudentCourseQuizProgress,
   computeMyCoursesQuizProgress,
+  loadEnrolledCourseIdsByStudentForCourses,
 } from '../../lib/courseQueries';
 
 type Result = { data?: unknown; error?: unknown };
@@ -281,5 +282,64 @@ describe('computeMyCoursesQuizProgress', () => {
     const result = await computeMyCoursesQuizProgress(makeSupabase(), 'student-1');
 
     expect(result).toEqual({ progress: null, error: { message: 'db down' } });
+  });
+});
+
+describe('loadEnrolledCourseIdsByStudentForCourses', () => {
+  it('builds a student -> Set<courseId> map from student_course rows', async () => {
+    queue('student_course', {
+      data: [
+        { user_id: 'student-1', course_id: 'course-A' },
+        { user_id: 'student-2', course_id: 'course-B' },
+      ],
+      error: null,
+    });
+
+    const result = await loadEnrolledCourseIdsByStudentForCourses(makeSupabase(), ['course-A', 'course-B']);
+
+    expect(result.error).toBeNull();
+    expect(result.enrollmentsByStudent).toEqual(
+      new Map([
+        ['student-1', new Set(['course-A'])],
+        ['student-2', new Set(['course-B'])],
+      ]),
+    );
+  });
+
+  it('collects every queried course a student is enrolled in into one Set', async () => {
+    queue('student_course', {
+      data: [
+        { user_id: 'student-1', course_id: 'course-A' },
+        { user_id: 'student-1', course_id: 'course-B' },
+      ],
+      error: null,
+    });
+
+    const result = await loadEnrolledCourseIdsByStudentForCourses(makeSupabase(), ['course-A', 'course-B']);
+
+    expect(result.enrollmentsByStudent).toEqual(new Map([['student-1', new Set(['course-A', 'course-B'])]]));
+  });
+
+  it('scopes the query to the given courses', async () => {
+    queue('student_course', { data: [], error: null });
+
+    await loadEnrolledCourseIdsByStudentForCourses(makeSupabase(), ['course-A']);
+
+    expect(state.filters).toContainEqual({ table: 'student_course', column: 'course_id', value: ['course-A'] });
+  });
+
+  it('returns an empty Map without querying when courseIds is empty', async () => {
+    const result = await loadEnrolledCourseIdsByStudentForCourses(makeSupabase(), []);
+
+    expect(result).toEqual({ enrollmentsByStudent: new Map(), error: null });
+    expect(state.tables).toEqual([]);
+  });
+
+  it('surfaces a query error', async () => {
+    queue('student_course', { data: null, error: { message: 'db down' } });
+
+    const result = await loadEnrolledCourseIdsByStudentForCourses(makeSupabase(), ['course-A']);
+
+    expect(result).toEqual({ enrollmentsByStudent: null, error: { message: 'db down' } });
   });
 });

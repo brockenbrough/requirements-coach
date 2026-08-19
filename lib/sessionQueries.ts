@@ -12,6 +12,7 @@ import {
 import type { InstructorActivityEntry, InstructorSessionEntry, SessionListEntry, SessionRecord } from './sessionTypes';
 import { shuffleArray } from './shuffleArray';
 import { listCoursesForActivityTypes } from './activityCourseQueries';
+import { loadEnrolledCourseIdsByStudentForCourses } from './courseQueries';
 import { fetchAllRowsByIds } from './supabasePaging';
 
 export type SupabaseClient = NonNullable<ReturnType<typeof getSupabaseClient>>;
@@ -469,15 +470,15 @@ function studentDisplayName(student: EmbeddedStudent): string {
  * Every student's attempts on the given mcq-kind catalogs, newest first — the real data behind
  * the Instructor Dashboard.
  *
- * A pure fetch, not an ownership check: ownedMcqTypes is whatever the caller has already decided
- * this instructor owns. GET /api/instructor/activities derives it from one
- * listOwnedActivityTypeSummaries(supabase, instructorId) call (lib/activityTypeQueries.ts),
- * filtered to grading_kind 'mcq' — deliberately not looked up again in here, so a dashboard load
- * costs one activity_type round trip total instead of one per caller that needs ownership. An
- * empty list short-circuits before session_log is ever queried; a built-in catalog (creator_id IS
- * NULL) can never appear in ownedMcqTypes for any instructor, so a fresh instructor with no
- * catalog of their own gets an empty result here, which is the correct "nothing to show yet"
- * state, not a bug.
+ * A pure fetch, not an ownership check: ownedMcqTypes/ownedCourseIds are whatever the caller has
+ * already decided this instructor owns. GET /api/instructor/activities derives ownedMcqTypes from
+ * one listOwnedActivityTypeSummaries(supabase, instructorId) call (lib/activityTypeQueries.ts),
+ * filtered to grading_kind 'mcq', and ownedCourseIds from listOwnedCourseIds — deliberately not
+ * looked up again in here, so a dashboard load costs one round trip per concern total instead of
+ * one per caller that needs it. An empty ownedMcqTypes short-circuits before session_log is ever
+ * queried; a built-in catalog (creator_id IS NULL) can never appear in ownedMcqTypes for any
+ * instructor, so a fresh instructor with no catalog of their own gets an empty result here, which
+ * is the correct "nothing to show yet" state, not a bug.
  *
  * The class-wide counterpart to loadActivityLog: same merged timeline of in-progress,
  * completed and abandoned sessions, but scoped by ownedMcqTypes instead of that one's
@@ -485,6 +486,18 @@ function studentDisplayName(student: EmbeddedStudent): string {
  * service-role client, which bypasses the own_sessions_select policy — so the caller MUST run
  * requireInstructor first. Reading another student's rows is exactly what this query is for, and
  * exactly what the guard exists to gate.
+ *
+ * A session only counts if its catalog is *currently* reachable via a live
+ * assembled_quiz/assembled_quiz_catalog row for a course this instructor owns AND that session's
+ * own student is currently enrolled in — the same "shared course" pairing
+ * lib/studentDetailQueries.ts's loadStudentDetailForInstructor already computes per student
+ * (ownedCourseIds ∩ enrolledCourseIds(student)), applied here to every row at once instead of one
+ * detail query per student. Without this, an old session on a catalog whose only linking course
+ * was later deleted (course deletion cascades away student_course and
+ * assembled_quiz/assembled_quiz_catalog via lib/courseQueries.ts's deleteCourse, but never touches
+ * session_log) would keep counting here forever even though the detail page — and the roster this
+ * feeds via lib/activityLogTypes.ts's summarizeStudents — correctly stopped seeing it, which is
+ * exactly what used to make the list page disagree with the detail page for the same student.
  *
  * Ordered in the query rather than in JS the way loadActivityLog does it. started_at is the
  * secondary key for the same reason as in loadCompletedAttempts: Postgres orders DESC as NULLS
@@ -511,30 +524,55 @@ function studentDisplayName(student: EmbeddedStudent): string {
  *
  * loadStudentActivityForIds has no such second source to double against — the course roster page
  * is the only thing that reads it, and there's no separate submissions merge there — so it
- * deliberately keeps including every activity type.
+ * deliberately keeps including every activity type, and deliberately keeps no course/enrollment
+ * scoping either: it already starts from one specific course's own live roster
+ * (loadEnrolledStudents), so it has no equivalent staleness to guard against, and its broader
+ * per-student scope (every activity type a roster member has ever attempted, not just this
+ * course's own catalogs) is intentional for CSV export purposes.
  *
  * courses (GitHub #474) costs one extra round trip — listCoursesForActivityTypes scoped to
  * ownedMcqTypes, the same list already bounding the session query — rather than one per session
- * row, since the same catalog is usually attempted by many students.
+ * row, since the same catalog is usually attempted by many students. It stays an unfiltered "every
+ * course currently linking this catalog" for display, independent of the shared-course inclusion
+ * filter above: a catalog reachable via more than one of the instructor's courses should still
+ * show all of them on an attempt that already passed the filter.
  */
-export async function loadAllStudentActivity(supabase: SupabaseClient, ownedMcqTypes: string[]) {
+export async function loadAllStudentActivity(supabase: SupabaseClient, ownedMcqTypes: string[], ownedCourseIds: string[]) {
   if (ownedMcqTypes.length === 0) return { activities: [], error: null };
 
-  const { data, error } = await supabase
-    .from('session_log')
-    .select(`${SESSION_COLUMNS}, ${STUDENT_EMBED}`)
-    .eq('student.role', 'student')
-    .in('activity_type', ownedMcqTypes)
-    .order('ended_at', { ascending: false })
-    .order('started_at', { ascending: false });
+  const [{ data, error }, coursesResult, enrollmentResult] = await Promise.all([
+    supabase
+      .from('session_log')
+      .select(`${SESSION_COLUMNS}, ${STUDENT_EMBED}`)
+      .eq('student.role', 'student')
+      .in('activity_type', ownedMcqTypes)
+      .order('ended_at', { ascending: false })
+      .order('started_at', { ascending: false }),
+    listCoursesForActivityTypes(supabase, ownedMcqTypes),
+    loadEnrolledCourseIdsByStudentForCourses(supabase, ownedCourseIds),
+  ]);
 
   if (error) return { activities: null, error };
+
+  const { coursesByActivityType, quizNameByActivityType, error: coursesError } = coursesResult;
+  if (coursesError) return { activities: null, error: coursesError };
+
+  const { enrollmentsByStudent, error: enrollmentError } = enrollmentResult;
+  if (enrollmentError) return { activities: null, error: enrollmentError };
 
   type SessionRow = Omit<ActivityLogRow, 'questionCount' | 'answeredCount' | 'nextPosition'> & {
     student: EmbeddedStudent;
   };
 
-  const rows = (data ?? []) as unknown as SessionRow[];
+  const allRows = (data ?? []) as unknown as SessionRow[];
+
+  // Only a session whose catalog is still linked to a course this instructor owns AND that
+  // student is still enrolled in counts — see this function's own doc comment above.
+  const rows = allRows.filter((row) => {
+    const linkedCourses = coursesByActivityType!.get(row.activity_type) ?? [];
+    const enrolledCourseIds = enrollmentsByStudent!.get(row.user_id);
+    return !!enrolledCourseIds && linkedCourses.some((course) => enrolledCourseIds.has(course.courseId));
+  });
 
   const { progress, error: progressError } = await loadProgressForSessions(
     supabase,
@@ -542,9 +580,6 @@ export async function loadAllStudentActivity(supabase: SupabaseClient, ownedMcqT
   );
 
   if (progressError) return { activities: null, error: progressError };
-
-  const { coursesByActivityType, quizNameByActivityType, error: coursesError } = await listCoursesForActivityTypes(supabase, ownedMcqTypes);
-  if (coursesError) return { activities: null, error: coursesError };
 
   // The embed is destructured off rather than spread along: it carries role and username, which
   // are inputs to this query, not part of what the endpoint discloses.
