@@ -42,7 +42,7 @@ export const MAX_DIFFICULTY_LEVEL = 3;
 export const PASS_RATIO = 0.75;
 
 export const SESSION_COLUMNS =
-  'session_id, user_id, activity_type, difficulty_level, started_at, ended_at, status, cumulative_score, max_score, passed';
+  'session_id, user_id, activity_type, assembled_quiz_id, difficulty_level, started_at, ended_at, status, cumulative_score, max_score, passed';
 
 // Mirrors ck_session_log_status in supabase/schema.sql.
 export const SESSION_STATUSES = ['in-progress', 'completed', 'abandoned'] as const;

@@ -14,6 +14,9 @@ export type SessionRecord = {
   session_id: string;
   user_id: string;
   activity_type: string;
+  /** Which assembled_quiz this session was started through — GitHub #583. Null for a bare/
+   *  bookmarked link with no quiz context, or a legacy row from before this column existed. */
+  assembled_quiz_id: string | null;
   difficulty_level: number;
   started_at: string;
   ended_at: string | null;
