@@ -17,6 +17,7 @@ const h = vi.hoisted(() => {
         return builder;
       },
       in: () => builder,
+      is: () => builder,
       limit: () => builder,
       maybeSingle: async () => result,
       then: (onOk: (r: Result) => unknown, onErr?: (e: unknown) => unknown) =>

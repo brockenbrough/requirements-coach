@@ -13,6 +13,7 @@ const h = vi.hoisted(() => {
     const builder: Record<string, unknown> = {
       select: () => builder,
       eq: () => builder,
+      is: () => builder,
       order: () => builder,
       maybeSingle: async () => result,
       single: async () => result,

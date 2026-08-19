@@ -49,6 +49,7 @@ const h = vi.hoisted(() => {
         return builder;
       },
       limit: () => builder,
+      is: () => builder,
       maybeSingle: async () => result,
       single: async () => result,
       then: (onOk: (r: Result) => unknown, onErr?: (e: unknown) => unknown) =>

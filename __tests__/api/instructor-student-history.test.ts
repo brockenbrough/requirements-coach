@@ -57,6 +57,15 @@ vi.mock('../../lib/supabase', () => ({
   }),
 }));
 
+// GitHub #525: wrapping (not replacing) the real implementation lets every existing test keep
+// exercising real isActivityType behavior against the mocked supabase client above, while this
+// file can also assert on what arguments the route actually passed it.
+vi.mock('../../lib/activityTypes', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../lib/activityTypes')>();
+  return { ...actual, isActivityType: vi.fn(actual.isActivityType) };
+});
+
+import { isActivityType } from '../../lib/activityTypes';
 import { GET } from '../../app/api/instructor/students/[studentId]/history/route';
 
 const STUDENT_ID = 'student-1';
@@ -84,6 +93,7 @@ beforeEach(() => {
   h.state.tables = [];
   h.state.filters = [];
   h.state.orders = [];
+  vi.mocked(isActivityType).mockClear();
 });
 
 describe('GET /api/instructor/students/:studentId/history', () => {
@@ -223,6 +233,21 @@ describe('GET /api/instructor/students/:studentId/history', () => {
 
     expect(response.status).toBe(200);
     expect(body.sessions).toEqual([]);
+  });
+
+  // GitHub #525: an instructor filtering a student's history by a since-deleted catalog must
+  // still get results, not a 400 — this route is one of the explicit includeDeleted opt-ins.
+  it('resolves a soft-deleted catalog too, when filtering history by activity type', async () => {
+    queueCallerRole('instructor');
+    queue('activity_type', { data: { activity_type: 'IDENTIFY_WEAK_USER_STORIES' }, error: null });
+    queueStudent();
+    queue('session_log', { data: [], error: null });
+
+    await GET(req('?activityType=IDENTIFY_WEAK_USER_STORIES'), PARAMS);
+
+    expect(isActivityType).toHaveBeenCalledWith(expect.anything(), 'IDENTIFY_WEAK_USER_STORIES', {
+      includeDeleted: true,
+    });
   });
 
   it('returns 500 when the session query fails', async () => {

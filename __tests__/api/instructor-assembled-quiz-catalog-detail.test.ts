@@ -22,6 +22,7 @@ const h = vi.hoisted(() => {
         if (isDelete) state.deletes.push({ table, column, value });
         return builder;
       },
+      is: () => builder,
       order: () => builder,
       maybeSingle: async () => result,
       then: (onOk: (r: Result) => unknown, onErr?: (e: unknown) => unknown) =>

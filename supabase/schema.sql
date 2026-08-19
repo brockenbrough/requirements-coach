@@ -110,6 +110,14 @@ CREATE TABLE activity_type (
     grading_kind  text        NOT NULL DEFAULT 'mcq',
     rating_prompt text,
     creator_id    uuid,
+    -- GitHub #525: soft delete. NULL = active. Deleting a catalog only ever sets this — the row
+    -- itself, and everything referencing it (question, session_log, title_definition, user_story),
+    -- is never removed, so historical attempts stay fully readable forever. isActivityType/
+    -- getGradingKind (lib/activityTypes.ts) exclude a soft-deleted catalog by default; a handful of
+    -- history-reading routes opt back in via their includeDeleted param. A catalog must already be
+    -- unlinked from every assembled_quiz before it can be deleted at all (deleteCatalog's 'linked'
+    -- guard, unchanged), so a soft-deleted catalog is never still reachable through a course.
+    deleted_at    timestamp,
     PRIMARY KEY (activity_type));
 
 -- ---------------------------------------------------------------------
@@ -1420,3 +1428,16 @@ CREATE POLICY own_daily_challenge_attempt_insert ON daily_challenge_attempt
 --     WHERE status = 'in-progress';
 --
 --   CREATE INDEX IF NOT EXISTS ix_session_log_assembled_quiz_id ON session_log (assembled_quiz_id);
+
+-- activity_type.deleted_at (GitHub #525): a question catalog used to be permanently undeletable
+-- the instant any student had a session_log row against it (deleteCatalog's old 'in_use' guard),
+-- with no way around it. Deleting now soft-deletes instead — the row, and everything referencing
+-- it, is never removed, so history stays readable everywhere. The only remaining precondition is
+-- unchanged: the catalog must already be unlinked from every assembled_quiz ('linked' guard). If
+-- your database predates this column:
+--
+--   ALTER TABLE activity_type ADD COLUMN IF NOT EXISTS deleted_at timestamp;
+--
+-- No backfill needed: every existing catalog is implicitly active (deleted_at IS NULL already,
+-- the column's own default), and nothing was ever hard-deleted under the old guard for this to
+-- need to account for.

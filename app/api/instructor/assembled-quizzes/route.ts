@@ -149,10 +149,13 @@ export async function POST(request: Request) {
 
   const uniqueCatalogIds = Array.from(new Set(catalogActivityTypes));
 
+  // GitHub #525: a soft-deleted catalog must not be composable into a new quiz — excluding it here
+  // makes it fail the same "does not exist" check below as a genuinely unknown key.
   const { data: validCatalogs, error: catalogError } = await supabase
     .from('activity_type')
     .select('activity_type, grading_kind')
-    .in('activity_type', uniqueCatalogIds);
+    .in('activity_type', uniqueCatalogIds)
+    .is('deleted_at', null);
 
   if (catalogError) return Response.json({ error: catalogError.message }, { status: 500 });
 

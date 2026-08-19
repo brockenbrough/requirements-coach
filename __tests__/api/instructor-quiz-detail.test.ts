@@ -34,6 +34,7 @@ const h = vi.hoisted(() => {
         return builder;
       },
       limit: () => builder,
+      is: () => builder,
       order: (column: string, opts?: { ascending?: boolean }) => {
         state.orders.push({ table, column, ascending: opts?.ascending ?? true });
         return builder;
@@ -475,40 +476,32 @@ describe('DELETE /api/instructor/quizzes/[activityType]', () => {
     expect(h.state.tables).not.toContain('session_log');
   });
 
-  it('returns 409 and deletes nothing when a student has already started a session for this catalog', async () => {
+  // GitHub #525: deletion no longer checks session_log/daily_challenge_attempt at all — a
+  // catalog stays deletable regardless of how many students have already attempted it.
+  it('succeeds even when a student has already completed a session for this catalog', async () => {
     queueRole('instructor');
-    queue('activity_type', { data: quizRow({ creator_id: 'instructor-1' }), error: null });
-    queue('session_log', { data: { session_id: 'session-1' }, error: null });
-
-    const res = await delReq();
-    expect(res.status).toBe(409);
-    const body = await res.json();
-    expect(body.error).toBe('This catalog has already been used by a student and cannot be deleted.');
-    expect(h.state.tables).not.toContain('question');
-    expect(h.state.deletes).toEqual([]);
-  });
-
-  // daily_challenge_attempt has no session_log/activity_type of its own, so a question can be
-  // "in use" there even with zero session_log rows for the catalog — the check this test locks in.
-  it('returns 409 when an mcq catalog\'s question has a daily_challenge_attempt, even with no session_log rows', async () => {
-    queueRole('instructor');
-    queue('activity_type', { data: quizRow({ creator_id: 'instructor-1' }), error: null });
-    queue('session_log', { data: null, error: null });
+    queue('activity_type', { data: quizRow({ creator_id: 'instructor-1' }), error: null }); // getQuizByActivityType
     queue('assembled_quiz_catalog', { data: [], error: null }); // linkage check — no quiz links
-    queue('question', { data: [{ question_id: 'q-1' }], error: null });
-    queue('daily_challenge_attempt', { data: { daily_challenge_attempt_id: 'attempt-1' }, error: null });
+    queue('activity_type', { data: null, error: null }); // the soft-delete UPDATE
 
     const res = await delReq();
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.error).toBe('This catalog has already been used by a student and cannot be deleted.');
-    expect(h.state.deletes).toEqual([]);
+    expect(body).toEqual({ activityType: 'IDENTIFY_WEAK_USER_STORIES' });
+
+    expect(h.state.tables).not.toContain('session_log');
+    expect(h.state.tables).not.toContain('daily_challenge_attempt');
+    expect(h.state.tables).not.toContain('question');
+    expect(h.state.deletes).toEqual([]); // nothing is ever hard-deleted any more
+    expect(h.state.updates).toContainEqual({
+      table: 'activity_type',
+      payload: { deleted_at: expect.any(String) },
+    });
   });
 
   it('returns 409 and deletes nothing when the catalog is still composed into one or more assembled quizzes', async () => {
     queueRole('instructor');
     queue('activity_type', { data: quizRow({ creator_id: 'instructor-1' }), error: null });
-    queue('session_log', { data: null, error: null });
     queue('assembled_quiz_catalog', {
       data: [
         { assembled_quiz: { assembled_quiz_id: 'quiz-1', quiz_name: 'Sprint 1 Quiz', course: { course_name: 'CS 101' } } },
@@ -526,85 +519,54 @@ describe('DELETE /api/instructor/quizzes/[activityType]', () => {
       { quizId: 'quiz-1', quizName: 'Sprint 1 Quiz', courseName: 'CS 101' },
       { quizId: 'quiz-2', quizName: 'Midterm Review', courseName: 'CS 201' },
     ]);
-    expect(h.state.tables).not.toContain('question');
-    expect(h.state.tables).not.toContain('user_story');
-    expect(h.state.deletes).toEqual([]);
+    expect(h.state.updates).toEqual([]);
   });
 
-  it('deletes an unused mcq catalog\'s questions/answers, unlinks it from every quiz, and deletes the catalog', async () => {
+  it('soft-deletes an mcq catalog: one activity_type update, nothing else touched', async () => {
     queueRole('instructor');
     queue('activity_type', { data: quizRow({ creator_id: 'instructor-1' }), error: null }); // getQuizByActivityType
-    queue('session_log', { data: null, error: null });
     queue('assembled_quiz_catalog', { data: [], error: null }); // linkage check — no quiz links
-    queue('question', { data: [{ question_id: 'q-1' }, { question_id: 'q-2' }], error: null }); // select ids
-    queue('daily_challenge_attempt', { data: null, error: null });
-    queue('question_to_answer', { data: [{ answer_id: 'a-1' }, { answer_id: 'a-2' }], error: null }); // select answer ids
-    queue('question_to_answer', { data: null, error: null }); // delete
-    queue('answer', { data: null, error: null }); // delete
-    queue('question', { data: null, error: null }); // delete
-    queue('title_definition', { data: null, error: null }); // delete
-    queue('assembled_quiz_catalog', { data: null, error: null }); // delete
-    queue('activity_type', { data: null, error: null }); // delete
+    queue('activity_type', { data: null, error: null }); // the soft-delete UPDATE
 
     const res = await delReq();
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toEqual({ activityType: 'IDENTIFY_WEAK_USER_STORIES' });
 
-    expect(h.state.deletes).toContainEqual({ table: 'question_to_answer', column: 'question_id', value: ['q-1', 'q-2'] });
-    expect(h.state.deletes).toContainEqual({ table: 'answer', column: 'answer_id', value: ['a-1', 'a-2'] });
-    expect(h.state.deletes).toContainEqual({ table: 'question', column: 'question_id', value: ['q-1', 'q-2'] });
-    expect(h.state.deletes).toContainEqual({ table: 'title_definition', column: 'activity_type', value: 'IDENTIFY_WEAK_USER_STORIES' });
-    expect(h.state.deletes).toContainEqual({ table: 'assembled_quiz_catalog', column: 'activity_type', value: 'IDENTIFY_WEAK_USER_STORIES' });
-    expect(h.state.deletes).toContainEqual({ table: 'activity_type', column: 'activity_type', value: 'IDENTIFY_WEAK_USER_STORIES' });
+    expect(h.state.updates).toEqual([
+      { table: 'activity_type', payload: { deleted_at: expect.any(String) } },
+    ]);
+    expect(h.state.tables).not.toContain('question');
+    expect(h.state.tables).not.toContain('user_story');
+    expect(h.state.tables).not.toContain('title_definition');
   });
 
-  it('deletes an unused llm-graded catalog\'s prompts, unlinks it from every quiz, and deletes the catalog', async () => {
+  it('soft-deletes an llm-graded catalog the same way as mcq', async () => {
     queueRole('instructor');
     queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'instructor-1' }), error: null });
-    queue('session_log', { data: null, error: null });
     queue('assembled_quiz_catalog', { data: [], error: null }); // linkage check — no quiz links
-    queue('user_story', { data: null, error: null }); // delete
-    queue('title_definition', { data: null, error: null });
-    queue('assembled_quiz_catalog', { data: null, error: null });
-    queue('activity_type', { data: null, error: null }); // delete
+    queue('activity_type', { data: null, error: null }); // the soft-delete UPDATE
 
     const res = await delReq('WRITE_ACCEPTANCE_CRITERIA');
     expect(res.status).toBe(200);
 
-    expect(h.state.deletes).toContainEqual({ table: 'user_story', column: 'activity_type', value: 'WRITE_ACCEPTANCE_CRITERIA' });
-    expect(h.state.deletes).toContainEqual({ table: 'assembled_quiz_catalog', column: 'activity_type', value: 'WRITE_ACCEPTANCE_CRITERIA' });
+    expect(h.state.updates).toEqual([
+      { table: 'activity_type', payload: { deleted_at: expect.any(String) } },
+    ]);
     expect(h.state.tables).not.toContain('question');
+    expect(h.state.tables).not.toContain('user_story');
     expect(h.state.tables).not.toContain('daily_challenge_attempt');
   });
 
-  it('returns 500 when the final delete fails for a reason other than a foreign key violation', async () => {
+  it('returns 500 when the soft-delete update fails', async () => {
     queueRole('instructor');
     queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'instructor-1' }), error: null });
-    queue('session_log', { data: null, error: null });
     queue('assembled_quiz_catalog', { data: [], error: null }); // linkage check — no quiz links
-    queue('user_story', { data: null, error: null });
-    queue('title_definition', { data: null, error: null });
-    queue('assembled_quiz_catalog', { data: null, error: null });
-    queue('activity_type', { data: null, error: { message: 'DB down' } });
+    queue('activity_type', { data: null, error: { message: 'DB down' } }); // the soft-delete UPDATE
 
     const res = await delReq('WRITE_ACCEPTANCE_CRITERIA');
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error).toBe('DB down');
-  });
-
-  it('returns 409 (defense in depth) when the final delete hits a foreign key violation the earlier checks missed', async () => {
-    queueRole('instructor');
-    queue('activity_type', { data: quizRow({ grading_kind: 'llm-graded', creator_id: 'instructor-1' }), error: null });
-    queue('session_log', { data: null, error: null });
-    queue('assembled_quiz_catalog', { data: [], error: null }); // linkage check — no quiz links
-    queue('user_story', { data: null, error: null });
-    queue('title_definition', { data: null, error: null });
-    queue('assembled_quiz_catalog', { data: null, error: null });
-    queue('activity_type', { data: null, error: { message: 'update or delete violates foreign key constraint', code: '23503' } });
-
-    const res = await delReq('WRITE_ACCEPTANCE_CRITERIA');
-    expect(res.status).toBe(409);
   });
 });

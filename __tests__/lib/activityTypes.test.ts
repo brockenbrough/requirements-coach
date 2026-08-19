@@ -36,6 +36,10 @@ function makeBuilder(table: string, result: Result) {
       state.filters.push({ table, column, value });
       return builder;
     },
+    is: (column: string, value: unknown) => {
+      state.filters.push({ table, column, value });
+      return builder;
+    },
     maybeSingle: async () => result,
   };
   return builder;
@@ -83,6 +87,7 @@ describe('getGradingKind', () => {
     expect(state.selects).toEqual([{ table: 'activity_type', columns: 'grading_kind' }]);
     expect(state.filters).toEqual([
       { table: 'activity_type', column: 'activity_type', value: 'WRITE_ACCEPTANCE_CRITERIA' },
+      { table: 'activity_type', column: 'deleted_at', value: null },
     ]);
   });
 
@@ -136,6 +141,26 @@ describe('getGradingKind', () => {
       error: null,
     });
   });
+
+  // GitHub #525: excludes a soft-deleted catalog by default — the mock's own queued row doesn't
+  // matter here, the point is that the query is filtered before the caller's fixture data would
+  // even be consulted for a real database.
+  it('filters out a soft-deleted catalog by default', async () => {
+    queue('activity_type', { data: { grading_kind: 'llm-graded' }, error: null });
+
+    await getGradingKind(makeSupabase(), 'WRITE_ACCEPTANCE_CRITERIA');
+
+    expect(state.filters).toContainEqual({ table: 'activity_type', column: 'deleted_at', value: null });
+  });
+
+  it('does not filter by deleted_at when includeDeleted is true', async () => {
+    queue('activity_type', { data: { grading_kind: 'llm-graded' }, error: null });
+
+    const result = await getGradingKind(makeSupabase(), 'WRITE_ACCEPTANCE_CRITERIA', { includeDeleted: true });
+
+    expect(result).toEqual({ gradingKind: 'llm-graded', error: null });
+    expect(state.filters.some((f) => f.column === 'deleted_at')).toBe(false);
+  });
 });
 
 describe('isActivityType', () => {
@@ -146,6 +171,35 @@ describe('isActivityType', () => {
 
     expect(result).toEqual({ valid: true, error: null });
     expect(state.selects).toEqual([{ table: 'activity_type', columns: 'activity_type' }]);
+  });
+
+  // GitHub #525
+  it('filters out a soft-deleted catalog by default', async () => {
+    queue('activity_type', { data: null, error: null });
+
+    await isActivityType(makeSupabase(), 'IDENTIFY_WEAK_USER_STORIES');
+
+    expect(state.filters).toContainEqual({ table: 'activity_type', column: 'deleted_at', value: null });
+  });
+
+  it('does not filter by deleted_at when includeDeleted is true, so a deleted catalog still counts as valid', async () => {
+    queue('activity_type', { data: { activity_type: 'IDENTIFY_WEAK_USER_STORIES' }, error: null });
+
+    const result = await isActivityType(makeSupabase(), 'IDENTIFY_WEAK_USER_STORIES', { includeDeleted: true });
+
+    expect(result).toEqual({ valid: true, error: null });
+    expect(state.filters.some((f) => f.column === 'deleted_at')).toBe(false);
+  });
+
+  it('never queries at all for a non-string or blank key, regardless of includeDeleted', async () => {
+    for (const value of [null, undefined, 42, '', '   ']) {
+      expect(await isActivityType(makeSupabase(), value, { includeDeleted: true })).toEqual({
+        valid: false,
+        error: null,
+      });
+    }
+
+    expect(state.tables).toEqual([]);
   });
 });
 

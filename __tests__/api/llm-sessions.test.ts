@@ -21,6 +21,7 @@ const h = vi.hoisted(() => {
         return builder;
       },
       in: () => builder,
+      is: () => builder,
       limit: () => builder,
       order: () => builder,
       insert: (payload: unknown) => {

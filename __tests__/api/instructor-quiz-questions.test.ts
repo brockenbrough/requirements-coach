@@ -18,6 +18,7 @@ const h = vi.hoisted(() => {
         state.filters.push({ table, column, value });
         return builder;
       },
+      is: () => builder,
       maybeSingle: async () => result,
       then: (onOk: (r: Result) => unknown, onErr?: (e: unknown) => unknown) =>
         Promise.resolve(result).then(onOk, onErr),

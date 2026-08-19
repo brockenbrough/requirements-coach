@@ -67,6 +67,12 @@ export async function findTodayAttempt(supabase: SupabaseClient, userId: string,
  * difficulty_level filter: the issue asks for "one random question," not a leveled draw.
  *
  * A student enrolled in no courses short-circuits to an empty pool without querying course/question.
+ *
+ * GitHub #525: excludes a question whose catalog has been soft-deleted (activity_type.deleted_at)
+ * — this pool has no other awareness of activity_type at all, so without this a deleted catalog's
+ * questions would stay eligible for new Daily Challenge draws forever, even though the catalog
+ * itself is gone from every other part of the app. Fetched via a non-inner embed and filtered in
+ * JS (this codebase's existing convention) rather than an embedded-column WHERE filter.
  */
 export async function loadEligibleQuestionIds(supabase: SupabaseClient, userId: string) {
   const enrolled = await getEnrolledCourseIds(supabase, userId);
@@ -87,12 +93,22 @@ export async function loadEligibleQuestionIds(supabase: SupabaseClient, userId: 
 
   const { data: questions, error: questionsError } = await supabase
     .from('question')
-    .select('question_id, max_score')
+    .select('question_id, max_score, catalog:activity_type(deleted_at)')
     .in('user_id', instructorIds);
 
   if (questionsError) return { questions: null, error: questionsError };
 
-  return { questions: (questions ?? []) as { question_id: string; max_score: number | null }[], error: null };
+  const rows = (questions ?? []) as unknown as {
+    question_id: string;
+    max_score: number | null;
+    catalog: { deleted_at: string | null } | null;
+  }[];
+
+  const eligible = rows
+    .filter((row) => row.catalog?.deleted_at == null)
+    .map((row) => ({ question_id: row.question_id, max_score: row.max_score }));
+
+  return { questions: eligible, error: null };
 }
 
 /**

@@ -42,7 +42,9 @@ export async function GET(request: Request) {
   const supabase = getSupabaseClient();
   if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
 
-  const { valid: validActivityType, error: activityTypeError } = await isActivityType(supabase, activityType);
+  // GitHub #525: includeDeleted so a student can still see their completed history on a catalog
+  // an instructor has since deleted — this is a history read, not a gate on new interaction.
+  const { valid: validActivityType, error: activityTypeError } = await isActivityType(supabase, activityType, { includeDeleted: true });
   if (activityTypeError) return Response.json({ error: activityTypeError.message }, { status: 500 });
   if (!validActivityType) {
     return Response.json({ error: 'Unknown activity type.' }, { status: 400 });

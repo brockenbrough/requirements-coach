@@ -54,6 +54,15 @@ vi.mock('../../lib/supabase', () => ({
   }),
 }));
 
+// GitHub #525: wrapping (not replacing) the real implementation lets every existing test keep
+// exercising real isActivityType behavior against the mocked supabase client above, while this
+// file can also assert on what arguments the route actually passed it.
+vi.mock('../../lib/activityTypes', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../lib/activityTypes')>();
+  return { ...actual, isActivityType: vi.fn(actual.isActivityType) };
+});
+
+import { isActivityType } from '../../lib/activityTypes';
 import { GET } from '../../app/api/sessions/in-progress/route';
 
 const ACTIVITY_TYPE = 'IDENTIFY_WEAK_USER_STORIES';
@@ -98,6 +107,7 @@ describe('GET /api/sessions/in-progress', () => {
     h.state.queues = {};
     h.state.inserts = [];
     h.state.tables = [];
+    vi.mocked(isActivityType).mockClear();
   });
 
   it('returns 401 without a token', async () => {
@@ -245,6 +255,19 @@ describe('GET /api/sessions/in-progress', () => {
     const response = await GET(req(`?activityType=${ACTIVITY_TYPE}&assembledQuizId=quiz-1`));
 
     expect(response.status).toBe(200);
+  });
+
+  // GitHub #525: this route reports "what's currently running", including a session on a catalog
+  // that's since been deleted — it should not 400 while that session is still live.
+  it('resolves a soft-deleted catalog too, so a running session for it still shows', async () => {
+    queueValidActivityType();
+    queue('session_log', { data: [sessionRow()], error: null });
+    queue('session_to_question', { data: drawnQuestions, error: null });
+    queue('answered_question_log', { data: [], error: null });
+
+    await GET(req(`?activityType=${ACTIVITY_TYPE}`));
+
+    expect(isActivityType).toHaveBeenCalledWith(expect.anything(), ACTIVITY_TYPE, { includeDeleted: true });
   });
 
   it('never writes', async () => {

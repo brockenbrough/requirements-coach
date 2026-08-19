@@ -103,7 +103,10 @@ export async function POST(request: Request, { params }: { params: { activityTyp
 
   const { activityType } = params;
 
-  const { gradingKind, error: kindError } = await getGradingKind(supabase, activityType);
+  // GitHub #525: includeDeleted so a submission already loaded in an open tab can still be graded
+  // even if the catalog is deleted mid-session — matches the MCQ answer route, which has no
+  // dependency on the catalog's live status at all.
+  const { gradingKind, error: kindError } = await getGradingKind(supabase, activityType, { includeDeleted: true });
   if (kindError) return Response.json({ error: kindError.message }, { status: 500 });
   if (gradingKind === null) return Response.json({ error: "Unknown activity type." }, { status: 400 });
   if (gradingKind !== "llm-graded") {

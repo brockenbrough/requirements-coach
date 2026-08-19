@@ -41,6 +41,7 @@ const h = vi.hoisted(() => {
       },
       order: () => builder,
       limit: () => builder,
+      is: () => builder,
       maybeSingle: async () => result,
       single: async () => result,
       then: (onOk: (r: Result) => unknown, onErr?: (e: unknown) => unknown) =>
