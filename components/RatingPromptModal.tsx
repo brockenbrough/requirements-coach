@@ -110,7 +110,7 @@ export function RatingPromptModal({
             onChange={(event) => setRatingPrompt(event.target.value)}
             disabled={submitting}
             placeholder="How should the AI score a student's answer? Replaces the built-in generic rubric for this catalog."
-            rows={6}
+            rows={14}
             className="mt-1.5 block w-full resize-y rounded-brand-md border border-brand-navy-border bg-brand-navy-2 px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none transition focus:border-brand-purple disabled:cursor-not-allowed disabled:opacity-60"
           />
         </label>
