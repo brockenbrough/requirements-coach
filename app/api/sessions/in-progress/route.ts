@@ -45,7 +45,10 @@ export async function GET(request: Request) {
   if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
 
   if (activityType !== null) {
-    const { valid: validActivityType, error: activityTypeError } = await isActivityType(supabase, activityType);
+    // GitHub #525: includeDeleted — this reports "is something currently running", not a gate on
+    // starting something new, so it should stay honest about an in-progress session even if the
+    // catalog it's on has since been deleted.
+    const { valid: validActivityType, error: activityTypeError } = await isActivityType(supabase, activityType, { includeDeleted: true });
     if (activityTypeError) return Response.json({ error: activityTypeError.message }, { status: 500 });
     if (!validActivityType) {
       return Response.json({ error: 'Unknown activity type.' }, { status: 400 });

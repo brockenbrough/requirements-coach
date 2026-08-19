@@ -69,6 +69,15 @@ vi.mock('../../lib/llm/factory', async (importOriginal) => {
 // override it to simulate a decrypt failure.
 vi.mock('../../lib/secretEncryption', () => ({ decryptSecret: vi.fn((value: string) => value) }));
 
+// GitHub #525: wrapping (not replacing) the real implementation lets every existing test keep
+// exercising real getGradingKind behavior against the mocked supabase client above, while this
+// file can also assert on what arguments the route actually passed it.
+vi.mock('../../lib/activityTypes', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../lib/activityTypes')>();
+  return { ...actual, getGradingKind: vi.fn(actual.getGradingKind) };
+});
+
+import { getGradingKind } from '../../lib/activityTypes';
 import { getLLMProvider } from '../../lib/llm/factory';
 import { decryptSecret } from '../../lib/secretEncryption';
 import { POST } from '../../app/api/activities/[activityType]/llm/submissions/route';
@@ -167,6 +176,7 @@ beforeEach(() => {
   vi.mocked(getLLMProvider).mockReturnValue({ rateAcceptanceCriteria } as never);
   vi.mocked(decryptSecret).mockReset();
   vi.mocked(decryptSecret).mockImplementation((value: string) => value);
+  vi.mocked(getGradingKind).mockClear();
 });
 
 describe('POST /api/activities/[activityType]/llm/submissions', () => {
@@ -454,5 +464,16 @@ describe('POST /api/activities/[activityType]/llm/submissions', () => {
     await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
 
     expect(rateAcceptanceCriteria).toHaveBeenCalledWith(STORY.story_text, 'x', null);
+  });
+
+  // GitHub #525: a submission already loaded in an open tab must still be gradable after the
+  // catalog is deleted mid-session, matching the MCQ answer route's existing unconditional behavior.
+  it('resolves a soft-deleted catalog too, so a submission on it can still be graded mid-session', async () => {
+    queueUpToLLM();
+    queueSuccessfulWrite(submissionRow('story-1'));
+
+    await POST(req({ userStoryId: 'story-1', submittedText: 'x', sessionId: SESSION_ID }), PARAMS());
+
+    expect(getGradingKind).toHaveBeenCalledWith(expect.anything(), ACTIVITY, { includeDeleted: true });
   });
 });

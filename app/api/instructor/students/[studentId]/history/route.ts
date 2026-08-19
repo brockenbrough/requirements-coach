@@ -45,7 +45,9 @@ export async function GET(request: Request, { params }: { params: { studentId: s
 
   const activityType = new URL(request.url).searchParams.get('activityType');
   if (activityType !== null) {
-    const { valid: validActivityType, error: activityTypeError } = await isActivityType(supabase, activityType);
+    // GitHub #525: includeDeleted so an instructor can still filter a student's history by a
+    // catalog that's since been deleted — this is a history read, not a gate on new interaction.
+    const { valid: validActivityType, error: activityTypeError } = await isActivityType(supabase, activityType, { includeDeleted: true });
     if (activityTypeError) return Response.json({ error: activityTypeError.message }, { status: 500 });
     if (!validActivityType) {
       return Response.json({ error: 'Unknown activity type.' }, { status: 400 });

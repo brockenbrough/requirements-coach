@@ -52,6 +52,15 @@ vi.mock('../../lib/supabase', () => ({
   }),
 }));
 
+// GitHub #525: wrapping (not replacing) the real implementation lets every existing test keep
+// exercising real isActivityType behavior against the mocked supabase client above, while this
+// file can also assert on what arguments the route actually passed it.
+vi.mock('../../lib/activityTypes', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../lib/activityTypes')>();
+  return { ...actual, isActivityType: vi.fn(actual.isActivityType) };
+});
+
+import { isActivityType } from '../../lib/activityTypes';
 import { GET } from '../../app/api/sessions/completed/route';
 
 const ACTIVITY = 'IDENTIFY_WEAK_USER_STORIES';
@@ -85,6 +94,7 @@ describe('GET /api/sessions/completed', () => {
     h.state.queues = {};
     h.state.tables = [];
     h.state.filters = [];
+    vi.mocked(isActivityType).mockClear();
   });
 
   it('returns 401 without a token', async () => {
@@ -214,6 +224,18 @@ describe('GET /api/sessions/completed', () => {
     await GET(req());
 
     expect(h.state.filters.some((f) => f.column === 'assembled_quiz_id')).toBe(false);
+  });
+
+  // GitHub #525: this route must still serve a soft-deleted catalog's history, since a student
+  // filtering their own completed attempts by activity type is exactly the "keep history readable
+  // forever" case the feature promises.
+  it('resolves a soft-deleted catalog too, so completed history for it keeps working', async () => {
+    queueValidActivityType();
+    queue('session_log', { data: [], error: null });
+
+    await GET(req());
+
+    expect(isActivityType).toHaveBeenCalledWith(expect.anything(), ACTIVITY, { includeDeleted: true });
   });
 
   it('returns 500 when the session_log query fails', async () => {
