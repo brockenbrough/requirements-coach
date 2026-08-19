@@ -1,5 +1,4 @@
-import { summarizeStudents, type StudentActivitySummary } from './activityLogTypes';
-import type { StudentAttemptDetail } from './mockStudentAttempts';
+import { summarizeStudents, type StudentActivitySummary, type StudentAttemptDetail } from './activityLogTypes';
 
 export type StudentMetrics = {
   averageScore: number | null;
@@ -12,16 +11,13 @@ export type StudentMetrics = {
 
 /**
  * GitHub #127: every number here is computed from the attempt list handed in, never hardcoded —
- * so swapping getMockStudentAttempts() for a real per-student fetch (see that file's docstring)
- * is the only change needed; this function doesn't know or care that the data is mock.
+ * so this function doesn't know or care whether the caller fetched real attempts or a mock.
  */
 export function computeStudentMetrics(studentId: string, studentName: string, attempts: StudentAttemptDetail[]): StudentMetrics {
   // averageScore/abandonedCount/needsAttention reuse the exact same thresholds and "completed
   // attempts only" rule the roster (lib/activityLogTypes.ts's summarizeStudents) already uses —
   // so this page can never disagree with the dashboard about whether a student needs attention.
-  // courses: [] — this page's own attempts are still mock data (see StudentAttemptDetail's own
-  // docstring in mockStudentAttempts.ts), with no real course association to report.
-  const asSummaries: StudentActivitySummary[] = attempts.map((attempt) => ({ ...attempt, studentId, studentName, courses: [] }));
+  const asSummaries: StudentActivitySummary[] = attempts.map((attempt) => ({ ...attempt, studentId, studentName }));
   const [aggregate] = summarizeStudents(asSummaries);
 
   const completedQuestions = attempts.reduce((sum, attempt) => sum + attempt.answeredQuestions, 0);

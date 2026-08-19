@@ -5,8 +5,8 @@ import type { StudentAggregate } from '../lib/activityLogTypes';
  * One student's card — shared by the Instructor Dashboard's roster preview and the All
  * Students page (GitHub #82) so the two never drift on what a student's summary looks like.
  * Links to the student's detail page (GitHub #127) — the name travels along as a query param
- * since that page's attempt data is currently mock (see lib/mockStudentAttempts.ts), not looked
- * up from studentId against anything real yet.
+ * purely so the header has something to show before that page's own real fetch
+ * (lib/sessionClient.ts's loadStudentDetail) resolves; the fetched studentName takes over once it does.
  */
 export function InstructorStudentCard({
   student,

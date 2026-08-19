@@ -1,5 +1,5 @@
 import { getActivityByType } from '../lib/activityContent';
-import type { StudentAttemptDetail } from '../lib/mockStudentAttempts';
+import type { StudentAttemptDetail } from '../lib/activityLogTypes';
 
 type ActivityGroup = {
   activityType: string;
@@ -52,6 +52,10 @@ export function StudentActivityBreakdown({ attempts }: { attempts: StudentAttemp
   return (
     <div className="rounded-brand-lg border border-gray-100 bg-gray-50 p-5">
       <p className="mb-4 text-sm font-extrabold text-brand-navy">By activity type</p>
+
+      {groups.length === 0 ? (
+        <p className="text-sm font-semibold text-gray-500">No attempts yet in your courses with this student.</p>
+      ) : null}
 
       {groups.map((group, index) => {
         const accent = group.isAcceptanceCriteria ? '#2DD4BF' : '#7C4DFF';

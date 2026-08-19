@@ -9,9 +9,10 @@
 // from the feedback route, and only after the answer has been committed.
 
 import type { ActivityType } from './activityTypes';
+import { toActivityLogEntry, type StudentAttemptDetail } from './activityLogTypes';
 import { toInstant } from './dateTime';
 import type { AvailableActivityTitles, PublicStudentProfile, PublicStudentTitle } from './leaderboardTypes';
-import type { InstructorActivityEntry, SessionListEntry, SessionRecord } from './sessionTypes';
+import type { ActivityCourseRef, InstructorActivityEntry, SessionListEntry, SessionRecord } from './sessionTypes';
 import type { OwnedActivityTypeSummary } from './activityTypeQueries';
 import type { QuizQuestion } from './quizQuestionTypes';
 import { getCachedCompletedAttempts, setCachedCompletedAttempts } from './completedAttemptsStore';
@@ -755,6 +756,58 @@ export function loadAcceptanceCriteriaSubmissions(
       setCachedAcceptanceCriteriaSubmissions(studentId, result.data.submissions);
     }
     return result;
+  });
+}
+
+/** One attempt as GET /api/instructor/students/{studentId}/detail sends it over the wire. */
+type StudentDetailAttemptWire = SessionListEntry & {
+  questionResults: boolean[];
+  courses: ActivityCourseRef[];
+};
+
+type StudentDetailResponse = {
+  studentName: string;
+  activityNames: Record<string, string>;
+  attempts: StudentDetailAttemptWire[];
+  classAveragePercent: number | null;
+};
+
+export type StudentDetail = {
+  studentName: string;
+  classAveragePercent: number | null;
+  attempts: StudentAttemptDetail[];
+};
+
+/**
+ * One student's real attempt history, scoped to whatever courses the calling instructor shares
+ * with them (GET /api/instructor/students/{studentId}/detail) — the data behind
+ * app/instructor/students/[id]/page.tsx, replacing the old fixed lib/mockStudentAttempts.ts
+ * fixture. 403 (no body) means the student exists but shares no course with this instructor; 404
+ * means the id isn't a student at all — both collapse to `!result.ok` here, same as
+ * loadPublicStudentProfile's peer-profile check, so the page doesn't need to tell them apart.
+ *
+ * Not cached, same reasoning as loadPublicStudentProfile: a rare, one-off page visit rather than
+ * something remounted on every navigation the way the sidebar score is.
+ */
+export function loadStudentDetail(token: string, studentId: string) {
+  return request<StudentDetailResponse>(
+    `/api/instructor/students/${encodeURIComponent(studentId)}/detail`,
+    { method: 'GET' },
+    token,
+  ).then((result) => {
+    if (!result.ok) return result;
+
+    const nameByType = new Map(Object.entries(result.data.activityNames));
+    const attempts: StudentAttemptDetail[] = result.data.attempts.map((attempt) => ({
+      ...toActivityLogEntry(attempt, nameByType),
+      questionResults: attempt.questionResults,
+      courses: attempt.courses,
+    }));
+
+    return {
+      ok: true as const,
+      data: { studentName: result.data.studentName, classAveragePercent: result.data.classAveragePercent, attempts },
+    };
   });
 }
 

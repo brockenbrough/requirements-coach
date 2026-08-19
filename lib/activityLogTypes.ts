@@ -210,6 +210,19 @@ export function toActivityLogEntry(session: SessionListEntry, nameByType?: Map<s
  * consumes that shape (ActivityLogTable's columns, InstructorActivityStats' per-activity
  * averages, resultStateOf) keeps working unchanged on either kind of row.
  */
+/**
+ * One attempt as the Instructor Dashboard's per-student detail page needs it (GitHub #127,
+ * later connected to real data) — every field of ActivityLogEntry plus the per-question
+ * correctness lib/studentAttemptMetrics.ts's streak calculation reduces over. Was declared in the
+ * now-deleted lib/mockStudentAttempts.ts; moved here once GET /api/instructor/students/{id}/detail
+ * (lib/studentDetailQueries.ts) started producing the real thing in the same shape.
+ */
+export type StudentAttemptDetail = ActivityLogEntry & {
+  questionResults: boolean[];
+  /** GitHub #474 shape reused here: every course this attempt's catalog is linked to. */
+  courses: { courseId: string; courseName: string }[];
+};
+
 export type QuizAttemptRow = StudentActivitySummary & { kind: 'quiz' };
 
 export type AcSubmissionRow = ActivityLogEntry & {
