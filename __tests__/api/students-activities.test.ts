@@ -14,6 +14,7 @@ const h = vi.hoisted(() => {
       select: () => builder,
       eq: () => builder,
       in: () => builder,
+      range: () => builder,
       order: () => builder,
       // PostgrestFilterBuilder is thenable — queries without .single() are awaited directly.
       then: (onOk: (r: Result) => unknown, onErr?: (e: unknown) => unknown) =>

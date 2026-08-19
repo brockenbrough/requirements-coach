@@ -34,6 +34,7 @@ const h = vi.hoisted(() => {
         state.filters.push({ table, column: `${column} (in)`, value });
         return builder;
       },
+      range: () => builder,
       order: (column: string, opts?: { ascending?: boolean }) => {
         state.orders.push({ table, column, ascending: opts?.ascending ?? true });
         return builder;

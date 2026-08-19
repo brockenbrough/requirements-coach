@@ -15,6 +15,7 @@ const h = vi.hoisted(() => {
       select: () => builder,
       eq: () => builder,
       in: () => builder,
+      range: () => builder,
       order: () => builder,
       insert: (payload: unknown) => {
         state.inserts.push({ table, payload });

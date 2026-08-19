@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "vitest run"
+    "test": "vitest run",
+    "seed:load-test": "node scripts/seed-load-test.js",
+    "cleanup:load-test": "node scripts/cleanup-load-test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
