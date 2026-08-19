@@ -239,7 +239,7 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
     }
 
     setExtraUserStories((current) => (current ?? []).filter((s) => s.userStoryId !== story.userStoryId));
-    showToast('Prompt removed from this quiz.');
+    showToast('Question removed from this quiz.');
     setRetryCount((count) => count + 1); // re-fetch level coverage now that a hand-picked prompt is gone from the pool
   }
 
@@ -393,7 +393,7 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
                       <p className="font-extrabold text-brand-navy hover:text-brand-purple hover:underline">{catalog.name}</p>
                       {catalog.description ? <p className="mt-0.5 text-xs font-semibold text-gray-500">{catalog.description}</p> : null}
                       <p className="mt-1 text-xs font-bold text-gray-600">
-                        {catalog.activeCount} of {catalog.totalQuestions} {catalog.gradingKind === 'llm-graded' ? 'prompts' : 'questions'} active
+                        {catalog.activeCount} of {catalog.totalQuestions} questions active
                         {catalog.excludedCount > 0 ? ` · ${catalog.excludedCount} excluded for this quiz` : ''}
                       </p>
                     </Link>
@@ -444,7 +444,7 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
               <>
                 <p className="mb-3 text-xs font-extrabold uppercase tracking-wide text-gray-400">Grading Rubrics</p>
                 <p className="mb-4 text-xs font-semibold text-gray-500">
-                  Each catalog's own grading rubric — a submission is scored against whichever catalog its prompt
+                  Each catalog's own grading rubric — a submission is scored against whichever catalog its question
                   came from. Changing one only affects submissions graded afterward.
                 </p>
                 <div className="mb-6 space-y-3">
@@ -514,12 +514,12 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
                   disabled={catalogOptionsForNewItem.length === 0}
                   title={
                     catalogOptionsForNewItem.length === 0
-                      ? `No catalogs exist yet to file a new ${quiz.gradingKind === 'llm-graded' ? 'prompt' : 'question'} under.`
+                      ? 'No catalogs exist yet to file a new question under.'
                       : undefined
                   }
                   className="flex-none rounded-full border border-brand-purple/40 px-4 py-1.5 text-xs font-extrabold text-brand-purple transition hover:bg-brand-purple/10 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {quiz.gradingKind === 'llm-graded' ? 'Add prompt' : 'Create new question'}
+                  {quiz.gradingKind === 'llm-graded' ? 'Add question' : 'Create new question'}
                 </button>
                 <button
                   type="button"
@@ -531,7 +531,7 @@ export default function AssembledQuizDetailPage({ params }: { params: { quizId: 
               </div>
             </div>
             <p className="mb-4 text-xs font-semibold text-gray-500">
-              Questions and prompts picked here count toward this quiz&apos;s pool regardless of whether their own
+              Questions picked here count toward this quiz&apos;s pool regardless of whether their own
               catalog is linked above. Removing one only drops it from this quiz — the original item, its catalog,
               and every other quiz are unaffected.
             </p>

@@ -28,7 +28,7 @@ const KIND_OPTIONS: { value: GradingKind; label: string; hint: string }[] = [
   {
     value: 'llm-graded',
     label: 'LLM-Graded Task',
-    hint: 'Students write a free-text answer to a prompt. Scored 1-10 by your configured AI provider.',
+    hint: 'Students write a free-text answer to a question. Scored 1-10 by your configured AI provider.',
   },
 ];
 
