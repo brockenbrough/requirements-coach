@@ -31,6 +31,9 @@ export async function GET(request: Request, { params }: { params: { activityType
   if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
 
   const { activityType } = params;
+  // GitHub #583: optional — scopes the lookup to a specific quiz when the caller knows one, so
+  // two quizzes composed from the same catalog don't resume each other's session.
+  const assembledQuizId = new URL(request.url).searchParams.get('assembledQuizId') ?? undefined;
 
   // Guarded so a mistyped or MCQ activityType is a clear error rather than a permanent, silent
   // "nothing in progress" — which is what the empty answer below would otherwise look like.
@@ -47,7 +50,7 @@ export async function GET(request: Request, { params }: { params: { activityType
   const { data: { user }, error: authError } = await supabase.auth.getUser(token);
   if (authError || !user) return Response.json({ error: 'Invalid or expired token.' }, { status: 401 });
 
-  const { session, error: sessionError } = await findInProgressSession(supabase, user.id, activityType);
+  const { session, error: sessionError } = await findInProgressSession(supabase, user.id, activityType, assembledQuizId);
   if (sessionError) return Response.json({ error: sessionError.message }, { status: 500 });
 
   // Nothing in progress is a normal answer, not a 404 — the client offers Start instead of
