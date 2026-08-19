@@ -117,7 +117,7 @@ export function PromptFormModal({
           <div>
             <p className="text-xs font-extrabold uppercase tracking-wide text-brand-gold">LLM-Graded Task</p>
             <h2 id="prompt-form-title" className="mt-1 text-xl font-extrabold text-white">
-              {mode === 'edit' ? 'Edit Prompt' : 'New Prompt'}
+              {mode === 'edit' ? 'Edit Prompt' : 'New Question'}
             </h2>
           </div>
           <button
