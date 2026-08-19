@@ -31,18 +31,28 @@ export function sumBestScores(sessions: SessionRow[]): number {
 
 /**
  * Sum of the student's best cumulative_score at each (activity_type, difficulty_level) pair,
- * counting every completed session (see sumBestScores for the reduction itself).
+ * counting every completed session (see sumBestScores for the reduction itself), plus every
+ * Daily Challenge attempt's own (already-doubled, see lib/dailyChallengeRules.ts) score.
  *
  * Completed, not passed: an attempt that ended below the 75% threshold still earned its points
  * and contributes them. Only sessions that are still running or were abandoned stay out — their
  * cumulative_score is a partial tally of an attempt that was never finished.
  *
- * sessionsCompleted (GitHub #39) is the row count behind that same query — every completed
- * session counts once here, unlike the score sum, which only keeps each level's best attempt.
- * Returned alongside score rather than via a second query, since it's already the row set the
- * score is computed from.
+ * The Daily Challenge side is a plain sum, not a sumBestScores-style reduction: unlike a session,
+ * a daily_challenge_attempt doesn't have an (activity_type, difficulty_level) key to dedupe on —
+ * uq_daily_challenge_attempt_user_date already caps the table at one row per user per calendar
+ * day, so every submitted attempt is a distinct day's points and all of them count. A `score` of
+ * `null` (never submitted, or the deadline passed first) contributes 0, the same "unfinished
+ * attempt earns nothing yet" rule sessions follow.
  *
- * A student with no completed sessions gets score 0 and sessionsCompleted 0.
+ * sessionsCompleted (GitHub #39) is the row count behind the session_log query only — every
+ * completed session counts once here, unlike the score sum, which only keeps each level's best
+ * attempt. Daily Challenge attempts are not sessions and don't affect this count. Returned
+ * alongside score rather than via a second query, since it's already the row set the score is
+ * computed from.
+ *
+ * A student with no completed sessions and no Daily Challenge attempts gets score 0 and
+ * sessionsCompleted 0.
  */
 export async function computeStudentScore(supabase: SupabaseClient, userId: string) {
   const { data, error } = await supabase
@@ -55,5 +65,17 @@ export async function computeStudentScore(supabase: SupabaseClient, userId: stri
 
   const sessions = (data ?? []) as SessionRow[];
 
-  return { score: sumBestScores(sessions), sessionsCompleted: sessions.length, error: null };
+  const { data: dailyChallengeData, error: dailyChallengeError } = await supabase
+    .from('daily_challenge_attempt')
+    .select('score')
+    .eq('user_id', userId);
+
+  if (dailyChallengeError) return { score: null, sessionsCompleted: null, error: dailyChallengeError };
+
+  const dailyChallengeScore = ((dailyChallengeData ?? []) as { score: number | null }[]).reduce(
+    (sum, row) => sum + (row.score ?? 0),
+    0,
+  );
+
+  return { score: sumBestScores(sessions) + dailyChallengeScore, sessionsCompleted: sessions.length, error: null };
 }

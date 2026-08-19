@@ -502,9 +502,11 @@ CREATE TABLE answered_question_log (
 -- submitted_option/is_correct/score/submitted_at are nullable for the same write-before-disclose
 -- reason as answered_question_log/submission: the row is inserted at draw time (locking in the
 -- question and today's deadline), then filled in only if the student submits before deadline_at.
--- A missed deadline is left unfinalized on purpose — nothing outside this table reads it for
--- scoring, so an unfinalized row's only job is to keep uq_daily_challenge_attempt_user_date
--- blocking a second attempt that day, finished or not.
+-- A missed deadline is left unfinalized on purpose: an unfinalized row's `score` stays NULL, which
+-- lib/scoreQueries.ts's computeStudentScore treats as contributing 0 to the cumulative total (the
+-- same "unfinished attempt earns nothing yet" rule session_log follows), so an unfinalized row's
+-- only other job is to keep uq_daily_challenge_attempt_user_date blocking a second attempt that
+-- day, finished or not.
 -- ---------------------------------------------------------------------
 CREATE TABLE daily_challenge_attempt (
     daily_challenge_attempt_id uuid      NOT NULL,

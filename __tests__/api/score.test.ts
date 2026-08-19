@@ -90,6 +90,7 @@ describe('GET /api/students/{studentId}/score', () => {
   // AC 3: no completed sessions at all.
   it('returns 0 when the student has no completed sessions', async () => {
     queue('session_log', { data: [], error: null });
+    queue('daily_challenge_attempt', { data: [], error: null });
 
     const response = await GET(req(), ctx);
     const body = await response.json();
@@ -123,14 +124,16 @@ describe('GET /api/students/{studentId}/score', () => {
   // REQ-GAM-DL-1 counts completed sessions, not passed ones: the query filters on status,
   // so a running or abandoned attempt never reaches the sum, while a finished-but-failed
   // one keeps the points it earned.
-  it('scopes the query to the student and to completed sessions', async () => {
+  it('scopes the queries to the student, and session_log additionally to completed sessions', async () => {
     queue('session_log', { data: [], error: null });
+    queue('daily_challenge_attempt', { data: [], error: null });
 
     await GET(req(), ctx);
 
     expect(h.state.filters).toEqual([
       { table: 'session_log', column: 'user_id', value: STUDENT_ID },
       { table: 'session_log', column: 'status', value: 'completed' },
+      { table: 'daily_challenge_attempt', column: 'user_id', value: STUDENT_ID },
     ]);
   });
 
@@ -199,8 +202,64 @@ describe('GET /api/students/{studentId}/score', () => {
     expect(body.score).toBe(275);
   });
 
+  // A submitted Daily Challenge attempt's already-doubled score (lib/dailyChallengeRules.ts's
+  // scoreForDailyChallenge) is added on top of the session-derived total.
+  it('adds a submitted Daily Challenge attempt score to the total', async () => {
+    queue('session_log', {
+      data: [{ activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 1, cumulative_score: 100 }],
+      error: null,
+    });
+    queue('daily_challenge_attempt', { data: [{ score: 40 }], error: null });
+
+    const body = await (await GET(req(), ctx)).json();
+
+    expect(body.score).toBe(140);
+  });
+
+  // Every day's attempt is its own row (uq_daily_challenge_attempt_user_date caps it at one per
+  // day) — unlike sessions there's no (activity_type, difficulty_level) to dedupe on, so every
+  // submitted attempt's score is summed, not just the best.
+  it('sums Daily Challenge scores across multiple days rather than keeping only the best', async () => {
+    queue('session_log', { data: [], error: null });
+    queue('daily_challenge_attempt', { data: [{ score: 20 }, { score: 40 }, { score: 10 }], error: null });
+
+    const body = await (await GET(req(), ctx)).json();
+
+    expect(body.score).toBe(70);
+  });
+
+  // A `null` score means the attempt was never submitted (deadline passed first, see the table's
+  // own doc comment in supabase/schema.sql) — it must contribute 0, not throw or count as points.
+  it('treats an unsubmitted Daily Challenge attempt (null score) as contributing 0', async () => {
+    queue('session_log', { data: [], error: null });
+    queue('daily_challenge_attempt', { data: [{ score: null }], error: null });
+
+    const body = await (await GET(req(), ctx)).json();
+
+    expect(body.score).toBe(0);
+  });
+
+  // Daily Challenge attempts are not sessions and must not inflate sessionsCompleted (GitHub #39),
+  // which is defined purely off the session_log row count.
+  it('does not count Daily Challenge attempts toward sessionsCompleted', async () => {
+    queue('session_log', { data: [], error: null });
+    queue('daily_challenge_attempt', { data: [{ score: 40 }], error: null });
+
+    const body = await (await GET(req(), ctx)).json();
+
+    expect(body.sessionsCompleted).toBe(0);
+  });
+
   it('returns 500 when the session_log query fails', async () => {
     queue('session_log', { data: null, error: { message: 'db down' } });
+
+    const response = await GET(req(), ctx);
+    expect(response.status).toBe(500);
+  });
+
+  it('returns 500 when the daily_challenge_attempt query fails', async () => {
+    queue('session_log', { data: [], error: null });
+    queue('daily_challenge_attempt', { data: null, error: { message: 'db down' } });
 
     const response = await GET(req(), ctx);
     expect(response.status).toBe(500);
