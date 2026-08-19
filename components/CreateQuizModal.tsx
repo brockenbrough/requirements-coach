@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createAssembledQuiz } from '../lib/assembledQuizClient';
+import { loadLlmConfig } from '../lib/instructorLlmConfigClient';
 import type { CourseSummary } from '../lib/courseClient';
 import type { QuizSummary } from '../lib/quizClient';
 import type { GradingKind } from '../lib/activityTypes';
@@ -56,6 +57,12 @@ const KIND_OPTIONS: { value: GradingKind; label: string; hint: string }[] = [
  * flat constant) and, for an already-created quiz, on its own detail page's level-coverage
  * banner (GET /api/instructor/assembled-quizzes/{quizId}) — this field only has to clear the
  * floor when the instructor sets it, not be provably satisfiable by any one catalog yet.
+ *
+ * GitHub #520: the "LLM-Graded Task" radio is disabled the same way CreateCatalogModal's own copy
+ * is — once loadLlmConfig confirms the instructor has no saved provider, since composing a quiz
+ * around LLM grading with none configured would promise something that can never actually grade.
+ * A head start on the error, not the enforcement itself: POST /api/instructor/assembled-quizzes
+ * checks the same thing server-side and 400s regardless.
  */
 export function CreateQuizModal({
   token,
@@ -102,6 +109,24 @@ export function CreateQuizModal({
   const [questionsPerLevelInput, setQuestionsPerLevelInput] = useState(String(QUESTIONS_PER_SESSION));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  // GitHub #520: null while unknown (still loading, or the check itself failed) — the radio stays
+  // enabled in that case, same "don't block on a convenience check" precedent as
+  // CreateCatalogModal's identical state; POST /api/instructor/assembled-quizzes enforces the real
+  // rule regardless.
+  const [hasLlmConfig, setHasLlmConfig] = useState<boolean | null>(null);
+
+  // An instructor with no LLM provider configured would compose a quiz whose grading can never
+  // succeed — disable the option up front rather than let them fill in the rest of the form and
+  // only find out at submit time.
+  useEffect(() => {
+    let cancelled = false;
+    loadLlmConfig(token).then((result) => {
+      if (!cancelled && result.ok) setHasLlmConfig(result.data.config !== null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   const parsedQuestionsPerLevel = Number.parseInt(questionsPerLevelInput, 10);
   const questionsPerLevelValid =
@@ -254,35 +279,43 @@ export function CreateQuizModal({
               Activity type
             </legend>
             <div className="grid gap-2">
-              {KIND_OPTIONS.map((option) => (
-                <label
-                  key={option.value}
-                  className={`flex cursor-pointer gap-3 rounded-brand-md border px-3.5 py-3 transition ${
-                    gradingKind === option.value
-                      ? 'border-brand-purple bg-brand-purple/10'
-                      : 'border-brand-navy-border bg-brand-navy-2 hover:border-brand-purple/50'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="gradingKind"
-                    value={option.value}
-                    checked={gradingKind === option.value}
-                    onChange={() => {
-                      setGradingKind(option.value);
-                      // Previously selected catalogs may no longer match the newly chosen kind —
-                      // a quiz can't mix kinds, so a stale selection would otherwise silently
-                      // submit alongside catalogs the instructor can no longer even see checked.
-                      setSelectedCatalogs([]);
-                    }}
-                    className="mt-0.5 h-4 w-4 flex-none accent-brand-purple"
-                  />
-                  <span className="block">
-                    <span className="block text-sm font-extrabold text-brand-ink">{option.label}</span>
-                    <span className="mt-0.5 block text-xs font-semibold text-brand-ink-muted">{option.hint}</span>
-                  </span>
-                </label>
-              ))}
+              {KIND_OPTIONS.map((option) => {
+                const disabled = option.value === 'llm-graded' && hasLlmConfig === false;
+                return (
+                  <label
+                    key={option.value}
+                    className={`flex gap-3 rounded-brand-md border px-3.5 py-3 transition ${
+                      disabled
+                        ? 'cursor-not-allowed border-brand-navy-border bg-brand-navy-2 opacity-50'
+                        : gradingKind === option.value
+                          ? 'cursor-pointer border-brand-purple bg-brand-purple/10'
+                          : 'cursor-pointer border-brand-navy-border bg-brand-navy-2 hover:border-brand-purple/50'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="gradingKind"
+                      value={option.value}
+                      checked={gradingKind === option.value}
+                      disabled={disabled}
+                      onChange={() => {
+                        setGradingKind(option.value);
+                        // Previously selected catalogs may no longer match the newly chosen kind —
+                        // a quiz can't mix kinds, so a stale selection would otherwise silently
+                        // submit alongside catalogs the instructor can no longer even see checked.
+                        setSelectedCatalogs([]);
+                      }}
+                      className="mt-0.5 h-4 w-4 flex-none accent-brand-purple"
+                    />
+                    <span className="block">
+                      <span className="block text-sm font-extrabold text-brand-ink">{option.label}</span>
+                      <span className="mt-0.5 block text-xs font-semibold text-brand-ink-muted">
+                        {disabled ? 'Configure an LLM provider in Settings first.' : option.hint}
+                      </span>
+                    </span>
+                  </label>
+                );
+              })}
             </div>
             <p className="mt-1.5 text-xs font-semibold text-brand-ink-muted/70">
               This cannot be changed after the quiz is created.

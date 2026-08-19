@@ -1,6 +1,7 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { requireInstructor } from '../../../../lib/instructorAuth';
 import { isGradingKind, slugifyQuizName, validateRatingPromptText } from '../../../../lib/activityTypes';
+import { hasLlmConfig } from '../../../../lib/instructorLlmConfigQueries';
 import { saveTitleLadder } from '../../../../lib/titleAuthoringQueries';
 import { validateTitleLadder } from '../../../../lib/titleLadderInput';
 
@@ -37,6 +38,15 @@ function getToken(request: Request): string | null {
  * rubric up front, since every submission against this catalog will be graded with it. A stray
  * ratingPrompt on an 'mcq' catalog is silently ignored rather than rejected, matching how other
  * kind-specific fields in this app are handled.
+ *
+ * GitHub #520: an 'llm-graded' catalog also requires the caller to already have a saved
+ * instructor_llm_config row (hasLlmConfig, lib/instructorLlmConfigQueries.ts) — without one, every
+ * prompt in the new catalog would be permanently ungradeable (POST .../llm/submissions resolves
+ * the grading provider from the prompt's creator_id, which for a freshly created catalog is this
+ * same instructor, and 500s with "the instructor who created this prompt has not configured an LLM
+ * provider" the first time a student answers). Checked *after* gradingKind/ratingPrompt validation
+ * but before the key is even derived, so a caller with no provider configured never gets far enough
+ * to create the catalog at all. Not checked for 'mcq', which has no grading provider to configure.
  *
  * The stored key (activity_type) is *derived* from name via slugifyQuizName — upper-cased,
  * non-alphanumeric runs collapsed to one underscore, the same format the three built-in keys
@@ -94,6 +104,15 @@ export async function POST(request: Request) {
     const validation = validateRatingPromptText(ratingPrompt);
     if (!validation.ok) return validation.response;
     trimmedRatingPrompt = validation.ratingPrompt;
+
+    const { hasConfig, error: configError } = await hasLlmConfig(supabase, guard.user_id);
+    if (configError) return Response.json({ error: configError.message }, { status: 500 });
+    if (!hasConfig) {
+      return Response.json(
+        { error: 'Configure an LLM provider in Settings before creating an LLM-graded catalog.' },
+        { status: 400 },
+      );
+    }
   }
 
   const key = slugifyQuizName(name);
