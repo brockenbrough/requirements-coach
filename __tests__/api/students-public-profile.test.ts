@@ -4,8 +4,8 @@ type Result = { data?: unknown; error?: unknown };
 
 // Harness copied from __tests__/api/score.test.ts, extended with `in`/`limit`/`maybeSingle`
 // (same additions __tests__/api/courses-leaderboard.test.ts already needed) since this route
-// composes a "user" lookup, two student_course reads (via lib/courseQueries.ts's
-// getEnrolledCourseIds/isEnrolledInAnyCourse) and computeStudentScore/computeStudentTitles.
+// composes a "user" lookup, one student_course read (via lib/courseQueries.ts's
+// getEnrolledCourseIds, for the target's own courses) and computeStudentScore/computeStudentTitles.
 const h = vi.hoisted(() => {
   const state = {
     queues: {} as Record<string, Result[]>,
@@ -79,11 +79,10 @@ function targetRow(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-/** Queues the full happy-path chain: target row, target's courses, shared course, score, titles, ladder. */
-function queueHappyPath(options: { targetCourseIds?: string[]; sharedCourseIds?: string[] } = {}) {
+/** Queues the full happy-path chain: target row, target's courses, score, titles, ladder. */
+function queueHappyPath(options: { targetCourseIds?: string[] } = {}) {
   queue('user', { data: targetRow(), error: null });
   queue('student_course', { data: (options.targetCourseIds ?? ['course-1']).map((id) => ({ course_id: id })), error: null });
-  queue('student_course', { data: (options.sharedCourseIds ?? ['course-1']).map((id) => ({ course_id: id })), error: null });
   queue('session_log', {
     data: [{ activity_type: 'IDENTIFY_WEAK_USER_STORIES', difficulty_level: 1, cumulative_score: 100, status: 'completed', passed: true }],
     error: null,
@@ -165,29 +164,6 @@ describe('GET /api/students/{studentId}/public-profile', () => {
     expect(h.state.tables).not.toContain('student_course');
   });
 
-  // AC: 403 unless caller and target share at least one course.
-  it('returns 403 when the caller shares no course with the target', async () => {
-    queue('user', { data: targetRow(), error: null });
-    queue('student_course', { data: [{ course_id: 'course-1' }], error: null }); // target's courses
-    queue('student_course', { data: [], error: null }); // caller not enrolled in any of them
-
-    const response = await GET(req(), ctx);
-
-    expect(response.status).toBe(403);
-    expect(h.state.tables).not.toContain('session_log');
-  });
-
-  it('returns 403 when the target is enrolled in nothing at all (no course to share)', async () => {
-    queue('user', { data: targetRow(), error: null });
-    queue('student_course', { data: [], error: null }); // target has no courses
-
-    const response = await GET(req(), ctx);
-
-    expect(response.status).toBe(403);
-    // isEnrolledInAnyCourse short-circuits on an empty course list — no second student_course read.
-    expect(h.state.tables.filter((t) => t === 'student_course')).toHaveLength(1);
-  });
-
   it('returns the profile when caller and target share a course', async () => {
     queueHappyPath();
 
@@ -218,6 +194,21 @@ describe('GET /api/students/{studentId}/public-profile', () => {
     });
   });
 
+  // Bug fix: this route used to 403 unless the caller and target shared a course
+  // (isEnrolledInAnyCourse), which broke clicking a student's row on the global ("All")
+  // leaderboard — a leaderboard that deliberately shows every student to every other student
+  // (see computeGlobalLeaderboard in lib/leaderboardQueries.ts). Authorization is role-only now,
+  // so this succeeds regardless of the caller's own enrollments; the mock harness never queues or
+  // reads the caller's student_course rows at all, which is itself part of what this test proves.
+  it('returns the profile for a caller who shares no course with the target', async () => {
+    queueHappyPath();
+
+    const response = await GET(req(), ctx);
+
+    expect(response.status).toBe(200);
+    expect(h.state.filters.filter((f) => f.column === 'user_id' && f.value === 'caller-1')).toEqual([]);
+  });
+
   // AC: the response body must contain none of these fields, even though "user" itself has them.
   it('never includes first_name, last_name, age, semester or role in the response', async () => {
     queueHappyPath();
@@ -241,17 +232,13 @@ describe('GET /api/students/{studentId}/public-profile', () => {
     expect(h.state.filters).toContainEqual({ table: 'user', column: 'user_id', value: TARGET_ID });
   });
 
-  it('checks the target\'s own courses and the caller\'s membership among them, in that order', async () => {
+  it("checks the target's own courses via student_course", async () => {
     queueHappyPath({ targetCourseIds: ['course-1', 'course-2'] });
 
     await GET(req(), ctx);
 
     const studentCourseFilters = h.state.filters.filter((f) => f.table === 'student_course');
-    expect(studentCourseFilters).toEqual([
-      { table: 'student_course', column: 'user_id', value: TARGET_ID },
-      { table: 'student_course', column: 'user_id', value: 'caller-1' },
-      { table: 'student_course', column: 'course_id', value: ['course-1', 'course-2'] },
-    ]);
+    expect(studentCourseFilters).toEqual([{ table: 'student_course', column: 'user_id', value: TARGET_ID }]);
   });
 
   it('returns 500 when the target lookup fails', async () => {
@@ -269,18 +256,8 @@ describe('GET /api/students/{studentId}/public-profile', () => {
     expect(response.status).toBe(500);
   });
 
-  it('returns 500 when the shared-course check fails', async () => {
-    queue('user', { data: targetRow(), error: null });
-    queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
-    queue('student_course', { data: null, error: { message: 'db down' } });
-
-    const response = await GET(req(), ctx);
-    expect(response.status).toBe(500);
-  });
-
   it('returns 500 when computing the score or titles fails', async () => {
     queue('user', { data: targetRow(), error: null });
-    queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
     queue('student_course', { data: [{ course_id: 'course-1' }], error: null });
     queue('session_log', { data: null, error: { message: 'db down' } });
     queue('session_log', { data: [], error: null });
