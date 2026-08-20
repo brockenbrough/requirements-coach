@@ -1,5 +1,5 @@
 import { getSupabaseClient } from '../../../../../lib/supabase';
-import { getEnrolledCourseIds, isEnrolledInAnyCourse } from '../../../../../lib/courseQueries';
+import { getEnrolledCourseIds } from '../../../../../lib/courseQueries';
 import { computeStudentScore } from '../../../../../lib/scoreQueries';
 import { computeStudentTitles, loadAvailableTitleLadders } from '../../../../../lib/titleQueries';
 
@@ -25,20 +25,27 @@ function getToken(request: Request): string | null {
  * (lib/scoreQueries.ts, lib/titleQueries.ts), not re-derived here, so this can never disagree
  * with the sidebar score pill or GET /api/students/{id}/titles about what either means.
  * availableTitles (the full earnable ladder for each of the target's enrolled-course activities,
- * loadAvailableTitleLadders) reuses targetCourseIds already fetched below for the shared-course
- * check, rather than querying student_course a second time — this route is the only place a peer
- * can see another student's ladder, since GET /api/students/{id}/available-titles is self-only.
+ * loadAvailableTitleLadders) reuses targetCourseIds already fetched below for the target's own
+ * enrolled-course activity list, rather than querying student_course a second time — this route
+ * is the only place a peer can see another student's ladder, since
+ * GET /api/students/{id}/available-titles is self-only.
  *
- * Authorization is "do the caller and the target share a course", not role or ownership: a
- * profile discloses another student's score and titles, and being classmates somewhere is what
- * makes that acceptable to see. Built on isEnrolledInAnyCourse (lib/courseQueries.ts), the same
- * shared helper GET /api/courses/{courseId}/leaderboard's own enrollment check uses (there with
- * a single-course list; here with the target's full course list) — one definition of "enrolled"
- * for both routes.
+ * Authorization is role only: any authenticated student may view any OTHER student's public
+ * profile, regardless of whether they share a course. This deliberately matches
+ * computeGlobalLeaderboard's policy (lib/leaderboardQueries.ts) — "every student visible to
+ * every other student, no shared-course requirement" — which the global ("All") leaderboard
+ * roster already implements with no relationship to the caller at all. This route used to gate
+ * on isEnrolledInAnyCourse ("do the caller and the target share a course"), the same check
+ * GET /api/courses/{courseId}/leaderboard still uses for its own (course-scoped) roster; that
+ * gate is what broke clicking a non-classmate's row from the global leaderboard — a 403 that
+ * rendered identically to a 404 "not found" card, since app/students/[id]/page.tsx treats any
+ * non-ok response the same way. isEnrolledInAnyCourse stays in lib/courseQueries.ts for the
+ * course-scoped leaderboard and enrollment routes, which still need it; only its call here is
+ * removed.
  *
  * 404-then-403, same ordering as the leaderboard route: an unknown studentId is a 404 regardless
  * of anything else. Once the target is confirmed to exist, a non-student target (an instructor
- * has no public profile) is a 403, and only then does the course-overlap check run.
+ * has no public profile) is a 403 — nothing else in this route 403s.
  */
 export async function GET(request: Request, { params }: { params: { studentId: string } }) {
   const token = getToken(request);
@@ -75,10 +82,6 @@ export async function GET(request: Request, { params }: { params: { studentId: s
   if (targetCoursesError || !targetCourseIds) {
     return Response.json({ error: targetCoursesError?.message ?? 'Could not load courses.' }, { status: 500 });
   }
-
-  const { enrolled, error: sharedCourseError } = await isEnrolledInAnyCourse(supabase, user.id, targetCourseIds);
-  if (sharedCourseError) return Response.json({ error: sharedCourseError.message }, { status: 500 });
-  if (!enrolled) return Response.json({ error: 'Forbidden.' }, { status: 403 });
 
   const [
     { score, error: scoreError },
