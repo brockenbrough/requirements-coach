@@ -1,0 +1,64 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'background': '#ffffff', 'primaryColor': '#ffffff', 'primaryTextColor': '#000000', 'primaryBorderColor': '#000000', 'lineColor': '#000000', 'textColor': '#000000', 'boundaryBkgColor': '#ffffff', 'boundaryBorderColor': '#000000', 'boundaryTextColor': '#000000', 'personBorder': '#000000', 'personBkg': '#ffffff' }, 'themeCSS': '.messageText { fill: #000000 !important; font-size: 15px !important; font-weight: 700 !important; } .messageLine0, .messageLine1 { stroke: #000000 !important; }'}}%%
+C4Component
+    title Component diagram for the API Application container (Training Ground)
+
+    Container_Ext(webApp, "Web Application", "Next.js App Router, React", "Renders role-gated pages for students and instructors")
+
+    Container_Boundary(apiApp, "API Application") {
+        Component(authGuard, "Auth & Session Guard", "TypeScript", "Verifies the bearer token, derives user_id, and enforces role/ownership checks before any handler runs")
+        Component(sessionEngine, "Session & Scoring Engine", "TypeScript", "Starts, resumes, answers, and completes MCQ and LLM-graded sessions; computes difficulty progression and cumulative score")
+        Component(courseCatalog, "Course & Catalog Management", "TypeScript", "Manages courses, question catalogs, and assembled quizzes; resolves which course grants access to which activity")
+        Component(gamification, "Gamification Engine", "TypeScript", "Derives mastery titles, streaks, and leaderboard rankings from session history at read time")
+        Component(llmGrading, "LLM Grading Integration", "TypeScript", "Builds the grading prompt, resolves the instructor's configured provider, and encrypts/decrypts provider API keys")
+        Component(reporting, "Instructor Reporting", "TypeScript", "Aggregates class-wide and per-student statistics for the instructor dashboard and CSV exports")
+        Component(profileMedia, "Profile & Media", "TypeScript", "Validates and stores avatar and course-cover uploads; reads and writes profile fields")
+    }
+
+    ContainerDb_Ext(database, "Database", "PostgreSQL", "Stores users, courses, catalogs, questions, sessions, submissions, scores")
+    Container_Ext(authService, "Auth Service", "Supabase Auth", "Issues and refreshes JWT access tokens")
+    Container_Ext(storageService, "Storage Service", "Supabase Storage", "Public buckets for avatar and course-cover images")
+    System_Ext(llmProvider, "LLM Provider", "Claude, ChatGPT, or Gemini - one active provider per instructor")
+
+    Rel(webApp, sessionEngine, "Starts, answers, and completes activities via", "JSON/HTTPS, Bearer JWT")
+    Rel(webApp, courseCatalog, "Creates and manages courses, catalogs, and quizzes via", "JSON/HTTPS, Bearer JWT")
+    Rel(webApp, gamification, "Reads titles, streaks, and leaderboards via", "JSON/HTTPS, Bearer JWT")
+    Rel(webApp, llmGrading, "Configures the LLM provider via", "JSON/HTTPS, Bearer JWT")
+    Rel(webApp, reporting, "Reads dashboard and export data via", "JSON/HTTPS, Bearer JWT")
+    Rel(webApp, profileMedia, "Edits profile and uploads images via", "JSON/HTTPS, Bearer JWT")
+
+    Rel(sessionEngine, authGuard, "Verifies caller via")
+    Rel(courseCatalog, authGuard, "Verifies caller via")
+    Rel(gamification, authGuard, "Verifies caller via")
+    Rel(llmGrading, authGuard, "Verifies caller via")
+    Rel(reporting, authGuard, "Verifies caller via")
+    Rel(profileMedia, authGuard, "Verifies caller via")
+    Rel(authGuard, authService, "Verifies JWTs via", "Supabase Auth API")
+
+    Rel(sessionEngine, courseCatalog, "Resolves activity access and quiz composition via")
+    Rel(sessionEngine, llmGrading, "Requests a grade for a free-text submission from")
+    Rel(reporting, courseCatalog, "Scopes results to instructor-owned courses via")
+
+    Rel(sessionEngine, database, "Reads/writes sessions, answers, and submissions in", "Service-role client")
+    Rel(courseCatalog, database, "Reads/writes courses, catalogs, and quizzes in", "Service-role client")
+    Rel(gamification, database, "Reads session history from", "Service-role client")
+    Rel(llmGrading, database, "Reads/writes encrypted provider config and grading results in", "Service-role client")
+    Rel(reporting, database, "Reads sessions, submissions, and courses from", "Service-role client")
+    Rel(profileMedia, database, "Reads/writes profile fields in", "Service-role client")
+
+    Rel(profileMedia, storageService, "Uploads and serves images via", "Supabase Storage API")
+    Rel(llmGrading, llmProvider, "Sends the rating prompt to", "HTTPS, decrypted API key")
+
+    UpdateLayoutConfig($c4ShapeInRow="4", $c4BoundaryInRow="1")
+
+    UpdateElementStyle(webApp, $bgColor="#ffffff", $fontColor="#000000", $borderColor="#000000")
+    UpdateElementStyle(authGuard, $bgColor="#ffffff", $fontColor="#000000", $borderColor="#000000")
+    UpdateElementStyle(sessionEngine, $bgColor="#ffffff", $fontColor="#000000", $borderColor="#000000")
+    UpdateElementStyle(courseCatalog, $bgColor="#ffffff", $fontColor="#000000", $borderColor="#000000")
+    UpdateElementStyle(gamification, $bgColor="#ffffff", $fontColor="#000000", $borderColor="#000000")
+    UpdateElementStyle(llmGrading, $bgColor="#ffffff", $fontColor="#000000", $borderColor="#000000")
+    UpdateElementStyle(reporting, $bgColor="#ffffff", $fontColor="#000000", $borderColor="#000000")
+    UpdateElementStyle(profileMedia, $bgColor="#ffffff", $fontColor="#000000", $borderColor="#000000")
+    UpdateElementStyle(database, $bgColor="#ffffff", $fontColor="#000000", $borderColor="#000000")
+    UpdateElementStyle(authService, $bgColor="#ffffff", $fontColor="#000000", $borderColor="#000000")
+    UpdateElementStyle(storageService, $bgColor="#ffffff", $fontColor="#000000", $borderColor="#000000")
+    UpdateElementStyle(llmProvider, $bgColor="#ffffff", $fontColor="#000000", $borderColor="#000000")

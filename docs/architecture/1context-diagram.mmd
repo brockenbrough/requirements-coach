@@ -1,0 +1,24 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'background': '#ffffff', 'primaryColor': '#ffffff', 'primaryTextColor': '#000000', 'primaryBorderColor': '#000000', 'lineColor': '#000000', 'textColor': '#000000', 'boundaryBkgColor': '#ffffff', 'boundaryBorderColor': '#000000', 'boundaryTextColor': '#000000', 'personBorder': '#000000', 'personBkg': '#ffffff' }, 'themeCSS': '.messageText { fill: #000000 !important; font-size: 16px !important; font-weight: 700 !important; } .messageLine0, .messageLine1 { stroke: #000000 !important; }'}}%%
+C4Context
+    title System context diagram for Training Ground
+
+    Person(student, "Student", "Practices writing and evaluating user stories and acceptance criteria")
+    Person(instructor, "Instructor", "Authors content, manages courses, and reviews student performance")
+
+    System(trainingGround, "Training Ground", "Lets students practice requirements-writing skills through scored activities, and lets instructors author content, manage courses, and review performance")
+
+    System_Ext(supabase, "Supabase Platform", "Managed Postgres database, user authentication, and file storage")
+    System_Ext(llmProvider, "LLM Provider", "Claude, ChatGPT, or Gemini - one active provider per instructor")
+
+    Rel(student, trainingGround, "Uses", "HTTPS")
+    Rel(instructor, trainingGround, "Uses", "HTTPS")
+    Rel(trainingGround, supabase, "Reads and writes data, authenticates users, and stores files via", "HTTPS")
+    Rel(trainingGround, llmProvider, "Requests free-text grading from", "HTTPS")
+
+    UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
+
+    UpdateElementStyle(student, $bgColor="#ffffff", $fontColor="#000000", $borderColor="#000000")
+    UpdateElementStyle(instructor, $bgColor="#ffffff", $fontColor="#000000", $borderColor="#000000")
+    UpdateElementStyle(trainingGround, $bgColor="#ffffff", $fontColor="#000000", $borderColor="#000000")
+    UpdateElementStyle(supabase, $bgColor="#ffffff", $fontColor="#000000", $borderColor="#000000")
+    UpdateElementStyle(llmProvider, $bgColor="#ffffff", $fontColor="#000000", $borderColor="#000000")
