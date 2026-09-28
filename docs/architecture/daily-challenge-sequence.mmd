@@ -1,0 +1,91 @@
+%%{init: {'theme': 'base', 'themeVariables': {
+  'background': '#ffffff',
+  'primaryColor': '#ffffff',
+  'primaryTextColor': '#000000',
+  'primaryBorderColor': '#000000',
+  'lineColor': '#000000',
+  'textColor': '#000000',
+  'actorBkg': '#ffffff',
+  'actorBorder': '#000000',
+  'actorTextColor': '#000000',
+  'actorLineColor': '#000000',
+  'signalColor': '#000000',
+  'signalTextColor': '#000000',
+  'labelBoxBkgColor': '#ffffff',
+  'labelBoxBorderColor': '#000000',
+  'labelTextColor': '#000000',
+  'loopTextColor': '#000000',
+  'noteBkgColor': '#ffffff',
+  'noteBorderColor': '#000000',
+  'noteTextColor': '#000000',
+  'activationBorderColor': '#000000',
+  'activationBkgColor': '#ffffff',
+  'sequenceNumberColor': '#000000'
+}}}%%
+sequenceDiagram
+    title Daily Challenge attempt flow
+    autonumber
+
+    actor Student
+    participant Page as Daily Challenge Page<br/>app/daily-challenge/page.tsx
+    participant Client as dailyChallengeClient.ts
+    participant API as Daily Challenge Routes<br/>app/api/daily-challenge/**
+    participant Rules as dailyChallengeRules.ts
+    participant DB as daily_challenge_attempt<br/>+ question / answer
+
+    Student->>Page: Opens /daily-challenge
+    Page->>Client: loadDailyChallenge(token)
+    Client->>API: GET /api/daily-challenge
+    API->>DB: findTodayAttempt(userId, todayUtc())
+
+    alt No attempt yet today
+        API->>DB: loadEligibleQuestionIds(userId)<br/>enrolled courses -> their instructors' questions
+        DB-->>API: eligible pool (or empty)
+        API-->>Client: 200 { attempt: null, available }
+        Client-->>Page: render "Start" (disabled if unavailable)
+    else Attempt already exists
+        API-->>Client: 200 buildAttemptResponse(attempt)<br/>submitted | expired | in-progress
+        Client-->>Page: render result / expired / countdown
+    end
+
+    Note over Page: Live per-second countdown pinned to deadline_at<br/>(toInstant — server timestamp is authoritative)
+
+    Student->>Page: Clicks "Start"
+    Page->>Client: startDailyChallenge(token)
+    Client->>API: POST /api/daily-challenge
+
+    API->>DB: findTodayAttempt (idempotent re-check)
+    alt Already started (resume or lost race)
+        API-->>Client: 200 existing attempt, resumed: true
+    else First start today
+        API->>DB: loadEligibleQuestionIds(userId)
+        DB-->>API: eligible pool
+        API->>API: pick one question at random
+        API->>DB: INSERT daily_challenge_attempt<br/>deadline_at = now + TIME_LIMIT_SECONDS
+        DB-->>API: inserted row (23505: re-fetch existing instead)
+        API-->>Client: 201 attempt + question, resumed: false
+    end
+    Client-->>Page: render question + countdown
+
+    Student->>Page: Selects an option before the deadline
+    Page->>Client: submitDailyChallengeAnswer(token, attemptId, optionId)
+    Client->>API: POST /api/daily-challenge/{attemptId}/answers
+    API->>DB: SELECT attempt WHERE id AND user_id
+
+    alt attempt.submitted_at already set
+        API-->>Client: 409 already-submitted body (discloses prior result)
+    else deadline_at has passed
+        API-->>Client: 409 { expired: true } (row left unfinalized, not written)
+    else on time and not yet submitted
+        API->>DB: validate selected option belongs to this question
+        API->>Rules: scoreForDailyChallenge(isCorrect, maxScore)
+        Rules-->>API: score (scoreForAnswer x SCORE_MULTIPLIER)
+        API->>DB: UPDATE ... SET submitted_option, is_correct, score, submitted_at<br/>WHERE submitted_at IS NULL
+        DB-->>API: updated row (no row: concurrent submit won, re-read and treat as 409)
+        API-->>Client: 200 { attempt, correct, explanation, score }
+    end
+
+    Client-->>Page: render correct/incorrect + explanation
+    Page->>Page: refreshScore() + clearCachedLeaderboard()
+    Note over Page: Score rolls into the student's total.<br/>Nothing else invalidates this cache.
+    Page-->>Student: shows result and updated total score
